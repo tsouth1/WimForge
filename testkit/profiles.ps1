@@ -250,7 +250,7 @@ function Get-Contrast([string]$A, [string]$B) {
     $x = & $lum $A; $y = & $lum $B; ([Math]::Max($x, $y) + 0.05) / ([Math]::Min($x, $y) + 0.05)
 }
 # Colours chosen for readability (not the log colours Terry specified) must reach 4.3:1 against what they sit on
-$pairs = 'Text/WindowBg', 'Text/PanelBg', 'Text/ControlBg', 'SubtleText/PanelBg', 'SubtleText/WindowBg', 'ButtonText/ButtonBg', 'AccentText/Accent', 'SelectionText/SelectionBg', 'TabSelectedText/PanelBg', 'Text/Hover', 'WarnText/PanelBg', 'InfoText/PanelBg', 'LogText/LogBg', 'LogWarn/LogBg'
+$pairs = 'Text/WindowBg', 'Text/PanelBg', 'Text/ControlBg', 'Text/CodeBg', 'SubtleText/PanelBg', 'SubtleText/WindowBg', 'ButtonText/ButtonBg', 'AccentText/Accent', 'SelectionText/SelectionBg', 'TabSelectedText/PanelBg', 'Text/Hover', 'WarnText/PanelBg', 'InfoText/PanelBg', 'LogText/LogBg', 'LogWarn/LogBg'
 $low = foreach ($n in $cs.Keys) { foreach ($p in $pairs) { $f, $b = $p -split '/'; $r = Get-Contrast $cs[$n].Colors[$f] $cs[$n].Colors[$b]; if ($r -lt 4.3) { "$n $p {0:N1}" -f $r } } }
 Check 'every scheme keeps text readable (contrast 4.3:1 or better)' (@($low).Count -eq 0) ($low -join '; ')
 Check 'log lines are classed by level: ERROR, WARN / CANCELLED, success, normal' (
@@ -270,5 +270,27 @@ Check 'saving the repository root (Save settings button) keeps the colour scheme
 Check 'an unusable General.json reads as no scheme, with a WARN' ((Read-ColorSchemeSetting -Directory $gs) -eq '' -and [bool]($script:LogLines -match 'WARN.*could not be used'))
 Save-GeneralSettings -Directory $gs -ColorScheme 'Minimalist Forge'
 Check 'saving over an unusable General.json writes a good file' ((Read-ColorSchemeSetting -Directory $gs) -eq 'Minimalist Forge' -and (Read-GeneralSettings -Directory $gs) -eq '')
+
+Write-Host "`n=== P13 Instructions tab: the Markdown subset INSTRUCTIONS.md uses (TODO 10b) ==="
+$md13 = @(
+    '# Title', '', 'First line of a paragraph', 'continues here.', '', '## Section', '### Sub',
+    '- one', '- two', '  continued text', '  - nested a', '    - deeper', '- three', '', '1. first', '2. second', '',
+    '```', 'code line 1', '  code line 2', '```', 'After code.'
+) -join "`r`n"
+$b13 = @(ConvertFrom-MarkdownBlocks $md13)
+$shape13 = ($b13 | ForEach-Object { "$($_.Type)$($_.Level)$(if ($_.Ordered) { 'o' })" }) -join ','
+Check 'blocks: headings with levels, paragraph, nested and numbered list items, code, paragraph' ($shape13 -eq 'Heading1,Paragraph0,Heading2,Heading3,ListItem0,ListItem0,ListItem1,ListItem2,ListItem0,ListItem0o,ListItem0o,Code0,Paragraph0') $shape13
+Check 'paragraph lines and list continuation lines are joined with a space' ($b13[1].Text -eq 'First line of a paragraph continues here.' -and $b13[5].Text -eq 'two continued text')
+Check 'a code block keeps its lines and indentation, and markup inside it is not parsed' ($b13[11].Text -eq "code line 1`n  code line 2")
+$in13 = @(Split-MarkdownInline 'Run **it elevated** with `Unblock-File .\x.ps1`, see [KB](https://support.microsoft.com/kb) or *this*.')
+Check 'inline: bold, code, link and italic runs, with the plain text between them' ((($in13 | ForEach-Object { "$($_.Kind):$($_.Text)" }) -join '|') -eq 'Text:Run |Bold:it elevated|Text: with |Code:Unblock-File .\x.ps1|Text:, see |Link:KB|Text: or |Italic:this|Text:.' -and $in13[5].Url -eq 'https://support.microsoft.com/kb')
+$in13b = @(Split-MarkdownInline 'Paths like NEWWIM\Media_CA2023 and `MediaRefresh_*` and C:\*.iso stay as written')
+Check 'underscores and a lone * are not markup; a * inside code stays in the code' ((($in13b | ForEach-Object { "$($_.Kind):$($_.Text)" }) -join '|') -eq 'Text:Paths like NEWWIM\Media_CA2023 and |Code:MediaRefresh_*|Text: and C:\*.iso stay as written')
+$guide13 = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
+if (Test-Path $guide13) {
+    $gb13 = @(ConvertFrom-MarkdownBlocks ([System.IO.File]::ReadAllText($guide13)))
+    $left13 = @($gb13 | Where-Object { $_.Type -ne 'Code' } | ForEach-Object { Split-MarkdownInline $_.Text } | Where-Object { $_.Kind -eq 'Text' -and ($_.Text -match '\*\*|`') } | ForEach-Object { $_.Text })
+    Check 'the real INSTRUCTIONS.md parses with no stray ** or ` left in the text' ($gb13.Count -gt 50 -and @($gb13 | Where-Object { $_.Type -eq 'Heading' -and $_.Text -eq 'Where the logs are' }).Count -eq 1 -and $left13.Count -eq 0) ($left13 -join ' || ')
+} else { Write-Host 'SKIP  INSTRUCTIONS.md not found next to the script' }
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

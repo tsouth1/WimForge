@@ -107,6 +107,11 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 - With a colour scheme other than Default, warnings, errors and success lines (such as `VALIDATION GATE: PASSED`) are shown in their own colours.
 - The same lines are written to the log file in `LOGS` (see below), so nothing is lost when the window is closed.
 
+### Instructions tab
+
+- This guide, formatted. The line at the top shows which `INSTRUCTIONS.md` was read (the one beside the script).
+- **Reload** - reads the file again, for example after editing it; no restart needed.
+
 ### General Settings tab
 
 - **Color scheme** - Default (the original look) or one of four dark schemes. The choice applies at once and is remembered for the next start. The tab shows the scheme's palette and a preview of the log colours.

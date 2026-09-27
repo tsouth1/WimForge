@@ -496,33 +496,81 @@ function Get-ColorSchemes {
         Palette = @('Window #F4F6F8', 'Accent #0078D4', 'Muted text #555555', 'Log background #111827', 'Log text #E5E7EB')
         Colors  = [ordered]@{ WindowBg = '#F4F6F8'; PanelBg = '#FFFFFF'; ControlBg = '#FFFFFF'; Border = '#ACACAC'; Text = '#000000'; SubtleText = '#555555'; Title = '#000000'
             Accent = '#0078D4'; AccentText = '#FFFFFF'; ButtonBg = '#DDDDDD'; ButtonText = '#000000'; TabBg = '#F0F0F0'; TabSelectedText = '#000000'
-            Hover = '#E5F3FB'; SelectionBg = '#CCE8FF'; SelectionText = '#000000'; InfoText = '#696969'; WarnText = '#B22222'
+            Hover = '#E5F3FB'; SelectionBg = '#CCE8FF'; SelectionText = '#000000'; InfoText = '#696969'; WarnText = '#B22222'; CodeBg = '#EEF1F4'
             LogBg = '#111827'; LogText = '#E5E7EB'; LogSuccess = '#E5E7EB'; LogWarn = '#E5E7EB'; LogError = '#E5E7EB' } }
     $s['Industrial Forge'] = [ordered]@{ Dark = $true
         Palette = @('Iron Gray #2B2B2B', 'Steel Blue #3A5F7D', 'Charcoal #1A1A1A', 'Molten Orange #FF6A00', 'Amber Glow #FFC14A')
         Colors  = [ordered]@{ WindowBg = '#2B2B2B'; PanelBg = '#1A1A1A'; ControlBg = '#2B2B2B'; Border = '#3A5F7D'; Text = '#EDEDED'; SubtleText = '#B0B0B0'; Title = '#FF6A00'
             Accent = '#FF6A00'; AccentText = '#1A1A1A'; ButtonBg = '#3A5F7D'; ButtonText = '#FFFFFF'; TabBg = '#2B2B2B'; TabSelectedText = '#FFC14A'
-            Hover = '#2F4A60'; SelectionBg = '#3A5F7D'; SelectionText = '#FFFFFF'; InfoText = '#B0B0B0'; WarnText = '#FFC14A'
+            Hover = '#2F4A60'; SelectionBg = '#3A5F7D'; SelectionText = '#FFFFFF'; InfoText = '#B0B0B0'; WarnText = '#FFC14A'; CodeBg = '#3A3A3A'
             LogBg = '#1A1A1A'; LogText = '#FFC14A'; LogSuccess = '#FFC14A'; LogWarn = '#FF6A00'; LogError = '#FF4D4D' } }
     $s['Modern Sysadmin'] = [ordered]@{ Dark = $true
         Palette = @('Azure Blue #0078D4', 'Graphite #3C3C3C', 'Slate #5A5A5A', 'Cloud Gray #D0D0D0', 'Lime Signal #A4E400')
         Colors  = [ordered]@{ WindowBg = '#3C3C3C'; PanelBg = '#333333'; ControlBg = '#2A2A2A'; Border = '#5A5A5A'; Text = '#D0D0D0'; SubtleText = '#A8A8A8'; Title = '#FFFFFF'
             Accent = '#0078D4'; AccentText = '#FFFFFF'; ButtonBg = '#5A5A5A'; ButtonText = '#FFFFFF'; TabBg = '#3C3C3C'; TabSelectedText = '#FFFFFF'
-            Hover = '#474747'; SelectionBg = '#0078D4'; SelectionText = '#FFFFFF'; InfoText = '#A8A8A8'; WarnText = '#FFC83D'
+            Hover = '#474747'; SelectionBg = '#0078D4'; SelectionText = '#FFFFFF'; InfoText = '#A8A8A8'; WarnText = '#FFC83D'; CodeBg = '#262626'
             LogBg = '#1E1E1E'; LogText = '#D0D0D0'; LogSuccess = '#A4E400'; LogWarn = '#FFC83D'; LogError = '#FF6B6B' } }
     $s['Arcane Tech (Runic Teal)'] = [ordered]@{ Dark = $true
         Palette = @('Runic Teal #00A6A6', 'Obsidian #0F0F0F', 'Gunmetal #2F3B45', 'Deep Violet #4B2E83', 'Electrum Gold #C6A667')
         Colors  = [ordered]@{ WindowBg = '#0F0F0F'; PanelBg = '#2F3B45'; ControlBg = '#1A2229'; Border = '#4B5A67'; Text = '#E8E8E8'; SubtleText = '#A9B4BE'; Title = '#C6A667'
             Accent = '#00A6A6'; AccentText = '#0F0F0F'; ButtonBg = '#4B2E83'; ButtonText = '#FFFFFF'; TabBg = '#1A2229'; TabSelectedText = '#C6A667'
-            Hover = '#3A4854'; SelectionBg = '#00A6A6'; SelectionText = '#0F0F0F'; InfoText = '#A9B4BE'; WarnText = '#C6A667'
+            Hover = '#3A4854'; SelectionBg = '#00A6A6'; SelectionText = '#0F0F0F'; InfoText = '#A9B4BE'; WarnText = '#C6A667'; CodeBg = '#1A2229'
             LogBg = '#0F0F0F'; LogText = '#C6A667'; LogSuccess = '#00A6A6'; LogWarn = '#FFB454'; LogError = '#FF6B6B' } }
     $s['Minimalist Forge'] = [ordered]@{ Dark = $true
         Palette = @('Blackened Steel #121212', 'Soft Gray #B8B8B8', 'Neutral Dark #2E2E2E', 'Forge Red #D7263D', 'White Heat #F2F2F2')
         Colors  = [ordered]@{ WindowBg = '#121212'; PanelBg = '#2E2E2E'; ControlBg = '#1C1C1C'; Border = '#4A4A4A'; Text = '#F2F2F2'; SubtleText = '#B8B8B8'; Title = '#F2F2F2'
             Accent = '#D7263D'; AccentText = '#F2F2F2'; ButtonBg = '#3A3A3A'; ButtonText = '#F2F2F2'; TabBg = '#1C1C1C'; TabSelectedText = '#F2F2F2'
-            Hover = '#3A3A3A'; SelectionBg = '#D7263D'; SelectionText = '#F2F2F2'; InfoText = '#B8B8B8'; WarnText = '#FF6B7A'
+            Hover = '#3A3A3A'; SelectionBg = '#D7263D'; SelectionText = '#F2F2F2'; InfoText = '#B8B8B8'; WarnText = '#FF6B7A'; CodeBg = '#1C1C1C'
             LogBg = '#121212'; LogText = '#B8B8B8'; LogSuccess = '#B8B8B8'; LogWarn = '#F2F2F2'; LogError = '#D7263D' } }
     return $s
+}
+function ConvertFrom-MarkdownBlocks {
+    # The Markdown subset INSTRUCTIONS.md uses (TODO 10b), split into blocks for the Instructions tab: Heading (Level 1-6),
+    # Paragraph, ListItem (Level = nesting from 2-space indents, Ordered for "1."), Code (fenced ```). Lines of a paragraph,
+    # and indented continuation lines of a list item, are joined with spaces. Inline markup is left in Text.
+    param([string]$Markdown)
+    $blocks = [System.Collections.Generic.List[object]]::new()
+    $para = $null; $inCode = $false; $code = $null
+    $flush = { if ($null -ne $para) { $blocks.Add([pscustomobject]@{ Type = 'Paragraph'; Level = 0; Ordered = $false; Text = $para }); Set-Variable -Name para -Value $null -Scope 1 } }
+    foreach ($line in ($Markdown -split '\r?\n')) {
+        if ($inCode) {
+            if ($line -match '^\s*```') { $blocks.Add([pscustomobject]@{ Type = 'Code'; Level = 0; Ordered = $false; Text = ($code -join "`n") }); $inCode = $false }
+            else { $code.Add($line) }
+            continue
+        }
+        if ($line -match '^\s*```') { & $flush; $inCode = $true; $code = [System.Collections.Generic.List[string]]::new(); continue }
+        if ($line -match '^\s*$') { & $flush; continue }
+        if ($line -match '^(#{1,6})\s+(.*)$') { & $flush; $blocks.Add([pscustomobject]@{ Type = 'Heading'; Level = $Matches[1].Length; Ordered = $false; Text = $Matches[2].Trim() }); continue }
+        if ($line -match '^(\s*)([-*]|\d+\.)\s+(.*)$') {
+            $indent = $Matches[1].Length; $marker = $Matches[2]; $itemText = $Matches[3].Trim()   # before -match below resets $Matches
+            & $flush
+            $blocks.Add([pscustomobject]@{ Type = 'ListItem'; Level = [int][Math]::Floor($indent / 2); Ordered = ($marker -match '^\d'); Text = $itemText })
+            continue
+        }
+        if ($null -eq $para -and $line -match '^\s+\S' -and $blocks.Count -gt 0 -and $blocks[$blocks.Count - 1].Type -eq 'ListItem') {
+            $blocks[$blocks.Count - 1].Text += ' ' + $line.Trim(); continue
+        }
+        $para = if ($null -eq $para) { $line.Trim() } else { $para + ' ' + $line.Trim() }
+    }
+    & $flush
+    if ($inCode) { $blocks.Add([pscustomobject]@{ Type = 'Code'; Level = 0; Ordered = $false; Text = ($code -join "`n") }) }
+    return $blocks.ToArray()
+}
+function Split-MarkdownInline {
+    # Inline markup for the Instructions tab: **bold**, *italic*, `code`, [text](url). Returns runs of Kind Text / Bold /
+    # Italic / Code / Link (Url set for links). Underscores are never markup (paths like Media_CA2023 stay as they are).
+    param([string]$Text)
+    $runs = [System.Collections.Generic.List[object]]::new()
+    $pattern = '(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|\*[^*\s][^*]*\*)'
+    foreach ($part in [regex]::Split($Text, $pattern)) {
+        if ($part -eq '') { continue }
+        if ($part -match '^`([^`]+)`$') { $runs.Add([pscustomobject]@{ Kind = 'Code'; Text = $Matches[1]; Url = '' }) }
+        elseif ($part -match '^\*\*([^*]+)\*\*$') { $runs.Add([pscustomobject]@{ Kind = 'Bold'; Text = $Matches[1]; Url = '' }) }
+        elseif ($part -match '^\[([^\]]+)\]\(([^)\s]+)\)$') { $runs.Add([pscustomobject]@{ Kind = 'Link'; Text = $Matches[1]; Url = $Matches[2] }) }
+        elseif ($part -match '^\*([^*\s][^*]*)\*$') { $runs.Add([pscustomobject]@{ Kind = 'Italic'; Text = $Matches[1]; Url = '' }) }
+        else { $runs.Add([pscustomobject]@{ Kind = 'Text'; Text = $part; Url = '' }) }
+    }
+    return $runs.ToArray()
 }
 function Get-LogLineKind {
     # How the Log tab colours a line: Error, Warn, Success or Normal, from the [LEVEL] tag every log line carries.
@@ -2114,6 +2162,10 @@ function Invoke-MediaRefresh {
    </Grid></TabItem>
    <TabItem Header="Languages"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Language packs, language features and fonts to add to install.wim (WinRE and boot.wim stay English-only). Requires a Language Pack ISO and a Features on Demand ISO. Leave empty for English only. Defaults follow the selected operating system. The list comes from Profiles\Languages.json." TextWrapping="Wrap"/><ListBox x:Name="LanguageList" Grid.Row="1" SelectionMode="Multiple" Margin="0,12,0,0"/></Grid></TabItem>
    <TabItem Header="Log"><RichTextBox x:Name="LogBox" Margin="12" IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="{DynamicResource WF.LogBg}" Foreground="{DynamicResource WF.LogText}"><FlowDocument PagePadding="4"><Paragraph Margin="0"/></FlowDocument></RichTextBox></TabItem>
+   <TabItem Header="Instructions"><Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <DockPanel Margin="0,0,0,8"><Button x:Name="ReloadInstructionsButton" DockPanel.Dock="Right" Content="Reload" Padding="14,3" ToolTip="Read INSTRUCTIONS.md again, for example after editing it"/><TextBlock x:Name="InstructionsSource" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource WF.SubtleText}"/></DockPanel>
+    <FlowDocumentScrollViewer x:Name="InstructionsViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" IsToolBarVisible="False"/>
+   </Grid></TabItem>
    <TabItem Header="General Settings"><StackPanel Margin="18"><GroupBox Header="Color scheme"><StackPanel Margin="12">
     <DockPanel><TextBlock Text="Scheme" Width="120" VerticalAlignment="Center"/><ComboBox x:Name="ColorSchemeCombo" Height="30" Width="300" HorizontalAlignment="Left"/></DockPanel>
     <TextBlock Text="Applies straight away and is remembered for the next start (Settings\General.json)." Foreground="{DynamicResource WF.SubtleText}" Margin="120,6,0,0" TextWrapping="Wrap"/>
@@ -2133,7 +2185,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -2276,6 +2328,107 @@ $script:ColorSchemeCombo.Add_SelectionChanged({
     catch { Write-Log "Color scheme $name applied, but it could not be saved: $($_.Exception.Message)" 'WARN' }
 })
 $window.Add_SourceInitialized({ Set-TitleBarDark ([bool]$script:ColorSchemes[$script:ColorSchemeName].Dark) })
+
+# ---- Instructions tab (TODO 10b): INSTRUCTIONS.md beside the script, shown as a formatted document ----
+# ConvertFrom-MarkdownBlocks / Split-MarkdownInline (engine region) parse it; the colours are WF.* brushes, so the
+# document follows the colour scheme like the rest of the window.
+$script:InstructionsPath = Join-Path (Split-Path $script:ProfilesDir -Parent) 'INSTRUCTIONS.md'
+function Add-MarkdownInlines {
+    param($Inlines, [string]$Text)
+    foreach ($r in @(Split-MarkdownInline $Text)) {
+        $run = New-Object System.Windows.Documents.Run $r.Text
+        switch ($r.Kind) {
+            'Bold'   { $run.FontWeight = [System.Windows.FontWeights]::SemiBold }
+            'Italic' { $run.FontStyle = [System.Windows.FontStyles]::Italic }
+            'Code'   { $run.FontFamily = New-Object System.Windows.Media.FontFamily 'Consolas'; $run.SetResourceReference([System.Windows.Documents.TextElement]::BackgroundProperty, 'WF.CodeBg') }
+        }
+        if ($r.Kind -eq 'Link') {
+            $link = New-Object System.Windows.Documents.Hyperlink $run
+            $link.SetResourceReference([System.Windows.Documents.TextElement]::ForegroundProperty, 'WF.Title')
+            if ($r.Url -match '^https?://') {
+                $link.NavigateUri = [uri]$r.Url; $link.ToolTip = $r.Url
+                $link.Add_RequestNavigate({ param($s, $e) try { Start-Process $e.Uri.AbsoluteUri } catch { }; $e.Handled = $true })
+            }
+            $Inlines.Add($link)
+        } else { $Inlines.Add($run) }
+    }
+}
+function New-InstructionsDocument {
+    # Headings, paragraphs, (nested) bullet and numbered lists and code blocks become a FlowDocument.
+    param([string]$Markdown)
+    $doc = New-Object System.Windows.Documents.FlowDocument
+    $doc.FontFamily = New-Object System.Windows.Media.FontFamily 'Segoe UI'; $doc.FontSize = 13
+    $doc.PagePadding = New-Object System.Windows.Thickness 18, 10, 18, 18
+    $doc.TextAlignment = [System.Windows.TextAlignment]::Left
+    $doc.SetResourceReference([System.Windows.Documents.FlowDocument]::ForegroundProperty, 'WF.Text')
+    $sizes = @{ 1 = 24; 2 = 18; 3 = 15; 4 = 14; 5 = 13; 6 = 13 }
+    $lists = @{}   # nesting level -> the List being filled
+    foreach ($b in @(ConvertFrom-MarkdownBlocks $Markdown)) {
+        if ($b.Type -ne 'ListItem') { $lists = @{} }
+        switch ($b.Type) {
+            'Heading' {
+                $p = New-Object System.Windows.Documents.Paragraph
+                $p.FontSize = $sizes[[int]$b.Level]; $p.FontWeight = [System.Windows.FontWeights]::SemiBold
+                $p.Margin = New-Object System.Windows.Thickness 0, $(if ($b.Level -eq 1) { 0 } elseif ($b.Level -eq 2) { 16 } else { 10 }), 0, 6
+                $p.SetResourceReference([System.Windows.Documents.TextElement]::ForegroundProperty, 'WF.Title')
+                Add-MarkdownInlines $p.Inlines $b.Text; $doc.Blocks.Add($p)
+            }
+            'Paragraph' {
+                $p = New-Object System.Windows.Documents.Paragraph; $p.Margin = New-Object System.Windows.Thickness 0, 0, 0, 10
+                Add-MarkdownInlines $p.Inlines $b.Text; $doc.Blocks.Add($p)
+            }
+            'Code' {
+                $p = New-Object System.Windows.Documents.Paragraph
+                $p.FontFamily = New-Object System.Windows.Media.FontFamily 'Consolas'; $p.FontSize = 12
+                $p.Padding = New-Object System.Windows.Thickness 10, 6, 10, 6; $p.Margin = New-Object System.Windows.Thickness 0, 0, 0, 10
+                $p.SetResourceReference([System.Windows.Documents.TextElement]::BackgroundProperty, 'WF.CodeBg')
+                $first = $true
+                foreach ($codeLine in ($b.Text -split "`n")) {
+                    if (-not $first) { $p.Inlines.Add((New-Object System.Windows.Documents.LineBreak)) }
+                    $p.Inlines.Add((New-Object System.Windows.Documents.Run $codeLine)); $first = $false
+                }
+                $doc.Blocks.Add($p)
+            }
+            'ListItem' {
+                $lvl = [Math]::Min([int]$b.Level, $lists.Count)   # a jump of more than one level nests one level only
+                foreach ($k in @($lists.Keys | Where-Object { $_ -gt $lvl })) { $lists.Remove($k) }
+                if (-not $lists.ContainsKey($lvl)) {
+                    $list = New-Object System.Windows.Documents.List
+                    $list.MarkerStyle = if ($b.Ordered) { [System.Windows.TextMarkerStyle]::Decimal } else { [System.Windows.TextMarkerStyle]::Disc }
+                    $list.Margin = New-Object System.Windows.Thickness 0, 0, 0, $(if ($lvl -eq 0) { 10 } else { 2 })
+                    $list.Padding = New-Object System.Windows.Thickness 22, 0, 0, 0
+                    if ($lvl -eq 0) { $doc.Blocks.Add($list) } else { $lists[$lvl - 1].ListItems.LastListItem.Blocks.Add($list) }
+                    $lists[$lvl] = $list
+                }
+                $item = New-Object System.Windows.Documents.ListItem
+                $p = New-Object System.Windows.Documents.Paragraph; $p.Margin = New-Object System.Windows.Thickness 0, 0, 0, 3
+                Add-MarkdownInlines $p.Inlines $b.Text
+                $item.Blocks.Add($p); $lists[$lvl].ListItems.Add($item)
+            }
+        }
+    }
+    return $doc
+}
+function Update-InstructionsTab {
+    # Renders INSTRUCTIONS.md (at start-up and on Reload). A missing or unreadable file is shown as such, never a crash.
+    $path = $script:InstructionsPath
+    try {
+        if (Test-Path -LiteralPath $path) {
+            $md = [System.IO.File]::ReadAllText($path)
+            $src = "$path   (read at $(Get-Date -Format 'HH:mm:ss'))"
+        } else {
+            $md = '# Instructions' + "`n`n" + '`INSTRUCTIONS.md` was not found next to the script (' + $path + '). Copy it there and press Reload.'
+            $src = "$path (not found)"
+        }
+        $script:InstructionsViewer.Document = New-InstructionsDocument $md
+        $script:InstructionsSource.Text = $src
+    } catch {
+        Write-Log "INSTRUCTIONS.md could not be shown: $($_.Exception.Message)" 'WARN'
+        $script:InstructionsSource.Text = "$path (could not be shown; see the Log tab)"
+    }
+}
+Update-InstructionsTab
+$script:ReloadInstructionsButton.Add_Click({ Update-InstructionsTab })
 
 # The window's own checkbox defaults, restored when an OS without saved settings is selected.
 $script:DefaultChecks = @{}

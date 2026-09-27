@@ -94,6 +94,30 @@ if ($wpf) {
     $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $false; $c3 = $script:ChkMedia2023.IsEnabled
     Check 'CA 2023 is available only with media and Patch boot.wim both ticked' ($c1 -and -not $c2 -and -not $c3)
 
+    # Instructions tab (TODO 10b): the real window's tab and the real guide rendered as a FlowDocument
+    foreach ($fn in 'Add-MarkdownInlines', 'New-InstructionsDocument', 'Update-InstructionsTab') {
+        $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
+    }
+    $tabNames = @(($win.FindName('LogBox').Parent.Parent.Items) | ForEach-Object { [string]$_.Header })
+    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
+    $script:InstructionsViewer = $win.FindName('InstructionsViewer'); $script:InstructionsSource = $win.FindName('InstructionsSource')
+    $script:InstructionsPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
+    if (Test-Path $script:InstructionsPath) {
+        Update-InstructionsTab
+        $doc = $script:InstructionsViewer.Document
+        $heads = @($doc.Blocks | Where-Object { $_ -is [System.Windows.Documents.Paragraph] -and $_.FontWeight -eq [System.Windows.FontWeights]::SemiBold } | ForEach-Object { (New-Object System.Windows.Documents.TextRange($_.ContentStart, $_.ContentEnd)).Text })
+        $lists = @($doc.Blocks | Where-Object { $_ -is [System.Windows.Documents.List] })
+        $nested = @($lists | ForEach-Object { $_.ListItems } | ForEach-Object { $_.Blocks } | Where-Object { $_ -is [System.Windows.Documents.List] })
+        $numbered = @($lists | Where-Object { $_.MarkerStyle -eq [System.Windows.TextMarkerStyle]::Decimal })
+        $deeper = @($nested | ForEach-Object { $_.ListItems } | ForEach-Object { $_.Blocks } | Where-Object { $_ -is [System.Windows.Documents.List] })   # CA 2023 under Patch boot.wim
+        Check 'WPF: the real guide renders: headings, bullet lists, nested lists and the numbered order of work' ($heads -contains 'WimForge - operator guide' -and $heads -contains 'Where the logs are' -and $lists.Count -gt 10 -and $nested.Count -ge 2 -and $deeper.Count -ge 1 -and $numbered.Count -ge 1 -and @($numbered[0].ListItems).Count -eq 6) "headings $($heads.Count), lists $($lists.Count), nested $($nested.Count), numbered $($numbered.Count)"
+        Check 'WPF: the path line shows which file was read' ($script:InstructionsSource.Text -like "*INSTRUCTIONS.md   (read at *")
+    } else { Write-Host 'SKIP  real INSTRUCTIONS.md rendering (file not found)' }
+    $script:InstructionsPath = Join-Path $PWD 'no_such_INSTRUCTIONS.md'
+    Update-InstructionsTab
+    $missingText = (New-Object System.Windows.Documents.TextRange($script:InstructionsViewer.Document.ContentStart, $script:InstructionsViewer.Document.ContentEnd)).Text
+    Check 'WPF: a missing INSTRUCTIONS.md is shown as a message, not an error' ($missingText -match 'INSTRUCTIONS\.md was not found next to the script' -and $script:InstructionsSource.Text -like '*(not found)')
+
     # Colour schemes (General Settings tab) on the real window
     $script:ThemedStyleXaml = [regex]::Match($src, "(?s)\`$script:ThemedStyleXaml = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
     foreach ($fn in 'New-SchemeBrush', 'Set-TitleBarDark', 'Set-ColorScheme', 'Add-LogText') {

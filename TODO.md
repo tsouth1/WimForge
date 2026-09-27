@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 412 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 422 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -22,7 +22,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | After 2 |
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
 | [9](#s9) | Housekeeping and final documentation | Claude | Ongoing |
-| [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ Terry for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10a INSTRUCTIONS.md written; 10d Image Inventory waits for Terry's script; 10b not started |
+| [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ Terry for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10a INSTRUCTIONS.md written and 10b Instructions tab built; 10d Image Inventory waits for Terry's script |
 | [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Not started |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
@@ -229,7 +229,14 @@ The script only logs a warning when the host DISM is older than the image. Servi
 - New file next to the script (same folder as `Profiles\`), written in Markdown so it doubles as the source for the Instructions tab (10b) and is still readable on its own in a text editor or on GitHub.
 - Contents: what the tool does and the folder layout it expects (ISO/LOGS/MOUNT/OLDWIM/NEWWIM/PATCHES/TEMP/WINPE/WINRE/WORKING per OS); a walkthrough of every GUI tab and control (Source and targets, Updates and features, Languages, Log, and whatever this step and step 7 add); the recommended order of operations (Preflight first, then a real run); and — the specific thing Terry asked for — **where the log files for a run land**: `LOGS\MediaRefresh_*.log` (run log), `LOGS\DISM_*.log` (DISM's own log), and the per-image change log `LOGS\ChangeLog_<OS>_<build>_<timestamp>.html`/`.csv` (also copied to `NEWWIM\` beside the output, per step 3b).
 
-**10b. "Instructions" tab in the GUI**
+**10b. "Instructions" tab in the GUI - built 2026-09-27; confirm in the real GUI**
+
+**What was built:** an **Instructions** tab between Log and General Settings: the path of the `INSTRUCTIONS.md` that was read (beside the script) with the time, a **Reload** button, and the guide in a `FlowDocumentScrollViewer`. A small converter covers the Markdown the guide uses: `ConvertFrom-MarkdownBlocks` (engine region: headings 1-6, paragraphs, bullet and numbered list items nested by 2-space indents with continuation lines, fenced code) and `Split-MarkdownInline` (`**bold**`, `*italic*`, `` `code` ``, `[text](url)`; underscores are never markup, so paths such as `Media_CA2023` stay intact); `New-InstructionsDocument` builds the WPF document (lists nest as real WPF lists; http/https links open in the browser). Colours are `WF.*` brushes, so the tab follows the colour scheme; a new `CodeBg` role (all five schemes; the contrast test covers it) gives inline code and code blocks a background. A missing file shows a message instead of an error. The guide got an "Instructions tab" section.
+- **Found while building:** the first version dropped every numbered list item (a `-match` inside the item's own hashtable reset `$Matches`); caught by rendering the guide, fixed, and covered by a test.
+- **Tests:** 4 in `profiles.ps1` (P13: block shapes and levels, joined lines, code kept as written, inline runs, underscores and `*` in code, and the real `INSTRUCTIONS.md` with no stray `**` or backticks left) and 3 in `xaml.ps1` (tab position with Reload and viewer; the real guide renders headings, lists, nested lists two levels deep and the six numbered steps; missing file message). Also rendered in the Default and dark schemes, and started for real (unelevated copy, Windows PowerShell 5.1): guide loaded at start-up, Reload in a dark scheme, no warnings.
+- **To confirm in the real GUI:** open the Instructions tab, scroll through, switch colour schemes, edit `INSTRUCTIONS.md` and press Reload.
+
+**Original plan:**
 
 - New tab beside the Log tab. Terry's ask is explicit that **looks matter** — this is not a plain read-only `TextBox` dump of the raw Markdown (that's what the Log tab already looks like). WPF has no built-in Markdown renderer, so this needs a small Markdown-to-`FlowDocument` conversion (headings, bold/italic, bullet and numbered lists, code spans/blocks, links) feeding a `RichTextBox` (or a `FlowDocumentScrollViewer`), styled to match the rest of the window (fonts, spacing, the app's color palette). Rendered once at start-up from `INSTRUCTIONS.md`; a small "Reload" affordance re-renders it if the file was hand-edited without restarting the tool.
 
@@ -423,6 +430,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: step 10b built - Instructions tab renders `INSTRUCTIONS.md` (headings, nested and numbered lists, code, links) in the scheme's colours, with Reload; new `CodeBg` colour role. Test kit 422 checks.
 - 2026-09-27: step 10a - `INSTRUCTIONS.md` operator guide written.
 - 2026-09-27: step 12a built - optional CA 2023 media (`NEWWIM\Media_CA2023`) and `_CA2023` ISO alongside the standard ones, with the boot manager, UEFI boot image and boot fonts signed by Windows UEFI CA 2023 from the patched boot.wim (Microsoft's `Make2023BootableMedia.ps1` steps), embedded signature verified. Test kit 412 checks.
 - 2026-09-27: boot.wim is patched only for the media ("Patch boot.wim" under the media option, relabelled); setup.exe / setuphost.exe and the boot manager files on the media come from the patched boot.wim (step 6); archive folders of runs in the same second no longer collide. Test kit 394 checks.
