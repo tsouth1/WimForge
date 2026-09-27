@@ -59,7 +59,7 @@ Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO.
 3. **Run a preflight:** tick "Preflight check only" and press "Start refresh". It takes about a minute and changes nothing. In the log, check the ISO roles, the patch counts, the language packs and the `Selected client image index` line.
 4. **Run the real build:** untick "Preflight check only", choose the outputs, updates, languages and the apps to remove (Apps tab), and press "Start refresh". A run takes one to four hours depending on the OS and the number of languages.
 5. **Check the result:** the completion message, the `VALIDATION GATE` line at the end of the log, and the change log (see below).
-6. **Import into SCCM** the `install.wim` from `NEWWIM` (or use the `Media` folder for an OS Upgrade Package).
+6. **Import into SCCM** from the SCCM tab (Full OS image or Upgrade package), or tick "Import after the run finishes" there before step 4.
 
 Press "Save settings" once the ticks and languages for an OS are how you want them; they come back every time that OS is selected.
 
@@ -111,6 +111,20 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 - After the run, **Verify** checks that every ticked app is really gone; a leftover fails the validation gate. Each removal is a row in the change log.
 - Windows Server has no provisioned consumer apps, so the tab is greyed out for it.
 
+### SCCM tab
+
+Imports the latest finished run of the selected OS into Configuration Manager. Needs the Configuration Manager console on the build machine and rights on the site.
+
+- **Site server** - the site server's name (FQDN). **Connect** checks the console module and the site, reads the site code, and fills the pick list with the site's distribution points and groups.
+- **Distribute to** - a distribution point or a distribution point group; type the name, or pick it from the list after Connect.
+- **Content source folder** - a folder on this server inside a shared folder (**Browse...** to pick it). The line under it shows the UNC path Configuration Manager imports from. Each import creates a new sub-folder named after the image; nothing already there is overwritten.
+- **Image name** - the OS name with the month (`yyyyMM`), following the selected OS; type another name if wanted (50 characters at most), **Reset** to go back. If an image of that name already exists, the new one gets " (2)", " (3)", ...; the existing one is never changed.
+- **Package type** - **Full OS image** (the `install.wim`, for task sequences) or **Upgrade package** (the whole refreshed media folder, for in-place upgrades; the run must have built the media folder).
+- **Import after the run finishes** - starts the import straight after a successful run, without a confirmation. An image whose validation gate FAILED is not imported.
+- **Import into SCCM...** - checks everything first (the run, the gate, the folder and share, free space, the site and the name) and shows exactly what it will do; nothing changes until you confirm. It then copies the image, creates the OS image or upgrade package, and starts the content distribution (follow it in the console under Monitoring > Distribution Status).
+- The line under the button shows the latest run for this OS: build, validation gate and time. **A run whose validation gate FAILED is never imported.**
+- Save settings keeps the site server and target (for every OS), and the content folder, package type and a typed image name (per OS).
+
 ### Log tab
 
 - Every line the run writes, with the time and a level: `[INFO]`, `[WARN]` or `[ERROR]`.
@@ -149,6 +163,7 @@ Everything goes to `<repository root>\<OS folder>\NEWWIM`:
 - `Media_CA2023` - the CA 2023 media folder (when ticked).
 - `UpdatedMedia_<date>.iso` and `UpdatedMedia_CA2023_<date>.iso` - the ISOs (when ticked).
 - `ChangeLog_<OS>_<build>_<date>.html` and `.csv` - a copy of the change log.
+- `RunResult.json` - the record of the run (build, validation gate, outputs) that the SCCM import works from.
 - `Archive\<date>` - the previous run's output, moved here before new output is written. The newest three archives are kept (`keepArchives` in the profile).
 
 ## Where the logs are
@@ -158,6 +173,7 @@ For each operating system, in `<repository root>\<OS folder>\LOGS`:
 - `MediaRefresh_<yyyyMMdd_HHmmss>.log` - the run log: the same lines as the Log tab. Written by servicing runs, preflights and "Download patches...".
 - `DISM_<yyyyMMdd_HHmmss>.log` - DISM's own detailed log for the same run. Look here when a package fails to install.
 - `ChangeLog_<OS>_<build>_<yyyyMMdd_HHmmss>.html` and `.csv` - the change log for the image (also copied to `NEWWIM`).
+- `SccmImport_<yyyyMMdd_HHmmss>.log` - what an SCCM import did (copy, import, distribution).
 
 For the Tools menu, in `<repository root>\LOGS`:
 
@@ -187,5 +203,8 @@ When asking for help with a run, send the `MediaRefresh_*`, `DISM_*` and `Change
 - **"Not enough free disk space"** - free space on the repository drive, or build fewer outputs at once. The message names the profile setting (`minFreeGB`, `spaceCheck`) if the estimate needs tuning.
 - **The run stops with a mount error, or a folder "cannot be cleared because an image is still mounted"** - use Tools > Cleanup Mountpoints, then start again.
 - **"CA 2023 media was not created"** - the `boot.wim` did not carry the CA 2023 boot files (they come with the April 2024 or later cumulative update). The standard media and `install.wim` are fine.
+- **SCCM: "The Configuration Manager console is not installed"** - install the console on the build machine; the import uses its PowerShell module.
+- **SCCM: "not inside a shared folder on this server"** - Configuration Manager reads the content over the network, so the content source folder must be inside a share. Share it (or a parent folder).
+- **SCCM: "Refused: ... FAILED its validation gate"** - fix what the VERIFY lines report, run again, then import.
 - **A step takes far longer than usual** (component cleanup over half an hour) - check the antivirus exclusion for the repository root and its `MOUNT` folders.
 - **Support-end warning in red** - the OS is within 180 days of the end of support; plan its replacement.

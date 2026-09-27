@@ -409,14 +409,14 @@ function Import-LanguageList {
 # ---------- saved GUI settings per OS (TODO step 10c) ----------
 # Settings\<profile folder>.json holds one OS's checkboxes and ticked languages; Settings\General.json the repository
 # root. Kept apart from Profiles\ on purpose: profile files get regenerated, which must not wipe saved choices.
-$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval')
+$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval', 'SccmAutoImport')
 function Get-OsSettingsFile {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition)
     return (Join-Path $Directory ($Definition.Folder + '.json'))
 }
 function Save-OsSettings {
     # Writes the selected OS's choices; returns the file path. Only the known option names are stored, as true/false.
-    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @())
+    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @(), [hashtable]$Sccm = @{})
     Ensure-Directory $Directory
     $opts = [ordered]@{}
     foreach ($k in $script:SettingOptionNames) { if ($Options.ContainsKey($k)) { $opts[$k] = [bool]$Options[$k] } }
@@ -424,6 +424,8 @@ function Save-OsSettings {
         schemaVersion = 1; os = $Definition.Name; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); options = $opts
         languages = @($Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
         removeApps = @($RemoveApps | Where-Object { $_ } | ForEach-Object { [string]$_ })   # provisioned apps ticked on the Apps tab, by DisplayName
+        # SCCM tab, per OS: content source folder, package type (Image / Upgrade), and the image name only when typed by hand
+        sccm = [ordered]@{ contentSource = [string]$Sccm['ContentSource']; packageType = [string]$Sccm['PackageType']; imageName = [string]$Sccm['ImageName'] }
     }
     $file = Get-OsSettingsFile -Directory $Directory -Definition $Definition
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json -Depth 4) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
@@ -450,7 +452,9 @@ function Read-OsSettings {
         $codes = @(@(Get-ProfileValue $obj 'languages' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
         $known = @($LanguageList | ForEach-Object { $_.Code })
         $apps = @(@(Get-ProfileValue $obj 'removeApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ })
-        return [pscustomobject]@{ File = $file; Options = $opts; Languages = @($codes | Where-Object { $known -contains $_ }); MissingLanguages = @($codes | Where-Object { $known -notcontains $_ }); RemoveApps = $apps }
+        $sc = Get-ProfileValue $obj 'sccm' $null
+        $sccm = [pscustomobject]@{ ContentSource = [string](Get-ProfileValue $sc 'contentSource' ''); PackageType = [string](Get-ProfileValue $sc 'packageType' ''); ImageName = [string](Get-ProfileValue $sc 'imageName' '') }
+        return [pscustomobject]@{ File = $file; Options = $opts; Languages = @($codes | Where-Object { $known -contains $_ }); MissingLanguages = @($codes | Where-Object { $known -notcontains $_ }); RemoveApps = $apps; Sccm = $sccm }
     } catch {
         Write-Log "Saved settings $file could not be used ($($_.Exception.Message)); using the defaults." 'WARN'
         return $null
@@ -466,7 +470,7 @@ function Remove-OsSettings {
 }
 function Save-GeneralSettings {
     # Settings\General.json holds what is shared by every OS. Only the values passed are changed; the others are kept.
-    param([Parameter(Mandatory)][string]$Directory, [string]$Root, [string]$ColorScheme)
+    param([Parameter(Mandatory)][string]$Directory, [string]$Root, [string]$ColorScheme, [string]$SccmSiteServer, [string]$SccmTargetType, [string]$SccmTarget)
     Ensure-Directory $Directory
     $file = Join-Path $Directory 'General.json'
     $old = $null
@@ -475,8 +479,24 @@ function Save-GeneralSettings {
         schemaVersion = 1; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         root        = $(if ($PSBoundParameters.ContainsKey('Root')) { [string]$Root } else { [string](Get-ProfileValue $old 'root' '') })
         colorScheme = $(if ($PSBoundParameters.ContainsKey('ColorScheme')) { [string]$ColorScheme } else { [string](Get-ProfileValue $old 'colorScheme' '') })
+        # SCCM tab (step 7): shared by every OS
+        sccmSiteServer = $(if ($PSBoundParameters.ContainsKey('SccmSiteServer')) { [string]$SccmSiteServer } else { [string](Get-ProfileValue $old 'sccmSiteServer' '') })
+        sccmTargetType = $(if ($PSBoundParameters.ContainsKey('SccmTargetType')) { [string]$SccmTargetType } else { [string](Get-ProfileValue $old 'sccmTargetType' '') })
+        sccmTarget     = $(if ($PSBoundParameters.ContainsKey('SccmTarget')) { [string]$SccmTarget } else { [string](Get-ProfileValue $old 'sccmTarget' '') })
     }
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+}
+function Read-SccmGeneralSettings {
+    # The SCCM tab's shared values from General.json (empty strings when not saved; an unusable file is a WARN).
+    param([string]$Directory)
+    $none = [pscustomobject]@{ SiteServer = ''; TargetType = ''; Target = '' }
+    if (-not $Directory) { return $none }
+    $file = Join-Path $Directory 'General.json'
+    if (-not (Test-Path -LiteralPath $file)) { return $none }
+    try {
+        $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
+        return [pscustomobject]@{ SiteServer = [string](Get-ProfileValue $o 'sccmSiteServer' ''); TargetType = [string](Get-ProfileValue $o 'sccmTargetType' ''); Target = [string](Get-ProfileValue $o 'sccmTarget' '') }
+    } catch { Write-Log "Saved settings $file could not be used ($($_.Exception.Message))." 'WARN'; return $none }
 }
 function Read-ColorSchemeSetting {
     # The saved colour scheme name, or '' when there is none or the file is unusable (WARN).
@@ -2041,6 +2061,179 @@ function Initialize-Repository {
     return $p
 }
 
+# ---------- SCCM import (TODO step 7) ----------
+# A finished run writes NEWWIM\RunResult.json; "Import into SCCM" (SCCM tab) copies that run's install.wim (OS image) or
+# media folder (upgrade package) into a sub-folder of the content source folder on this server, creates the OS image /
+# upgrade package from its UNC path, and distributes it to a distribution point or group. Decisions (Terry, 2026-09-27):
+# a same-named object is never touched - the new one gets " (2)", " (3)", ...; an image whose validation gate FAILED is
+# refused; an import is started with the button, or after a run when "Import after the run finishes" is ticked.
+# Every call into Configuration Manager goes through the small Sccm* wrappers below, so the test kit can replace them.
+$script:SccmNameDateFormat = 'yyyyMM'   # image name = OS name + this date (Terry, 2026-09-21)
+$script:RunResultFileName  = 'RunResult.json'
+function Get-SccmImageName {
+    param([string]$OsName, [datetime]$Date = (Get-Date))
+    return "$OsName $($Date.ToString($script:SccmNameDateFormat))"
+}
+function Get-SccmUniqueName {
+    # $Name, or "$Name (2)", "(3)", ... when a same-named object exists (compared case-insensitively). SCCM allows 50 characters.
+    param([string]$Name, [string[]]$Existing = @())
+    $taken = @($Existing | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+    $candidate = $Name; $n = 1
+    while ($taken -contains $candidate.ToLowerInvariant()) { $n++; $candidate = "$Name ($n)" }
+    if ($candidate.Length -gt 50) { throw "The image name '$candidate' is $($candidate.Length) characters; Configuration Manager allows 50. Shorten the name on the SCCM tab." }
+    return $candidate
+}
+function Save-RunResult {
+    # The record of a finished run that the SCCM import works from (and refuses when its gate FAILED).
+    param([hashtable]$Paths, [string]$OsName, [string]$Build, [string]$Gate, [string]$Install, [string]$Media, [string]$ChangeLog)
+    $data = [ordered]@{ schemaVersion = 1; finished = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); os = $OsName; build = $Build; gate = $Gate; install = $Install; media = $Media; changeLog = $ChangeLog; toolVersion = $script:ToolVersion }
+    $file = [System.IO.Path]::Combine($Paths.NewWim, $script:RunResultFileName)
+    [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    return $file
+}
+function Read-RunResult {
+    param([string]$NewWim)
+    $file = [System.IO.Path]::Combine($NewWim, $script:RunResultFileName)
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try {
+        $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
+        return [pscustomobject]@{ File = $file; Finished = [string](Get-ProfileValue $o 'finished' ''); Os = [string](Get-ProfileValue $o 'os' ''); Build = [string](Get-ProfileValue $o 'build' '')
+            Gate = [string](Get-ProfileValue $o 'gate' ''); Install = [string](Get-ProfileValue $o 'install' ''); Media = [string](Get-ProfileValue $o 'media' ''); ChangeLog = [string](Get-ProfileValue $o 'changeLog' '') }
+    } catch { Write-Log "Run record $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
+}
+function Get-ServerShares {
+    # This server's ordinary file shares (not the admin shares such as C$ or ADMIN$), as Name / Path.
+    return @(Get-SmbShare -ErrorAction Stop | Where-Object { -not $_.Special -and $_.Path -and $_.Name -notmatch '\$$' } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Path = [string]$_.Path } })
+}
+function ConvertTo-SccmUncPath {
+    # A local folder on this server -> \\<Server>\<share>\<rest>, using the share whose path is the longest that contains
+    # the folder. A path that is already UNC is returned as it is. Throws when no share contains the folder.
+    param([string]$LocalPath, [string]$Server, [object[]]$Shares = @())
+    $p = $LocalPath.TrimEnd('\')
+    if ($p.StartsWith('\\')) { return $p }
+    $best = $null
+    foreach ($s in @($Shares)) {
+        $sp = ([string]$s.Path).TrimEnd('\')
+        if ((Test-PathUnder $p $sp) -and ($null -eq $best -or $sp.Length -gt ([string]$best.Path).TrimEnd('\').Length)) { $best = $s }
+    }
+    if (-not $best) { throw "The content source folder $LocalPath is not inside a shared folder on this server, so Configuration Manager cannot reach it. Share it (or a parent folder) and try again." }
+    $rest = $p.Substring(([string]$best.Path).TrimEnd('\').Length).TrimStart('\')
+    return ('\\' + $Server + '\' + $best.Name + $(if ($rest) { '\' + $rest } else { '' }))
+}
+function Get-SccmSafeFolderName { param([string]$Name) return (($Name -replace '[\\/:*?"<>|]', '') -replace '\s+', ' ').Trim() }
+function Import-SccmModule {
+    # The Configuration Manager console's PowerShell module (installed with the console).
+    if (Get-Module ConfigurationManager) { return }
+    $ui = $env:SMS_ADMIN_UI_PATH
+    if (-not $ui) { throw 'The Configuration Manager console is not installed on this machine (SMS_ADMIN_UI_PATH is not set). Install the console, then try again.' }
+    $psd = Join-Path (Split-Path $ui -Parent) 'ConfigurationManager.psd1'
+    if (-not (Test-Path -LiteralPath $psd)) { throw "The Configuration Manager PowerShell module was not found at $psd." }
+    Import-Module $psd -ErrorAction Stop -WarningAction SilentlyContinue
+}
+function Get-SccmSiteCode {
+    param([Parameter(Mandatory)][string]$SiteServer)
+    $loc = @(Get-CimInstance -ComputerName $SiteServer -Namespace 'root\SMS' -ClassName SMS_ProviderLocation -ErrorAction Stop | Where-Object { $_.ProviderForLocalSite }) | Select-Object -First 1
+    if (-not $loc) { throw "No SMS Provider for a site was found on $SiteServer. Check the site server name." }
+    return [string]$loc.SiteCode
+}
+function Invoke-InSccmSite {
+    # Runs $Script on the site drive (<site code>:), which Configuration Manager cmdlets need; file work stays outside it.
+    param([Parameter(Mandatory)][string]$SiteCode, [Parameter(Mandatory)][string]$SiteServer, [Parameter(Mandatory)][scriptblock]$Script)
+    if (-not (Get-PSDrive -Name $SiteCode -PSProvider CMSite -ErrorAction SilentlyContinue)) { New-PSDrive -Name $SiteCode -PSProvider CMSite -Root $SiteServer -ErrorAction Stop | Out-Null }
+    Push-Location "$($SiteCode):\"
+    try { return (& $Script) } finally { Pop-Location }
+}
+function Connect-SccmSite {
+    # Loads the module, reads the site code and lists the distribution points and groups (the SCCM tab's Connect button).
+    param([Parameter(Mandatory)][string]$SiteServer)
+    Write-Log "Connecting to Configuration Manager site server $SiteServer"
+    Import-SccmModule
+    $code = Get-SccmSiteCode -SiteServer $SiteServer
+    Write-Log "Site code: $code"
+    $lists = Invoke-InSccmSite -SiteCode $code -SiteServer $SiteServer -Script {
+        [pscustomobject]@{
+            DPs    = @(Get-CMDistributionPoint -AllSite | ForEach-Object { ([string]$_.NetworkOSPath).TrimStart('\') } | Where-Object { $_ } | Sort-Object -Unique)
+            Groups = @(Get-CMDistributionPointGroup | ForEach-Object { [string]$_.Name } | Where-Object { $_ } | Sort-Object -Unique)
+        } }
+    Write-Log "Found $(@($lists.DPs).Count) distribution point(s) and $(@($lists.Groups).Count) distribution point group(s)."
+    return [pscustomobject]@{ Mode = 'SccmConnect'; SiteServer = $SiteServer; SiteCode = $code; DPs = @($lists.DPs); Groups = @($lists.Groups) }
+}
+function Invoke-SccmImport {
+    # -DryRun: checks everything and returns the plan, changes nothing. Otherwise: copies, imports, distributes.
+    param([Parameter(Mandatory)][pscustomobject]$Options, [Parameter(Mandatory)][pscustomobject]$Definition, [Parameter(Mandatory)][hashtable]$Paths, [switch]$DryRun)
+    Set-Phase -OsName $Definition.Name -Phase $(if ($DryRun) { 'Checking the SCCM import' } else { 'Importing into SCCM' })
+    $siteServer = ([string](Get-ProfileValue $Options 'SccmSiteServer' '')).Trim()
+    $target = ([string](Get-ProfileValue $Options 'SccmTarget' '')).Trim()
+    $targetIsGroup = ([string](Get-ProfileValue $Options 'SccmTargetType' 'DP')) -eq 'DPGroup'
+    $sourceLocal = ([string](Get-ProfileValue $Options 'SccmContentSource' '')).Trim()
+    $sourceServer = ([string](Get-ProfileValue $Options 'SccmSourceServer' $env:COMPUTERNAME)).Trim()
+    $isUpgrade = ([string](Get-ProfileValue $Options 'SccmPackageType' 'Image')) -eq 'Upgrade'
+    $wantedName = ([string](Get-ProfileValue $Options 'SccmImageName' '')).Trim()
+    $kind = if ($isUpgrade) { 'OS upgrade package' } else { 'OS image' }
+    foreach ($req in @(@('Site server', $siteServer), @('Distribution point or group', $target), @('Content source folder', $sourceLocal), @('Image name', $wantedName))) {
+        if (-not $req[1]) { throw "$($req[0]) is empty on the SCCM tab." }
+    }
+    # 1. The finished run to import: it must exist and must not have FAILED its validation gate.
+    $run = Read-RunResult -NewWim $Paths.NewWim
+    if (-not $run) { throw "There is no finished run to import in $($Paths.NewWim). Run a servicing run for $($Definition.Name) first." }
+    if ($run.Gate -eq 'FAILED') { throw "Refused: the image in $($Paths.NewWim) (build $($run.Build), finished $($run.Finished)) FAILED its validation gate. Fix the cause and run again; a failed image is never imported." }
+    if ($run.Gate -ne 'PASSED') { Write-Log "The image in $($Paths.NewWim) was not verified (validation gate: $($run.Gate)); importing it anyway." 'WARN' }
+    $content = if ($isUpgrade) { $run.Media } else { $run.Install }
+    if (-not $content -or -not (Test-Path -LiteralPath $content)) {
+        throw $(if ($isUpgrade) { "An upgrade package needs the refreshed media folder, and the last run did not build one (or it is gone). Tick 'Create refreshed media folder' and run again, or import a Full OS image." } else { "The last run's install.wim ($content) is not there any more. Run again." })
+    }
+    $sizeGB = if ($isUpgrade) { (@(Get-ChildItem -LiteralPath $content -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum) / 1GB } else { (Get-Item -LiteralPath $content).Length / 1GB }
+    # 2. The content source folder: local on this server, reachable by UNC under \\<this server>\.
+    if (-not (Test-Path -LiteralPath $sourceLocal)) { throw "The content source folder $sourceLocal does not exist." }
+    $sourceUnc = ConvertTo-SccmUncPath -LocalPath $sourceLocal -Server $sourceServer -Shares $(if ($sourceLocal.StartsWith('\\')) { @() } else { @(Get-ServerShares) })
+    if (-not $sourceUnc.StartsWith("\\$sourceServer\", [System.StringComparison]::OrdinalIgnoreCase)) { throw "The content source $sourceUnc must be on this server (\\$sourceServer\)." }
+    $free = Get-FreeSpaceGB -Path $sourceLocal
+    if ($null -ne $free -and $free -lt ($sizeGB * 1.1 + 1)) { throw ("Not enough free space for the copy: {0:N1} GB free in {1}, about {2:N1} GB needed." -f $free, $sourceLocal, ($sizeGB * 1.1 + 1)) }
+    # 3. The site: module, site code, existing names, distribution target.
+    Import-SccmModule
+    $siteCode = Get-SccmSiteCode -SiteServer $siteServer
+    $existing = Invoke-InSccmSite -SiteCode $siteCode -SiteServer $siteServer -Script {
+        if ($isUpgrade) { @(Get-CMOperatingSystemInstaller -Name "$wantedName*" | ForEach-Object { [string]$_.Name }) } else { @(Get-CMOperatingSystemImage -Name "$wantedName*" | ForEach-Object { [string]$_.Name }) } }
+    $name = Get-SccmUniqueName -Name $wantedName -Existing @($existing)
+    if ($name -ne $wantedName) { Write-Log "A $kind named '$wantedName' already exists; this one is imported as '$name' (the existing one is not changed)." 'WARN' }
+    $folderName = Get-SccmSafeFolderName $name
+    $destLocal = Join-Path $sourceLocal $folderName; $n = 1
+    while (Test-Path -LiteralPath $destLocal) { $n++; $destLocal = Join-Path $sourceLocal "$folderName ($n)" }
+    $destUnc = $sourceUnc + '\' + (Split-Path $destLocal -Leaf)
+    $importPath = if ($isUpgrade) { $destUnc } else { $destUnc + '\install.wim' }
+    $description = ("WimForge $($script:ToolVersion); build $($run.Build); gate $($run.Gate); change log $(Split-Path $run.ChangeLog -Leaf)")
+    if ($description.Length -gt 127) { $description = $description.Substring(0, 127) }
+    $plan = [pscustomobject]@{ Mode = 'SccmImport'; DryRun = [bool]$DryRun; Kind = $kind; Name = $name; RequestedName = $wantedName; Build = $run.Build; Gate = $run.Gate; Finished = $run.Finished
+        Content = $content; SizeGB = [Math]::Round($sizeGB, 1); DestinationLocal = $destLocal; ImportPath = $importPath; SiteServer = $siteServer; SiteCode = $siteCode
+        Target = $target; TargetIsGroup = $targetIsGroup; PackageId = $null; Description = $description }
+    Write-Log "SCCM import plan: $kind '$name' from $importPath (copy of $content, $($plan.SizeGB) GB), site $siteCode on $siteServer, distribute to $(if ($targetIsGroup) { 'distribution point group' } else { 'distribution point' }) $target."
+    if ($DryRun) { Set-Phase 'Done'; return $plan }
+    # 4. Copy (local), import (UNC), distribute.
+    Set-Phase 'Copying to the content source'; Set-Progress 20 'Copying to the content source'
+    Ensure-Directory $destLocal
+    if ($isUpgrade) { Copy-Item -Path (Join-Path $content '*') -Destination $destLocal -Recurse -Force -ErrorAction Stop }
+    else { Copy-Item -LiteralPath $content -Destination (Join-Path $destLocal 'install.wim') -Force -ErrorAction Stop }
+    Write-Log "Copied $content to $destLocal"
+    Assert-NotCancelled
+    Set-Phase "Importing the $kind"; Set-Progress 70 "Importing the $kind"
+    $pkgId = Invoke-InSccmSite -SiteCode $siteCode -SiteServer $siteServer -Script {
+        $obj = if ($isUpgrade) { New-CMOperatingSystemInstaller -Name $name -Path $importPath -Description $description -Version $run.Build -ErrorAction Stop }
+               else { New-CMOperatingSystemImage -Name $name -Path $importPath -Description $description -Version $run.Build -ErrorAction Stop }
+        [string]$obj.PackageID }
+    Write-Log "Imported $kind '$name' as package $pkgId."
+    $plan.PackageId = $pkgId
+    Set-Phase 'Distributing content'; Set-Progress 85 'Distributing content'
+    Invoke-InSccmSite -SiteCode $siteCode -SiteServer $siteServer -Script {
+        $dist = @{ ErrorAction = 'Stop' }
+        if ($isUpgrade) { $dist['OperatingSystemInstallerId'] = $pkgId } else { $dist['OperatingSystemImageId'] = $pkgId }
+        if ($targetIsGroup) { $dist['DistributionPointGroupName'] = $target } else { $dist['DistributionPointName'] = $target }
+        Start-CMContentDistribution @dist | Out-Null }
+    Write-Log "Content distribution of $pkgId to $target started. The console shows its progress (Monitoring > Distribution Status)."
+    Write-Log "SCCM import completed successfully: $kind '$name' ($pkgId)."
+    Set-Progress 100 'Imported into SCCM'; Set-Phase 'Done'
+    return $plan
+}
+
 # ---------- main run ----------
 function Invoke-MediaRefresh {
     param([Parameter(Mandatory)][pscustomobject]$Options)
@@ -2063,10 +2256,25 @@ function Invoke-MediaRefresh {
         }
         return (Invoke-MountCleanup -Root $cleanRoot -DryRun:$dry)
     }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'SccmConnect') {
+        $srv = ([string](Get-ProfileValue $Options 'SccmSiteServer' '')).Trim()
+        if (-not $srv) { throw 'Enter the site server name on the SCCM tab.' }
+        Set-Phase -OsName 'SCCM' -Phase 'Connecting'
+        $r = Connect-SccmSite -SiteServer $srv
+        Set-Phase 'Done'; $script:LastResult = $r; return $r
+    }
     $name = [string]$Options.OsName
     if (-not $name) { throw 'Select an operating system.' }
     $definition = $script:OsDefinitions[$name]
     if (-not $definition) { throw "Unknown OS profile '$name'." }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'SccmImport') {
+        $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
+        $dry = [bool](Get-ProfileValue $Options 'DryRun' $true)
+        if (-not $dry) { $script:LogFile = Join-Path $paths.Logs ("SccmImport_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss')) }
+        Write-Log "WimForge v$($script:ToolVersion): SCCM import for $name$(if ($dry) { ' (check only)' })"
+        $r = Invoke-SccmImport -Options $Options -Definition $definition -Paths $paths -DryRun:$dry
+        $script:LastResult = $r; return $r
+    }
     if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Download') {
         # Step 5: acquisition-layer run instead of a servicing run. Everything below this branch (mount/service/verify)
         # is untouched and only reached when Mode is absent or 'Service'.
@@ -2276,6 +2484,9 @@ function Invoke-MediaRefresh {
             if ($changeLogPaths) {
                 foreach ($f in @($changeLogPaths.Html, $changeLogPaths.Csv)) { Copy-Item -LiteralPath $f -Destination $paths.NewWim -Force -ErrorAction SilentlyContinue }
             }
+            # The record the SCCM import works from (step 7): what this run produced and whether it passed.
+            $runBuild = if ($script:VerifyBuildAfter) { $script:VerifyBuildAfter } else { $script:BuildBefore }
+            [void](Save-RunResult -Paths $paths -OsName $name -Build $runBuild -Gate $gate -Install $finalInstall -Media $mediaFolder -ChangeLog $(if ($changeLogPaths) { $changeLogPaths.Html } else { '' }))
         }
         Set-Progress 100 'Completed successfully'
         Set-Phase 'Done'
@@ -2319,6 +2530,26 @@ function Invoke-MediaRefresh {
     <TextBlock x:Name="AppsSource" Grid.Row="2" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/>
     <ListBox x:Name="AppList" Grid.Row="3" SelectionMode="Multiple" Margin="0,8,0,0"/>
    </Grid></TabItem>
+   <TabItem Header="SCCM"><ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="18">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TextBlock Grid.Row="0" Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,0,0,14" Text="Imports the latest finished run of the selected operating system into Configuration Manager: copies it into a new sub-folder of the content source folder on this server, creates the OS image (or OS upgrade package) from that folder's UNC path, and distributes it. An image whose validation gate FAILED is never imported; an existing image with the same name is never changed (the new one gets a number). Needs the Configuration Manager console on this machine."/>
+    <TextBlock Grid.Row="1" Text="Site server" VerticalAlignment="Center"/>
+    <DockPanel Grid.Row="1" Grid.Column="1"><Button x:Name="SccmConnectButton" DockPanel.Dock="Right" Content="Connect" Margin="8,0,0,0" Padding="14,3" ToolTip="Checks the console module and the site, reads the site code and lists the distribution points and groups"/><TextBox x:Name="SccmSiteServer" Height="28" Padding="4"/></DockPanel>
+    <TextBlock x:Name="SccmSiteInfo" Grid.Row="2" Grid.Column="1" Margin="0,4,0,10" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="Not connected. Connect reads the site code and lists the distribution points and groups."/>
+    <TextBlock Grid.Row="3" Text="Distribute to" VerticalAlignment="Top" Margin="0,4,0,0"/>
+    <StackPanel Grid.Row="3" Grid.Column="1"><StackPanel Orientation="Horizontal"><RadioButton x:Name="SccmTargetDP" Content="Distribution point" IsChecked="True" Margin="0,0,18,0"/><RadioButton x:Name="SccmTargetGroup" Content="Distribution point group"/></StackPanel>
+     <DockPanel Margin="0,6,0,0"><ComboBox x:Name="SccmTargetList" DockPanel.Dock="Right" Width="230" Height="28" Margin="8,0,0,0" ToolTip="Filled by Connect; picking one copies it into the box"/><TextBox x:Name="SccmTarget" Height="28" Padding="4" ToolTip="Distribution point server name (FQDN) or distribution point group name"/></DockPanel></StackPanel>
+    <TextBlock Grid.Row="4" Text="Content source folder" VerticalAlignment="Center" Margin="0,14,0,0"/>
+    <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,14,0,0"><Button x:Name="SccmBrowseButton" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0" Padding="14,3"/><TextBox x:Name="SccmContentSource" Height="28" Padding="4" ToolTip="A folder on this server inside a shared folder; each import creates a sub-folder named after the image"/></DockPanel>
+    <TextBlock x:Name="SccmUncPreview" Grid.Row="5" Grid.Column="1" Margin="0,4,0,10" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/>
+    <TextBlock Grid.Row="6" Text="Image name" VerticalAlignment="Center"/>
+    <DockPanel Grid.Row="6" Grid.Column="1"><Button x:Name="SccmNameResetButton" DockPanel.Dock="Right" Content="Reset" Margin="8,0,0,0" Padding="14,3" ToolTip="Back to the OS name with the month (yyyyMM)"/><TextBox x:Name="SccmImageName" Height="28" Padding="4" MaxLength="50"/></DockPanel>
+    <TextBlock Grid.Row="7" Text="Package type" VerticalAlignment="Center" Margin="0,12,0,0"/>
+    <ComboBox x:Name="SccmPackageType" Grid.Row="7" Grid.Column="1" Width="260" Height="28" HorizontalAlignment="Left" Margin="0,12,0,0"><ComboBoxItem Content="Full OS image" Tag="Image" IsSelected="True"/><ComboBoxItem Content="Upgrade package (needs the media folder)" Tag="Upgrade"/></ComboBox>
+    <CheckBox x:Name="ChkSccmAutoImport" Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" IsChecked="False" Content="Import after the run finishes (no confirmation; only when the run succeeds and its validation gate did not fail)"/>
+    <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,14,0,0"><Button x:Name="SccmImportButton" Content="Import into SCCM..." HorizontalAlignment="Left" Padding="16,5" ToolTip="Checks everything first and shows what it will do; nothing changes until you confirm"/><TextBlock x:Name="SccmLastRun" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/></StackPanel>
+   </Grid></ScrollViewer></TabItem>
    <TabItem Header="Log"><RichTextBox x:Name="LogBox" Margin="12" IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="{DynamicResource WF.LogBg}" Foreground="{DynamicResource WF.LogText}"><FlowDocument PagePadding="4"><Paragraph Margin="0"/></FlowDocument></RichTextBox></TabItem>
    <TabItem Header="Instructions"><Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <DockPanel Margin="0,0,0,8"><Button x:Name="ReloadInstructionsButton" DockPanel.Dock="Right" Content="Reload" Padding="14,3" ToolTip="Read INSTRUCTIONS.md again, for example after editing it"/><TextBlock x:Name="InstructionsSource" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource WF.SubtleText}"/></DockPanel>
@@ -2343,7 +2574,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -2372,6 +2603,14 @@ $script:ThemedStyleXaml = @'
     <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"/></StackPanel>
    <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource WF.Accent}"/></Trigger>
     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Box" Property="Background" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Mark" Property="Visibility" Value="Visible"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="RadioButton"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="RadioButton"><StackPanel Orientation="Horizontal" Background="Transparent">
+    <Grid Width="16" Height="16" VerticalAlignment="Center"><Ellipse x:Name="Ring" Fill="{DynamicResource WF.ControlBg}" Stroke="{DynamicResource WF.SubtleText}" StrokeThickness="1"/><Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource WF.Accent}" Visibility="Collapsed"/></Grid>
+    <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"/></StackPanel>
+   <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource WF.Accent}"/></Trigger>
+    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Dot" Property="Visibility" Value="Visible"/></Trigger>
     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
  </Setter.Value></Setter></Style>
  <Style TargetType="ProgressBar"><Setter Property="Background" Value="{DynamicResource WF.ControlBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.Accent}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/></Style>
@@ -2623,6 +2862,7 @@ function Set-OsSettings {
         Write-Log "Settings for $($def.Name) loaded from $($saved.File)"
     } else { Set-DefaultLanguages }
     Update-AppList -Ticked $(if ($saved) { @($saved.RemoveApps) } else { @() })
+    Set-SccmOsValues $(if ($saved) { $saved.Sccm } else { $null })
 }
 function Get-SelectedSettings {
     $opts = @{}
@@ -2656,12 +2896,65 @@ function Update-AppList {
     foreach ($item in $script:AppList.Items) { $item.IsSelected = (@($Ticked) -contains [string]$item.Tag) }
     $script:AppsSource.Text = if ($inv) { "$(@($inv.Apps).Count) provisioned app(s) in $($inv.Source), index $($inv.Index) ($($inv.ImageName), $($inv.Version)); read $($inv.Read)." } else { 'No app list for this OS yet: run a preflight, or press Read apps from the ISO.' }
 }
+# ---- SCCM tab (step 7) ----
+$script:SccmLists = $null        # distribution points and groups from the last Connect
+$script:ServerShares = $null     # this server's shares, read once for the UNC preview
+$script:SccmSourceServer = $env:COMPUTERNAME
+function Get-SccmAutoName { $os = [string]$script:OsCombo.SelectedItem; if ($os) { return (Get-SccmImageName -OsName $os) } else { return '' } }
+function Get-SccmPackageTypeTag { if ($script:SccmPackageType.SelectedItem) { return [string]$script:SccmPackageType.SelectedItem.Tag } else { return 'Image' } }
+function Set-SccmPackageType {
+    param([string]$Tag)
+    $pick = @($script:SccmPackageType.Items | Where-Object { [string]$_.Tag -eq $Tag }) | Select-Object -First 1
+    $script:SccmPackageType.SelectedItem = if ($pick) { $pick } else { $script:SccmPackageType.Items[0] }
+}
+function Update-SccmTargetList {
+    $script:SccmTargetList.Items.Clear()
+    if (-not $script:SccmLists) { return }
+    $names = if ([bool]$script:SccmTargetGroup.IsChecked) { @($script:SccmLists.Groups) } else { @($script:SccmLists.DPs) }
+    foreach ($n in $names) { [void]$script:SccmTargetList.Items.Add([string]$n) }
+}
+function Update-SccmUncPreview {
+    $p = ([string]$script:SccmContentSource.Text).Trim()
+    $warn = $false
+    $script:SccmUncPreview.Text = if (-not $p) { 'Choose a folder on this server inside a shared folder; each import creates a sub-folder named after the image.' }
+    else {
+        try {
+            if (-not $p.StartsWith('\\') -and $null -eq $script:ServerShares) { $script:ServerShares = @(Get-ServerShares) }
+            $unc = ConvertTo-SccmUncPath -LocalPath $p -Server $script:SccmSourceServer -Shares $(if ($p.StartsWith('\\')) { @() } else { @($script:ServerShares) })
+            "Configuration Manager imports from $unc\<image name>"
+        } catch { $warn = $true; $_.Exception.Message }
+    }
+    $script:SccmUncPreview.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, $(if ($warn) { 'WF.WarnText' } else { 'WF.SubtleText' }))
+}
+function Update-SccmLastRun {
+    # What "Import into SCCM" would import for the selected OS: the latest finished run's record in its NEWWIM folder.
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
+    if (-not $def) { $script:SccmLastRun.Text = ''; return }
+    $r = Read-RunResult -NewWim ([System.IO.Path]::Combine((Get-OsRootPath -Root ([string]$script:RootText.Text).Trim() -Definition $def), 'NEWWIM'))
+    $failed = $r -and $r.Gate -eq 'FAILED'
+    $script:SccmLastRun.Text = if (-not $r) { "No finished run yet for $($def.Name); run one first." }
+        else { "Latest run: build $($r.Build), validation gate $($r.Gate), finished $($r.Finished)$(if ($r.Media) { ', with the media folder' })$(if ($failed) { ' - it will not be imported.' })" }
+    $script:SccmLastRun.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, $(if ($failed) { 'WF.WarnText' } else { 'WF.SubtleText' }))
+}
+function Set-SccmOsValues {
+    # The selected OS's saved SCCM values; the image name follows the OS (name + yyyyMM) unless one was typed and saved.
+    param($Saved)
+    $script:SccmContentSource.Text = if ($Saved -and $Saved.ContentSource) { $Saved.ContentSource } else { '' }
+    Set-SccmPackageType $(if ($Saved -and $Saved.PackageType) { $Saved.PackageType } else { 'Image' })
+    $script:SccmImageName.Text = if ($Saved -and $Saved.ImageName) { $Saved.ImageName } else { Get-SccmAutoName }
+    Update-SccmUncPreview; Update-SccmLastRun
+}
+function Get-SccmSelected {
+    $name = ([string]$script:SccmImageName.Text).Trim()
+    return @{ ContentSource = ([string]$script:SccmContentSource.Text).Trim(); PackageType = (Get-SccmPackageTypeTag); ImageName = $(if ($name -and $name -ne (Get-SccmAutoName)) { $name } else { '' }) }
+}
 function Save-CurrentOsSettings {
     $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
     if (-not $def) { return $null }
     $sel = Get-SelectedSettings
-    $file = Save-OsSettings -Directory $script:SettingsDir -Definition $def -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps
-    Save-GeneralSettings -Directory $script:SettingsDir -Root ([string]$script:RootText.Text)
+    $file = Save-OsSettings -Directory $script:SettingsDir -Definition $def -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps -Sccm (Get-SccmSelected)
+    Save-GeneralSettings -Directory $script:SettingsDir -Root ([string]$script:RootText.Text) -SccmSiteServer ([string]$script:SccmSiteServer.Text).Trim() `
+        -SccmTargetType $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }) -SccmTarget ([string]$script:SccmTarget.Text).Trim()
     Write-Log "Settings for $($def.Name) saved to $file ($(@($sel.Languages).Count) language(s), $(@($sel.RemoveApps).Count) app(s) to remove); repository root saved."
     return $file
 }
@@ -2702,6 +2995,8 @@ function Get-UiOptions {
         PreflightOnly = [bool]$script:ChkPreflight.IsChecked; Install = [bool]$script:ChkInstall.IsChecked; Boot = [bool]$script:ChkBoot.IsChecked; WinRE = [bool]$script:ChkWinRE.IsChecked
         Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = [bool]$script:ChkBuildIso.IsChecked; Media2023 = [bool]$script:ChkMedia2023.IsChecked
         RemoveApps = $(if ([bool]$script:ChkAppRemoval.IsChecked) { @(Get-TickedApps) } else { @() })
+        SccmSiteServer = ([string]$script:SccmSiteServer.Text).Trim(); SccmTargetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); SccmTarget = ([string]$script:SccmTarget.Text).Trim()
+        SccmContentSource = ([string]$script:SccmContentSource.Text).Trim(); SccmSourceServer = $script:SccmSourceServer; SccmPackageType = (Get-SccmPackageTypeTag); SccmImageName = ([string]$script:SccmImageName.Text).Trim()
         SSU = [bool]$script:ChkSSU.IsChecked; LCU = [bool]$script:ChkLCU.IsChecked; SafeOS = [bool]$script:ChkSafeOS.IsChecked
         NetCU = [bool]$script:ChkNetCU.IsChecked; SetupDU = [bool]$script:ChkSetupDU.IsChecked; NetFx3 = [bool]$script:ChkNetFx3.IsChecked
         Languages = $langs; ProfilesDir = $script:ProfilesDir
@@ -2736,6 +3031,9 @@ $script:ReloadProfilesButton.Add_Click({
 })
 $savedRoot = Read-GeneralSettings -Directory $script:SettingsDir
 if ($savedRoot) { $script:RootText.Text = $savedRoot; Write-Log "Repository root loaded from saved settings: $savedRoot" }
+$sccmSaved = Read-SccmGeneralSettings -Directory $script:SettingsDir
+$script:SccmSiteServer.Text = $sccmSaved.SiteServer; $script:SccmTarget.Text = $sccmSaved.Target
+if ($sccmSaved.TargetType -eq 'DPGroup') { $script:SccmTargetGroup.IsChecked = $true }
 Update-ProfileList
 Set-OsSettings
 Update-ProfileInfo
@@ -2836,6 +3134,40 @@ function Complete-BackgroundRun {
     $isApps = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Apps')
     # A preflight, a run or Read apps may have written the OS's app list: refresh the Apps tab, keeping the ticks.
     try { Update-AppList -Ticked @(Get-TickedApps) } catch { }
+    try { Update-SccmLastRun } catch { }
+    $resMode = if ($ok -and $res) { [string](Get-ProfileValue $res 'Mode' '') } else { '' }
+
+    # SCCM tab: Connect finished - fill the distribution point / group list.
+    if ($resMode -eq 'SccmConnect') {
+        $script:SccmLists = $res
+        $script:SccmSiteInfo.Text = "Connected to site $($res.SiteCode) on $($res.SiteServer): $(@($res.DPs).Count) distribution point(s), $(@($res.Groups).Count) group(s)."
+        Update-SccmTargetList
+        $script:Status.Text = 'Ready'; $script:Progress.Value = 0
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        Update-HeaderIdle
+        return
+    }
+    # SCCM tab: the check-only import pass finished - show exactly what would happen and ask.
+    if ($resMode -eq 'SccmImport' -and [bool]$res.DryRun -and -not $wasCancelled) {
+        $script:Status.Text = 'Ready'; $script:Progress.Value = 0
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        Update-HeaderIdle
+        $dup = if ($res.Name -ne $res.RequestedName) { "`n(A $($res.Kind) named '$($res.RequestedName)' already exists and is not changed.)" } else { '' }
+        $gateNote = if ($res.Gate -ne 'PASSED') { "`nNote: this image was not verified (validation gate: $($res.Gate))." } else { '' }
+        $msg = "Import into Configuration Manager:`n`n  $($res.Kind): $($res.Name)$dup`n  Build $($res.Build), validation gate $($res.Gate), run finished $($res.Finished)$gateNote`n`n  Copy ($($res.SizeGB) GB): $($res.Content)`n    to $($res.DestinationLocal)`n  Import from: $($res.ImportPath)`n  Site $($res.SiteCode) on $($res.SiteServer)`n  Distribute to $(if ($res.TargetIsGroup) { 'distribution point group' } else { 'distribution point' }): $($res.Target)`n`nImport now?"
+        if ([System.Windows.MessageBox]::Show($msg, 'WimForge - SCCM import', 'YesNo', 'Question') -eq 'Yes' -and $script:PendingSccmOptions) {
+            $go = $script:PendingSccmOptions; $go | Add-Member -NotePropertyName DryRun -NotePropertyValue $false -Force
+            # the confirmed name, so a duplicate that appears meanwhile cannot change what was shown
+            $go | Add-Member -NotePropertyName SccmImageName -NotePropertyValue $res.Name -Force
+            $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+            try { Start-BackgroundRun -Options $go }
+            catch {
+                $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+                [System.Windows.MessageBox]::Show("Could not start the import: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+            }
+        }
+        return
+    }
 
     # Tools > Cleanup Mountpoints: the check-only pass finished. Show what it found and ask before discarding anything.
     if ($isCleanup -and [bool]$res.DryRun -and -not $wasCancelled) {
@@ -2899,6 +3231,22 @@ function Complete-BackgroundRun {
     if ($ok) {
         $script:Status.Text = 'Done'; $script:Progress.Value = 100
         if ($script:HeaderPhase) { $script:HeaderPhase.Text = 'Done' }
+        if ($resMode -eq 'SccmImport') {
+            [System.Windows.MessageBox]::Show("Imported into Configuration Manager:`n`n  $($res.Kind) '$($res.Name)' - package $($res.PackageId)`n  from $($res.ImportPath)`n`nContent distribution to $($res.Target) has started; the console shows its progress (Monitoring > Distribution Status).", 'WimForge - SCCM import', 'OK', 'Information') | Out-Null
+            Update-HeaderIdle
+            return
+        }
+        # A servicing run finished and "Import after the run finishes" is ticked: import straight away, without a dialog
+        # (the engine refuses an image whose validation gate FAILED).
+        if ($resMode -eq '' -and $res -and -not [bool](Get-ProfileValue $res 'Preflight' $false) -and (Get-ProfileValue $res 'Install' $null) -and [bool]$script:ChkSccmAutoImport.IsChecked) {
+            if ([string](Get-ProfileValue $res 'Gate' '') -eq 'FAILED') {
+                Add-LogText '[WARN] Import after the run finishes is ticked, but the validation gate FAILED, so the image is not imported.'
+            } else {
+                Add-LogText '[INFO] The run finished; starting the SCCM import (Import after the run finishes is ticked).'
+                Start-SccmBackground -Mode 'SccmImport' -DryRun $false
+                return
+            }
+        }
         if ($isApps) {
             [System.Windows.MessageBox]::Show("$($res.Count) provisioned app(s) read from $($res.Source), index $($res.Index) ($($res.ImageName)).`n`nTick the apps to remove on the Apps tab, then press Save settings.", 'WimForge - Apps', 'OK', 'Information') | Out-Null
             Update-HeaderIdle
@@ -3013,6 +3361,37 @@ $script:AcquirePatchesButton.Add_Click({
 $script:ToolsButton.Add_Click({
     $menu = $script:ToolsButton.ContextMenu
     $menu.PlacementTarget = $script:ToolsButton; $menu.Placement = 'Bottom'; $menu.IsOpen = $true
+})
+function Start-SccmBackground {
+    # Connect / check / import on the background runspace, like the other long operations.
+    param([string]$Mode, [bool]$DryRun = $true)
+    if (-not $script:RunButton.IsEnabled) { return }
+    if (-not $script:EngineText) { [System.Windows.MessageBox]::Show('This needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null; return }
+    $opts = Get-UiOptions
+    $opts | Add-Member -NotePropertyName Mode -NotePropertyValue $Mode -Force
+    $opts | Add-Member -NotePropertyName DryRun -NotePropertyValue $DryRun -Force
+    if ($Mode -eq 'SccmImport') { $script:PendingSccmOptions = $opts }
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+    }
+}
+$script:PendingSccmOptions = $null
+$script:SccmConnectButton.Add_Click({ Start-SccmBackground -Mode 'SccmConnect' })
+$script:SccmImportButton.Add_Click({ Start-SccmBackground -Mode 'SccmImport' -DryRun $true })
+$script:SccmTargetDP.Add_Checked({ Update-SccmTargetList }); $script:SccmTargetGroup.Add_Checked({ Update-SccmTargetList })
+$script:SccmTargetList.Add_SelectionChanged({ if ($script:SccmTargetList.SelectedItem) { $script:SccmTarget.Text = [string]$script:SccmTargetList.SelectedItem } })
+$script:SccmContentSource.Add_LostFocus({ Update-SccmUncPreview })
+$script:SccmNameResetButton.Add_Click({ $script:SccmImageName.Text = Get-SccmAutoName })
+$script:SccmBrowseButton.Add_Click({
+    Add-Type -AssemblyName System.Windows.Forms
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Content source folder for the SCCM import (a folder on this server inside a shared folder)'
+    if ($script:SccmContentSource.Text -and (Test-Path -LiteralPath $script:SccmContentSource.Text)) { $dlg.SelectedPath = $script:SccmContentSource.Text }
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:SccmContentSource.Text = $dlg.SelectedPath; Update-SccmUncPreview }
 })
 $script:ReadAppsButton.Add_Click({
     # Apps tab: read the selected edition's provisioned apps from the OS ISO on the background runspace (read-only).

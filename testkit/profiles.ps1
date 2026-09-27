@@ -306,6 +306,32 @@ $w11def = [pscustomobject]@{ Folder = 'Win11_Enterprise_24H2'; AltFolders = @('W
 New-Item -ItemType Directory -Force (Join-Path $tmp 'apps14b\Win11Enterprise_24H2') | Out-Null
 Check 'Get-OsRootPath uses an accepted alternative folder name that exists, and never throws for a missing drive' ((Get-OsRootPath -Root (Join-Path $tmp 'apps14b') -Definition $w11def) -like '*\Win11Enterprise_24H2' -and (Get-OsRootPath -Root 'Q:\nowhere' -Definition $w11def) -eq 'Q:\nowhere\Win11_Enterprise_24H2')
 
+Write-Host "`n=== P15 SCCM import: names, UNC paths, the run record, saved values (TODO step 7) ==="
+Check 'image name = OS name + yyyyMM' ((Get-SccmImageName -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Date ([datetime]'2026-09-27')) -eq 'Windows 10 Enterprise LTSC 2021 (KMS) 202609')
+Check 'a free name is kept; a taken one (any case) gets (2), then (3)' ((Get-SccmUniqueName -Name 'Win 202609' -Existing @('Other')) -eq 'Win 202609' -and (Get-SccmUniqueName -Name 'Win 202609' -Existing @('WIN 202609')) -eq 'Win 202609 (2)' -and (Get-SccmUniqueName -Name 'Win 202609' -Existing @('Win 202609', 'Win 202609 (2)')) -eq 'Win 202609 (3)')
+$threw = $false; try { Get-SccmUniqueName -Name ('x' * 49) -Existing @('x' * 49) } catch { $threw = $true; $m15 = $_.Exception.Message }
+Check 'a name over 50 characters (after the suffix) is refused with the reason' ($threw -and $m15 -like '*Configuration Manager allows 50*')
+$sh15 = @([pscustomobject]@{ Name = 'Sources'; Path = 'F:\Sources' }, [pscustomobject]@{ Name = 'OSD'; Path = 'F:\Sources\OSD\' }, [pscustomobject]@{ Name = 'FRoot'; Path = 'F:\' })
+Check 'UNC path: the longest share that contains the folder wins' ((ConvertTo-SccmUncPath -LocalPath 'F:\Sources\OSD\Images\' -Server 'BUILD01' -Shares $sh15) -eq '\\BUILD01\OSD\Images' -and (ConvertTo-SccmUncPath -LocalPath 'F:\Sources\Drivers' -Server 'BUILD01' -Shares $sh15) -eq '\\BUILD01\Sources\Drivers' -and (ConvertTo-SccmUncPath -LocalPath 'F:\Other' -Server 'BUILD01' -Shares $sh15) -eq '\\BUILD01\FRoot\Other')
+Check 'UNC path: the share folder itself, a folder name that only starts like a share, and a UNC typed in' ((ConvertTo-SccmUncPath -LocalPath 'F:\Sources' -Server 'B' -Shares $sh15[0..1]) -eq '\\B\Sources' -and (ConvertTo-SccmUncPath -LocalPath '\\B\OSD\X\' -Server 'B' -Shares @()) -eq '\\B\OSD\X')
+$threw = $false; try { ConvertTo-SccmUncPath -LocalPath 'G:\SourcesX' -Server 'B' -Shares $sh15[0..1] } catch { $threw = $true; $m15 = $_.Exception.Message }
+Check 'UNC path: a folder outside every share is refused with what to do' ($threw -and $m15 -like '*not inside a shared folder on this server*')
+$threw = $false; try { ConvertTo-SccmUncPath -LocalPath 'F:\SourcesX\Y' -Server 'B' -Shares $sh15[0..1] } catch { $threw = $true }
+Check 'UNC path: F:\SourcesX is not inside the F:\Sources share' $threw
+$nw15 = Join-Path $tmp 'sccm15\NEWWIM'; New-Item -ItemType Directory -Force $nw15 | Out-Null
+Check 'no run record reads as none' ($null -eq (Read-RunResult -NewWim $nw15))
+[void](Save-RunResult -Paths @{ NewWim = $nw15 } -OsName 'KMS' -Build '10.0.19044.6456' -Gate 'PASSED' -Install "$nw15\install.wim" -Media "$nw15\Media" -ChangeLog "$tmp\LOGS\ChangeLog_x.html")
+$rr15 = Read-RunResult -NewWim $nw15
+Check 'the run record keeps build, gate, outputs and change log' ($rr15.Build -eq '10.0.19044.6456' -and $rr15.Gate -eq 'PASSED' -and $rr15.Install -like '*\install.wim' -and $rr15.Media -like '*\Media' -and $rr15.ChangeLog -like '*ChangeLog_x.html' -and $rr15.Finished)
+$gs15 = Join-Path $tmp 'sccm15\Settings'
+Save-GeneralSettings -Directory $gs15 -Root 'F:\mediaRefresh' -ColorScheme 'Modern Sysadmin'
+Save-GeneralSettings -Directory $gs15 -SccmSiteServer 'cm01.contoso.com' -SccmTargetType 'DPGroup' -SccmTarget 'All DPs'
+$sg15 = Read-SccmGeneralSettings -Directory $gs15
+Check 'SCCM site server and target are saved in General.json without losing the root or the colour scheme' ($sg15.SiteServer -eq 'cm01.contoso.com' -and $sg15.TargetType -eq 'DPGroup' -and $sg15.Target -eq 'All DPs' -and (Read-GeneralSettings -Directory $gs15) -eq 'F:\mediaRefresh' -and (Read-ColorSchemeSetting -Directory $gs15) -eq 'Modern Sysadmin')
+[void](Save-OsSettings -Directory $gs15 -Definition $kms -Options @{ SccmAutoImport = $true } -Sccm @{ ContentSource = 'F:\Sources\OSD'; PackageType = 'Upgrade'; ImageName = 'KMS custom' })
+$os15 = Read-OsSettings -Directory $gs15 -Definition $kms -LanguageList $builtLangs
+Check 'per OS: content source, package type, a hand-typed image name and Import after the run are saved' ($os15.Sccm.ContentSource -eq 'F:\Sources\OSD' -and $os15.Sccm.PackageType -eq 'Upgrade' -and $os15.Sccm.ImageName -eq 'KMS custom' -and $os15.Options['SccmAutoImport'] -eq $true)
+
 $guide13 = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
 if (Test-Path $guide13) {
     $gb13 = @(ConvertFrom-MarkdownBlocks ([System.IO.File]::ReadAllText($guide13)))

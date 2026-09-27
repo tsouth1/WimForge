@@ -535,4 +535,64 @@ Check 'Windows Server: ticked apps are ignored with a WARN' ([bool]($logs18 -mat
 $script:ImageCount = 1
 Set-Item function:Get-AppxProvisionedPackage $gap18; Set-Item function:Get-WindowsImage $gwi18
 
+Write-Host "`n=== E19 SCCM import: check, copy, import, distribute (TODO step 7; Configuration Manager mocked) ==="
+# A real run (E18) writes the run record the import works from
+$rrW11 = Read-RunResult -NewWim (Join-Path $base 'Win11Enterprise_24H2\NEWWIM')
+Check 'a finished run writes NEWWIM\RunResult.json with its build, gate and install.wim' ($null -ne $rrW11 -and $rrW11.Install -like '*\NEWWIM\install.wim' -and $rrW11.Gate -in @('PASSED', 'FAILED'))
+# The site, mocked: module, site code, site drive and the cmdlets the import uses
+$script:Cm = @{ Images = [System.Collections.Generic.List[string]]::new(); Installers = [System.Collections.Generic.List[string]]::new(); Calls = [System.Collections.Generic.List[string]]::new() }
+function Import-SccmModule { }
+function Get-SccmSiteCode { param($SiteServer) 'PS1' }
+function Invoke-InSccmSite { param($SiteCode, $SiteServer, [scriptblock]$Script) & $Script }
+function Get-CMDistributionPoint { param([switch]$AllSite) @([pscustomobject]@{ NetworkOSPath = '\\dp01.contoso.com' }, [pscustomobject]@{ NetworkOSPath = '\\dp02.contoso.com' }) }
+function Get-CMDistributionPointGroup { @([pscustomobject]@{ Name = 'All DPs' }) }
+function Get-CMOperatingSystemImage { param($Name) @($script:Cm.Images | Where-Object { $_ -like $Name } | ForEach-Object { [pscustomobject]@{ Name = $_ } }) }
+function Get-CMOperatingSystemInstaller { param($Name) @($script:Cm.Installers | Where-Object { $_ -like $Name } | ForEach-Object { [pscustomobject]@{ Name = $_ } }) }
+function New-CMOperatingSystemImage { param($Name, $Path, $Description, $Version) $script:Cm.Calls.Add("NewImage|$Name|$Path|$Version"); $script:Cm.Images.Add($Name); [pscustomobject]@{ PackageID = 'PS100123'; Name = $Name } }
+function New-CMOperatingSystemInstaller { param($Name, $Path, $Description, $Version) $script:Cm.Calls.Add("NewInstaller|$Name|$Path"); $script:Cm.Installers.Add($Name); [pscustomobject]@{ PackageID = 'PS100124'; Name = $Name } }
+function Start-CMContentDistribution { param($OperatingSystemImageId, $OperatingSystemInstallerId, $DistributionPointName, $DistributionPointGroupName) $script:Cm.Calls.Add("Distribute|img=$OperatingSystemImageId|inst=$OperatingSystemInstallerId|dp=$DistributionPointName|group=$DistributionPointGroupName") }
+$shareRoot = Join-Path $base '_share'; $contentRoot = Join-Path $shareRoot 'OSD\Images'; New-Item -ItemType Directory -Force $contentRoot | Out-Null
+function Get-ServerShares { @([pscustomobject]@{ Name = 'Sources'; Path = $shareRoot }) }
+$con19 = Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'SccmConnect'; SccmSiteServer = 'cm01.contoso.com'; Root = $base; OsName = '' })
+Check 'Connect: site code, distribution points (without \\) and groups' ($con19.SiteCode -eq 'PS1' -and (@($con19.DPs) -join ',') -eq 'dp01.contoso.com,dp02.contoso.com' -and (@($con19.Groups) -join ',') -eq 'All DPs')
+# The KMS run to import: an install.wim and a media folder with a passed gate
+$nw19 = Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\NEWWIM'; New-File (Join-Path $nw19 'install.wim') 'kms-wim'; New-File (Join-Path $nw19 'Media\setup.exe') 'setup'; New-File (Join-Path $nw19 'Media\sources\install.wim') 'kms-wim'
+[void](Save-RunResult -Paths @{ NewWim = $nw19 } -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Build '10.0.19044.6456' -Gate 'PASSED' -Install (Join-Path $nw19 'install.wim') -Media (Join-Path $nw19 'Media') -ChangeLog 'C:\x\ChangeLog_KMS.html')
+function Opts19([hashtable]$o = @{}) {
+    $d = [ordered]@{ Mode = 'SccmImport'; DryRun = $true; OsName = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Root = $base; SccmSiteServer = 'cm01.contoso.com'; SccmTargetType = 'DP'; SccmTarget = 'dp01.contoso.com'
+        SccmContentSource = $contentRoot; SccmSourceServer = 'BUILD01'; SccmPackageType = 'Image'; SccmImageName = 'Windows 10 Enterprise LTSC 2021 (KMS) 202609' }
+    foreach ($k in $o.Keys) { $d[$k] = $o[$k] }; [pscustomobject]$d }
+$script:Cm.Images.Add('Windows 10 Enterprise LTSC 2021 (KMS) 202609')   # already imported earlier this month
+$dry19 = Invoke-MediaRefresh (Opts19)
+Check 'check only: the plan names the next free name, the UNC import path, size, build and gate' ($dry19.DryRun -and $dry19.Name -eq 'Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)' -and $dry19.ImportPath -eq '\\BUILD01\Sources\OSD\Images\Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)\install.wim' -and $dry19.Build -eq '10.0.19044.6456' -and $dry19.Gate -eq 'PASSED' -and $dry19.SiteCode -eq 'PS1')
+Check 'check only: nothing is copied, imported or distributed' ($script:Cm.Calls.Count -eq 0 -and @(Get-ChildItem $contentRoot).Count -eq 0)
+Check 'the description (127 characters at most) names the build, gate and change log' ($dry19.Description.Length -le 127 -and $dry19.Description -like '*build 10.0.19044.6456; gate PASSED; change log ChangeLog_KMS.html')
+$real19 = Invoke-MediaRefresh (Opts19 @{ DryRun = $false; SccmImageName = $dry19.Name })
+$dest19 = Join-Path $contentRoot 'Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)'
+Check 'import: install.wim is copied into a new sub-folder named after the image' ((Get-Content -Raw (Join-Path $dest19 'install.wim')).Trim() -eq 'kms-wim')
+Check 'import: the OS image is created from the UNC path, with the build as its version' (($script:Cm.Calls | Where-Object { $_ -like 'NewImage|*' }) -eq "NewImage|Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)|\\BUILD01\Sources\OSD\Images\Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)\install.wim|10.0.19044.6456")
+Check 'import: content is distributed to the chosen distribution point by package ID' (($script:Cm.Calls | Where-Object { $_ -like 'Distribute|*' }) -eq 'Distribute|img=PS100123|inst=|dp=dp01.contoso.com|group=' -and $real19.PackageId -eq 'PS100123')
+Check 'import: logs to <OS folder>\LOGS\SccmImport_<time>.log' ($script:LogFile -like (Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\LOGS\SccmImport_*.log'))
+$script:LogFile = $null
+# Upgrade package to a distribution point group: the whole media folder
+$script:Cm.Calls.Clear()
+$up19 = Invoke-MediaRefresh (Opts19 @{ DryRun = $false; SccmPackageType = 'Upgrade'; SccmTargetType = 'DPGroup'; SccmTarget = 'All DPs'; SccmImageName = 'KMS upgrade 202609' })
+Check 'upgrade package: the media folder is copied, created as an OS upgrade package and sent to the group' ((Test-Path (Join-Path $contentRoot 'KMS upgrade 202609\setup.exe')) -and (Test-Path (Join-Path $contentRoot 'KMS upgrade 202609\sources\install.wim')) -and ($script:Cm.Calls -join ' / ') -eq 'NewInstaller|KMS upgrade 202609|\\BUILD01\Sources\OSD\Images\KMS upgrade 202609 / Distribute|img=|inst=PS100124|dp=|group=All DPs')
+$script:LogFile = $null
+# A folder that already exists gets a number; the name check is separate from the folder check
+New-Item -ItemType Directory -Force (Join-Path $contentRoot 'Fresh name') | Out-Null
+$dry19b = Invoke-MediaRefresh (Opts19 @{ SccmImageName = 'Fresh name' })
+Check 'an existing sub-folder of the same name is never reused: the copy goes to "... (2)"' ($dry19b.Name -eq 'Fresh name' -and $dry19b.DestinationLocal -like '*\Fresh name (2)')
+# Refusals
+function Test-Refused19($o, $like) { $t = $false; $m = ''; try { [void](Invoke-MediaRefresh $o) } catch { $t = $true; $m = $_.Exception.Message }; return ($t -and $m -like $like) }
+[void](Save-RunResult -Paths @{ NewWim = $nw19 } -OsName 'KMS' -Build '10.0.19044.6456' -Gate 'FAILED' -Install (Join-Path $nw19 'install.wim') -Media '' -ChangeLog '')
+$script:Cm.Calls.Clear()
+Check 'a run whose validation gate FAILED is refused, and nothing is copied or imported' ((Test-Refused19 (Opts19 @{ DryRun = $false; SccmImageName = 'Should not exist' }) 'Refused: *FAILED its validation gate*') -and $script:Cm.Calls.Count -eq 0 -and -not (Test-Path (Join-Path $contentRoot 'Should not exist')))
+[void](Save-RunResult -Paths @{ NewWim = $nw19 } -OsName 'KMS' -Build '10.0.19044.6456' -Gate 'PASSED' -Install (Join-Path $nw19 'install.wim') -Media '' -ChangeLog '')
+Check 'an upgrade package without a media folder is refused with what to do' (Test-Refused19 (Opts19 @{ SccmPackageType = 'Upgrade' }) "*Tick 'Create refreshed media folder'*")
+Check 'a content source outside every share is refused' (Test-Refused19 (Opts19 @{ SccmContentSource = $base }) '*not inside a shared folder*')
+Check 'an empty field is named' (Test-Refused19 (Opts19 @{ SccmTarget = '' }) 'Distribution point or group is empty*')
+Remove-Item (Join-Path $nw19 'RunResult.json') -Force
+Check 'no finished run: refused with what to do' (Test-Refused19 (Opts19) 'There is no finished run to import*')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

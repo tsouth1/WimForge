@@ -54,8 +54,11 @@ if ($wpf) {
     foreach ($n in $script:SettingOptionNames) { Set-Variable -Name "Chk$n" -Scope Script -Value $win.FindName("Chk$n") }
     $script:RootText = $win.FindName('RootText'); $script:LanguageList = $win.FindName('LanguageList')
     Check 'the Save settings and Reset to defaults buttons are in the window' ($null -ne $win.FindName('SaveSettingsButton') -and $null -ne $win.FindName('ResetSettingsButton'))
-    foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
-    foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings', 'Get-TickedApps', 'Update-AppList') {
+    foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource', 'SccmSiteServer', 'SccmSiteInfo', 'SccmTargetDP', 'SccmTargetGroup', 'SccmTargetList', 'SccmTarget', 'SccmContentSource', 'SccmUncPreview', 'SccmImageName', 'SccmPackageType', 'SccmLastRun') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
+    $script:SccmLists = $null; $script:SccmSourceServer = 'BUILD01'
+    $script:ServerShares = @([pscustomobject]@{ Name = 'Sources'; Path = 'F:\Sources' })   # not this PC's real shares
+    foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings', 'Get-TickedApps', 'Update-AppList',
+                    'Get-SccmAutoName', 'Get-SccmPackageTypeTag', 'Set-SccmPackageType', 'Update-SccmTargetList', 'Update-SccmUncPreview', 'Update-SccmLastRun', 'Set-SccmOsValues', 'Get-SccmSelected') {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $script:SettingsDir = Join-Path $PWD 'tst_settings'; if (Test-Path $script:SettingsDir) { Remove-Item -Recurse -Force $script:SettingsDir }
@@ -107,6 +110,36 @@ if ($wpf) {
     Check 'WPF Apps tab: Windows Server greys the list out and says why' (-not $script:AppList.IsEnabled -and -not $script:ReadAppsButton.IsEnabled -and $script:AppsSource.Text -like 'App removal is for client editions*')
     Remove-Item $saved11 -Force -ErrorAction SilentlyContinue
 
+    # SCCM tab (TODO step 7) on the real window
+    $auto = { param($os) "$os $((Get-Date).ToString('yyyyMM'))" }
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    Check 'WPF SCCM tab: the image name follows the selected OS (name + yyyyMM); Full OS image by default' ($script:SccmImageName.Text -eq (& $auto 'Windows 10 Enterprise LTSC 2021 (KMS)') -and (Get-SccmPackageTypeTag) -eq 'Image')
+    $script:SccmImageName.Text = 'KMS gold image'; Set-SccmPackageType 'Upgrade'; $script:SccmContentSource.Text = 'F:\Sources\OSD'
+    $script:SccmSiteServer.Text = 'cm01.contoso.com'; $script:SccmTargetGroup.IsChecked = $true; $script:SccmTarget.Text = 'All DPs'
+    $saved12 = Save-CurrentOsSettings
+    $script:OsCombo.SelectedItem = 'Windows 11 Enterprise 24H2'; Set-OsSettings
+    $w11Name = $script:SccmImageName.Text; $w11Type = Get-SccmPackageTypeTag
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    Check 'WPF SCCM tab: a typed name, the package type and the content folder are saved per OS; another OS keeps its own' ($w11Name -eq (& $auto 'Windows 11 Enterprise 24H2') -and $w11Type -eq 'Image' -and $script:SccmImageName.Text -eq 'KMS gold image' -and (Get-SccmPackageTypeTag) -eq 'Upgrade' -and $script:SccmContentSource.Text -eq 'F:\Sources\OSD')
+    $sg12 = Read-SccmGeneralSettings -Directory $script:SettingsDir
+    Check 'WPF SCCM tab: site server and distribution target are saved once for every OS' ($sg12.SiteServer -eq 'cm01.contoso.com' -and $sg12.TargetType -eq 'DPGroup' -and $sg12.Target -eq 'All DPs')
+    $script:SccmImageName.Text = (Get-SccmAutoName)
+    Check 'WPF SCCM tab: back to the automatic name, nothing typed is saved' ((Get-SccmSelected).ImageName -eq '')
+    Update-SccmUncPreview
+    $okPreview = $script:SccmUncPreview.Text
+    $script:SccmContentSource.Text = 'G:\Elsewhere'; Update-SccmUncPreview
+    Check 'WPF SCCM tab: the UNC preview shows the import path, or why the folder cannot be used' ($okPreview -eq 'Configuration Manager imports from \\BUILD01\Sources\OSD\<image name>' -and $script:SccmUncPreview.Text -like '*not inside a shared folder*')
+    $script:SccmLists = [pscustomobject]@{ DPs = @('dp01.contoso.com', 'dp02.contoso.com'); Groups = @('All DPs') }
+    $script:SccmTargetDP.IsChecked = $true; Update-SccmTargetList; $dps = @($script:SccmTargetList.Items) -join ','
+    $script:SccmTargetGroup.IsChecked = $true; Update-SccmTargetList; $grps = @($script:SccmTargetList.Items) -join ','
+    Check 'WPF SCCM tab: the pick list shows distribution points or groups, as chosen' ($dps -eq 'dp01.contoso.com,dp02.contoso.com' -and $grps -eq 'All DPs')
+    $nw12 = [System.IO.Path]::Combine($root11, $kmsDef.Folder, 'NEWWIM'); New-Item -ItemType Directory -Force $nw12 | Out-Null
+    Update-SccmLastRun; $none12 = $script:SccmLastRun.Text
+    [void](Save-RunResult -Paths @{ NewWim = $nw12 } -OsName 'KMS' -Build '10.0.19044.6456' -Gate 'FAILED' -Install 'x' -Media '' -ChangeLog '')
+    Update-SccmLastRun
+    Check 'WPF SCCM tab: the latest run line says what would be imported, and that a FAILED run will not be' ($none12 -like 'No finished run yet*' -and $script:SccmLastRun.Text -like 'Latest run: build 10.0.19044.6456, validation gate FAILED*will not be imported.')
+    Remove-Item $saved12 -Force -ErrorAction SilentlyContinue
+
     # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
     Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
@@ -127,7 +160,7 @@ if ($wpf) {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $tabNames = @(($win.FindName('LogBox').Parent.Parent.Items) | ForEach-Object { [string]$_.Header })
-    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Apps,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
+    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Apps,SCCM,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
     $script:InstructionsViewer = $win.FindName('InstructionsViewer'); $script:InstructionsSource = $win.FindName('InstructionsSource')
     $script:InstructionsPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
     if (Test-Path $script:InstructionsPath) {
