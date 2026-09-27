@@ -13,7 +13,10 @@ and optionally build a refreshed media folder and ISO for OS Upgrade
 Packages. It can also download the current LCU, .NET CU, Safe OS and Setup
 Dynamic Updates from the Microsoft Update Catalog (via the MSCatalogLTS
 module), with a dry-run preview before anything is downloaded.
-![WimForge Screenshot](wimforge.png)
+![WimForge Screenshot](images/WimForge.png)
+![WimForge Screenshot](images/Updates.png)
+![WimForge Screenshot](images/General.png)
+![WimForge Screenshot](images/lang.png)
 
 
 ## Files
