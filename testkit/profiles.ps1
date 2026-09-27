@@ -157,6 +157,9 @@ $iso = Join-Path $tmp 'os.iso'; $fsx = [System.IO.File]::Create($iso); $fsx.SetL
 $script:FreeGB = 500.0; $script:LogLines.Clear()
 Test-FreeSpace -Definition $defA -Paths $pp -SourceWim $wim -OsIsoPath $iso -Options ([pscustomobject]@{ BuildMedia=$true; BuildIso=$true })
 Check 'media + ISO add one ISO size each (12 + 4 + 4 = 20)' (@($script:LogLines | Where-Object { $_ -like '*needs about 20 GB*' }).Count -eq 1) ($script:LogLines -join ' | ')
+$script:LogLines.Clear()
+Test-FreeSpace -Definition $defA -Paths $pp -SourceWim $wim -OsIsoPath $iso -Options ([pscustomobject]@{ BuildMedia=$true; BuildIso=$true; Boot=$true; Media2023=$true })
+Check 'CA 2023 media + ISO alongside add two more ISO sizes (20 + 4 + 4 = 28)' (@($script:LogLines | Where-Object { $_ -like '*needs about 28 GB*' }).Count -eq 1) ($script:LogLines -join ' | ')
 $esd = Join-Path $tmp 'src\install.esd'; $fsx = [System.IO.File]::Create($esd); $fsx.SetLength(2GB); $fsx.Close(); $script:LogLines.Clear()
 Test-FreeSpace -Definition $defA -Paths $pp -SourceWim $esd -OsIsoPath $null -Options $opt
 Check 'ESD is treated as about 2.5x larger (2*2.5*3+6 = 21)' (@($script:LogLines | Where-Object { $_ -like '*needs about 21 GB*' }).Count -eq 1) ($script:LogLines -join ' | ')

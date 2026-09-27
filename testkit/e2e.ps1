@@ -391,4 +391,80 @@ Check 'an archive stamp already used in the same second gets a _2 folder' ((Test
 
 Check 'a servicing run calls the ISO check right after the stale-mount check' ($src -match "Clear-StaleMounts \`$paths\.Root\r?\n\s+Clear-StaleIsoMounts \`$paths\.ISO")
 
+Write-Host "`n=== E17 CA 2023 media alongside the standard media (Make2023BootableMedia.ps1 steps; Terry, 2026-09-27) ==="
+# boot.wim index 1 carries the CA 2023 boot files (EX); index 2 is the Setup image as in E16. Real boot files are signed
+# PE files; here the content says which certificate "signed" them and Get-EmbeddedSignerIssuer reads that.
+$gwi17 = ${function:Get-WindowsImage}; $mwi17 = ${function:Mount-WindowsImage}; $iso17 = ${function:Build-IsoFromMedia}; $sig17 = ${function:Get-EmbeddedSignerIssuer}
+$script:Ex17 = $true
+function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
+    if (-not $Mounted -and -not $Index -and $ImagePath -like '*boot*') { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Microsoft Windows Setup' }) }
+    & $gwi17 @PSBoundParameters }
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+    & $mwi17 @PSBoundParameters
+    if ($ImagePath -notlike '*boot.working.wim') { return }
+    New-File (Join-Path $Path 'Windows/Boot/EFI/boot.stl') 'stl'
+    if ($script:Ex17) {
+        New-File (Join-Path $Path 'Windows/Boot/EFI_EX/bootmgfw_EX.efi') "ex-bootmgfw idx$Index"; New-File (Join-Path $Path 'Windows/Boot/EFI_EX/bootmgr_EX.efi') 'ex-bootmgr'
+        New-File (Join-Path $Path 'Windows/Boot/FONTS_EX/chs_boot_EX.ttf') 'ex-font'; New-File (Join-Path $Path 'Windows/Boot/FONTS_EX/segmono_boot_EX.ttf') 'ex-font2'
+        New-File (Join-Path $Path 'Windows/Boot/DVD_EX/EFI/en-US/efisys_EX.bin') 'ex-efisys'
+    }
+    if ($Index -eq 2) { foreach ($p in 'sources/setup.exe', 'Windows/Boot/EFI/bootmgfw.efi', 'Windows/Boot/EFI/bootmgr.efi') { New-File (Join-Path $Path $p) "patched $(Split-Path $p -Leaf)" } } }
+$script:IsoCalls17 = [System.Collections.Generic.List[string]]::new()
+function Build-IsoFromMedia { param([string]$MediaFolder, [hashtable]$Paths, [string]$EfiBootFile = 'efisys.bin', [string]$NamePrefix = 'UpdatedMedia')
+    $script:IsoCalls17.Add("$(Split-Path $MediaFolder -Leaf)|$EfiBootFile|$NamePrefix"); return (Join-Path $Paths.NewWim "$NamePrefix.iso") }
+function Get-EmbeddedSignerIssuer { param([string]$Path) $c = (Get-Content -Raw -LiteralPath $Path -ErrorAction SilentlyContinue); if ($c -like 'ex-*') { 'CN=Windows UEFI CA 2023, O=Microsoft Corporation, C=US' } else { 'CN=Microsoft Windows Production PCA 2011' } }
+$os17 = Join-Path $isos 'os11'
+foreach ($p in 'sources/boot.wim', 'sources/setup.exe', 'efi/boot/bootx64.efi', 'bootmgr.efi', 'efi/microsoft/boot/efisys.bin', 'efi/microsoft/boot/fonts/chs_boot.ttf', 'boot/etfsboot.com') { New-File (Join-Path $os17 $p) 'orig' }
+$opts17 = @{ NetFx3 = $false; Boot = $true; BuildMedia = $true; BuildIso = $true; SetupDU = $false; WinRE = $false; Media2023 = $true }
+Reset-Test; $script:ChangeEvents = $null
+$logs17 = [System.Collections.Generic.List[string]]::new()
+$wl17 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs17.Add("[$Level] $Message") }
+$o17 = Opts 'Windows 11 Enterprise 24H2' @() $opts17; $o17 | Add-Member -NotePropertyName Media2023 -NotePropertyValue $true -Force
+Invoke-MediaRefresh $o17
+Set-Item function:Write-Log $wl17
+$nw17 = Join-Path $base 'Win11Enterprise_24H2\NEWWIM'; $std17 = Join-Path $nw17 'Media'; $ca17 = Join-Path $nw17 'Media_CA2023'
+$rd17 = { param($root, $rel) $p = Join-Path $root $rel; if (Test-Path -LiteralPath $p) { (Get-Content -Raw -LiteralPath $p).Trim() } else { '<missing>' } }
+Check 'the CA 2023 media is built alongside the standard media' ((Test-Path $std17) -and (Test-Path $ca17) -and $script:LastResult.Media2023 -eq $ca17 -and -not $script:LastResult.Media2023Error)
+Check 'CA 2023 boot manager: efi\boot\bootx64.efi <- bootmgfw_EX.efi (from boot.wim index 1); bootmgr.efi <- bootmgr_EX.efi' ((& $rd17 $ca17 'efi\boot\bootx64.efi') -eq 'ex-bootmgfw idx1' -and (& $rd17 $ca17 'bootmgr.efi') -eq 'ex-bootmgr')
+Check 'CA 2023 UEFI boot image and fonts: efisys_ex.bin added, FONTS_EX copied without _EX' ((& $rd17 $ca17 'efi\microsoft\boot\efisys_ex.bin') -eq 'ex-efisys' -and (& $rd17 $ca17 'efi\microsoft\boot\fonts\chs_boot.ttf') -eq 'ex-font' -and (& $rd17 $ca17 'efi\microsoft\boot\fonts\segmono_boot.ttf') -eq 'ex-font2')
+Check 'the CA 2023 media keeps everything else of the refreshed media (patched setup.exe, install.wim, boot.wim)' ((& $rd17 $ca17 'sources\setup.exe') -eq 'patched setup.exe' -and (Test-Path (Join-Path $ca17 'sources\install.wim')) -and (& $rd17 $ca17 'sources\boot.wim') -eq 'x')
+Check 'the standard media is unchanged: PCA 2011 boot manager from the patched boot.wim, no efisys_ex.bin, original fonts' ((& $rd17 $std17 'efi\boot\bootx64.efi') -eq 'patched bootmgfw.efi' -and (& $rd17 $std17 'efi\microsoft\boot\efisys_ex.bin') -eq '<missing>' -and (& $rd17 $std17 'efi\microsoft\boot\fonts\chs_boot.ttf') -eq 'orig')
+Check 'two ISOs: the standard one with efisys.bin, the CA 2023 one with efisys_ex.bin' (($script:IsoCalls17 -join ' / ') -eq 'Media|efisys.bin|UpdatedMedia / Media_CA2023|efisys_ex.bin|UpdatedMedia_CA2023' -and $script:LastResult.Iso2023 -like '*UpdatedMedia_CA2023.iso') ($script:IsoCalls17 -join ' / ')
+Check 'the CA 2023 boot manager signature is verified and logged' ([bool]($logs17 -match '^\[INFO\] VERIFY CA 2023 media: bootx64\.efi is signed by CN=Windows UEFI CA 2023') -and [bool]($logs17 -match 'Standard media: bootx64\.efi is signed by CN=Microsoft Windows Production PCA 2011'))
+$ev17 = @($script:ChangeEvents | Where-Object { $_.Category -eq 'Media CA 2023' } | ForEach-Object { $_.Item })
+Check 'the change log records each CA 2023 media change' ($ev17 -contains 'efi\boot\bootx64.efi' -and $ev17 -contains 'bootmgr.efi' -and $ev17 -contains 'efi\microsoft\boot\efisys_ex.bin' -and $ev17 -contains 'efi\microsoft\boot\fonts') ($ev17 -join ', ')
+# A boot manager that turns out not to be CA 2023 signed: reported, not shipped as CA 2023; the run and the standard ISO still succeed
+Reset-Test; $script:IsoCalls17.Clear()
+function Get-EmbeddedSignerIssuer { param([string]$Path) 'CN=Microsoft Windows Production PCA 2011' }
+Invoke-MediaRefresh $o17
+Check 'a CA 2023 boot manager with the wrong signer: error reported, no CA 2023 ISO, standard ISO still built' ($script:LastResult.Media2023Error -like '*not ''Windows UEFI CA 2023''*' -and $null -eq $script:LastResult.Media2023 -and ($script:IsoCalls17 -join ' / ') -eq 'Media|efisys.bin|UpdatedMedia') ($script:IsoCalls17 -join ' / ')
+# boot.wim without the EX files (LCU older than 2024-04)
+Reset-Test; $script:IsoCalls17.Clear(); $script:Ex17 = $false
+Invoke-MediaRefresh $o17
+Check 'no CA 2023 boot files in boot.wim: clear 2024-04 message, the run still completes' ($script:LastResult.Media2023Error -like '*2024-04 or later cumulative update*' -and $script:LastResult.Install -and $script:LastResult.Media)
+$script:Ex17 = $true
+# CA 2023 ticked without Patch boot.wim: skipped with a WARN, nothing saved from boot.wim
+Reset-Test; $script:IsoCalls17.Clear(); $logs17.Clear()
+function Write-Log { param($Message, $Level = 'INFO') $logs17.Add("[$Level] $Message") }
+$o17b = Opts 'Windows 11 Enterprise 24H2' @() ($opts17 + @{}); $o17b.Boot = $false; $o17b | Add-Member -NotePropertyName Media2023 -NotePropertyValue $true -Force
+Invoke-MediaRefresh $o17b
+Set-Item function:Write-Log $wl17
+Check 'CA 2023 without Patch boot.wim: skipped with a WARN, no Media_CA2023' ([bool]($logs17 -match '^\[WARN\] CA 2023 media is ticked, but it needs the media and Patch boot.wim') -and -not (Test-Path $ca17) -and $null -eq $script:LastResult.Media2023)
+# Patch boot.wim without CA 2023: the EX files are not even saved
+Reset-Test; $o17c = Opts 'Windows 11 Enterprise 24H2' @() $opts17
+Invoke-MediaRefresh $o17c
+Check 'without CA 2023 ticked, no CA 2023 files are saved and no Media_CA2023 is built' (-not (Test-Path (Join-Path $base 'Win11Enterprise_24H2\WORKING\bootfiles\CA2023')) -and -not (Test-Path $ca17))
+# ARM64 media: bootaa64.efi is the one replaced
+$arm17 = Join-Path $base '_arm17'; New-File (Join-Path $arm17 'efi\boot\bootaa64.efi') 'orig'
+$exd17 = Join-Path $base '_ex17'; foreach ($p in 'EFI_EX\bootmgfw_EX.efi', 'DVD_EX\EFI\en-US\efisys_EX.bin') { New-File (Join-Path $exd17 $p) 'ex' }
+$t17 = Set-Media2023BootFiles -Media $arm17 -ExFiles $exd17
+Check 'ARM64 media: bootaa64.efi is replaced, no bootx64.efi is added' ((Split-Path $t17 -Leaf) -eq 'bootaa64.efi' -and (& $rd17 $arm17 'efi\boot\bootaa64.efi') -eq 'ex' -and -not (Test-Path (Join-Path $arm17 'efi\boot\bootx64.efi')))
+Set-Item function:Get-WindowsImage $gwi17; Set-Item function:Mount-WindowsImage $mwi17; Set-Item function:Build-IsoFromMedia $iso17; Set-Item function:Get-EmbeddedSignerIssuer $sig17
+# The real signature reader on this PC's own boot files (Windows 11 and Server 2025 carry both)
+$exReal = 'C:\Windows\Boot\EFI_EX\bootmgfw_EX.efi'; $stdReal = 'C:\Windows\Boot\EFI\bootmgfw.efi'
+if ((Test-Path $exReal) -and (Test-Path $stdReal)) {
+    Check 'real files: the embedded signer tells CA 2023 and PCA 2011 boot managers apart' ((Get-EmbeddedSignerIssuer $exReal) -match 'Windows UEFI CA 2023' -and (Get-EmbeddedSignerIssuer $stdReal) -match 'Windows Production PCA 2011')
+} else { Write-Host 'SKIP  real boot manager signature check (no C:\Windows\Boot\EFI_EX on this PC)' }
+Check 'an unsigned or missing file gives an empty issuer, not an error' ((Get-EmbeddedSignerIssuer (Join-Path $arm17 'efi\boot\bootaa64.efi')) -eq '' -and (Get-EmbeddedSignerIssuer 'C:\no\such.efi') -eq '')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

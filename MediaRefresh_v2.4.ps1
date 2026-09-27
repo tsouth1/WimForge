@@ -409,7 +409,7 @@ function Import-LanguageList {
 # ---------- saved GUI settings per OS (TODO step 10c) ----------
 # Settings\<profile folder>.json holds one OS's checkboxes and ticked languages; Settings\General.json the repository
 # root. Kept apart from Profiles\ on purpose: profile files get regenerated, which must not wipe saved choices.
-$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3')
+$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3')
 function Get-OsSettingsFile {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition)
     return (Join-Path $Directory ($Definition.Folder + '.json'))
@@ -1433,10 +1433,25 @@ function Save-BootMediaFiles {
         if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $Destination $name) -Force; Write-Log "Saved $name from the patched $Target for the media." }
     }
 }
+function Save-Boot2023Files {
+    # The boot files signed with 'Windows UEFI CA 2023' that the 2024-04 and later cumulative updates add to boot.wim
+    # (Windows\Boot\EFI_EX, FONTS_EX, DVD_EX), saved after the LCU for the CA 2023 media (Set-Media2023BootFiles).
+    # Returns $false when the image does not have them (LCU older than 2024-04).
+    param([string]$Mount, [string]$Destination, [string]$Target)
+    $boot = Join-Chain $Mount @('Windows', 'Boot')
+    foreach ($d in 'EFI_EX', 'FONTS_EX', 'DVD_EX') { if (-not (Test-Path -LiteralPath (Join-Path $boot $d))) { return $false } }
+    Ensure-Directory $Destination
+    foreach ($d in 'EFI_EX', 'FONTS_EX', 'DVD_EX') { Copy-Item -LiteralPath (Join-Path $boot $d) -Destination (Join-Path $Destination $d) -Recurse -Force }
+    $stl = Join-Chain $boot @('EFI', 'boot.stl')
+    if (Test-Path -LiteralPath $stl) { Copy-Item -LiteralPath $stl -Destination (Join-Path $Destination 'boot.stl') -Force }
+    Write-Log "Saved the Windows UEFI CA 2023 boot files (EFI_EX, FONTS_EX, DVD_EX) from the patched $Target."
+    return $true
+}
 function Service-BootWim {
     # Patches every boot.wim image (1 = WinPE, 2 = WinPE + Windows Setup) for the refreshed media. No languages: boot.wim
-    # stays English-only (Terry, 2026-09-26). Returns the folder holding the files saved from the Setup image.
-    param([string]$SourceBoot, [string]$Destination, [hashtable]$Paths, [hashtable]$Packages)
+    # stays English-only (Terry, 2026-09-26). Returns the folder holding the files saved from the Setup image, and with
+    # -Save2023 the CA 2023 boot files in its CA2023 sub-folder (taken from the first image, as Microsoft's script does).
+    param([string]$SourceBoot, [string]$Destination, [hashtable]$Paths, [hashtable]$Packages, [switch]$Save2023)
     $dl = $script:DismLogArgs
     $working = Join-Path $Paths.Working 'boot.working.wim'
     $optimized = Join-Path $Paths.Temp 'boot.optimized.wim'
@@ -1455,6 +1470,7 @@ function Service-BootWim {
             Invoke-DismExe -Arguments @("/Image:$($Paths.WinPeMount)", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description "Cleaning $target"
             # The Setup image is the one with sources\setup.exe (index 2 on Microsoft media).
             if (Test-Path -LiteralPath (Join-Chain $Paths.WinPeMount @('sources', 'setup.exe'))) { Save-BootMediaFiles -Mount $Paths.WinPeMount -Destination $saved -Target $target }
+            if ($Save2023 -and -not (Test-Path -LiteralPath (Join-Path $saved 'CA2023'))) { [void](Save-Boot2023Files -Mount $Paths.WinPeMount -Destination (Join-Path $saved 'CA2023') -Target $target) }
             Dismount-WindowsImage -Path $Paths.WinPeMount -Save -CheckIntegrity @dl -ErrorAction Stop | Out-Null
         } catch {
             Dismount-IfMounted $Paths.WinPeMount
@@ -1675,6 +1691,67 @@ function Update-MediaBootFiles {
         Add-ChangeEvent -Category 'Media' -Item 'efi\microsoft\boot\boot.stl' -Target 'Media' -Detail 'from the patched boot.wim'
     }
 }
+function Get-EmbeddedSignerIssuer {
+    # Issuer of the signature embedded in a boot file - what UEFI firmware checks. (Get-AuthenticodeSignature reports the
+    # Windows catalog signature for boot files, which is PCA 2011 for both the old and the CA 2023 boot manager.)
+    param([string]$Path)
+    try { return [string]([System.Security.Cryptography.X509Certificates.X509Certificate]::CreateFromSignedFile($Path)).Issuer } catch { return '' }
+}
+function Set-Media2023BootFiles {
+    # Microsoft's Make2023BootableMedia.ps1 (v1.4, Copy-2023BootBins; BSD licence), applied to a copy of the refreshed
+    # media: bootmgfw_EX.efi -> efi\boot\bootx64.efi (bootaa64.efi on ARM64 media), bootmgr_EX.efi -> bootmgr.efi when
+    # present, efisys_EX.bin -> efi\microsoft\boot\efisys_ex.bin (the ISO's UEFI boot image), FONTS_EX -> efi\microsoft\boot\fonts
+    # with _EX dropped from the names, boot.stl when the media has none. Returns the boot manager path on the media.
+    param([string]$Media, [string]$ExFiles)
+    $bootmgfw = Join-Chain $ExFiles @('EFI_EX', 'bootmgfw_EX.efi'); $efisys = Join-Chain $ExFiles @('DVD_EX', 'EFI', 'en-US', 'efisys_EX.bin')
+    foreach ($req in $bootmgfw, $efisys) { if (-not (Test-Path -LiteralPath $req)) { throw "The CA 2023 boot file $(Split-Path $req -Leaf) is missing from boot.wim; it comes with the 2024-04 or later cumulative update." } }
+    $bootDir = Join-Chain $Media @('efi', 'boot'); Ensure-Directory $bootDir
+    $name = if (Test-Path -LiteralPath (Join-Path $bootDir 'bootaa64.efi')) { 'bootaa64.efi' } else { 'bootx64.efi' }
+    $target = Join-Path $bootDir $name
+    Copy-Item -LiteralPath $bootmgfw -Destination $target -Force
+    Write-Log "CA 2023 media: efi\boot\$name <- bootmgfw_EX.efi"
+    Add-ChangeEvent -Category 'Media CA 2023' -Item "efi\boot\$name" -Target 'Media_CA2023' -Detail 'boot manager signed by Windows UEFI CA 2023 (bootmgfw_EX.efi)'
+    $mgr = Join-Chain $ExFiles @('EFI_EX', 'bootmgr_EX.efi')
+    if (Test-Path -LiteralPath $mgr) {
+        Copy-Item -LiteralPath $mgr -Destination (Join-Path $Media 'bootmgr.efi') -Force
+        Write-Log 'CA 2023 media: bootmgr.efi <- bootmgr_EX.efi'
+        Add-ChangeEvent -Category 'Media CA 2023' -Item 'bootmgr.efi' -Target 'Media_CA2023' -Detail 'bootmgr_EX.efi'
+    }
+    $msBoot = Join-Chain $Media @('efi', 'microsoft', 'boot'); Ensure-Directory $msBoot
+    Copy-Item -LiteralPath $efisys -Destination (Join-Path $msBoot 'efisys_ex.bin') -Force
+    Write-Log 'CA 2023 media: efi\microsoft\boot\efisys_ex.bin <- efisys_EX.bin (UEFI boot image for the ISO)'
+    Add-ChangeEvent -Category 'Media CA 2023' -Item 'efi\microsoft\boot\efisys_ex.bin' -Target 'Media_CA2023' -Detail 'efisys_EX.bin, the UEFI boot image of the CA 2023 ISO'
+    $fontsEx = Join-Path $ExFiles 'FONTS_EX'
+    if (Test-Path -LiteralPath $fontsEx) {
+        $fonts = Join-Path $msBoot 'fonts'; Ensure-Directory $fonts
+        $n = 0
+        foreach ($f in @(Get-ChildItem -LiteralPath $fontsEx -File)) { Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $fonts ($f.Name -replace '_EX', '')) -Force; $n++ }
+        Write-Log "CA 2023 media: $n boot font(s) from FONTS_EX copied to efi\microsoft\boot\fonts"
+        Add-ChangeEvent -Category 'Media CA 2023' -Item 'efi\microsoft\boot\fonts' -Target 'Media_CA2023' -Detail "$n boot font(s) from FONTS_EX"
+    }
+    $stl = Join-Path $ExFiles 'boot.stl'; $stlDst = Join-Path $msBoot 'boot.stl'
+    if ((Test-Path -LiteralPath $stl) -and -not (Test-Path -LiteralPath $stlDst)) { Copy-Item -LiteralPath $stl -Destination $stlDst -Force; Write-Log 'CA 2023 media: efi\microsoft\boot\boot.stl added' }
+    return $target
+}
+function New-Media2023 {
+    # The CA 2023 media, built alongside the standard media (Terry, 2026-09-27): a copy of the finished refreshed media
+    # with the CA 2023 boot files swapped in, then checked - the boot manager's embedded signature must be issued by
+    # 'Windows UEFI CA 2023'. It boots only on PCs whose firmware trusts that certificate.
+    param([string]$MediaFolder, [string]$ExFiles, [hashtable]$Paths)
+    if (-not $ExFiles -or -not (Test-Path -LiteralPath $ExFiles)) { throw 'boot.wim has no Windows UEFI CA 2023 boot files (Windows\Boot\EFI_EX, FONTS_EX, DVD_EX). They come with the 2024-04 or later cumulative update; check PATCHES\LCU.' }
+    $media = Join-Path $Paths.NewWim 'Media_CA2023'
+    Remove-DirectoryContents $media
+    Write-Log "Copying the refreshed media to $media"
+    Copy-Item -Path (Join-Path $MediaFolder '*') -Destination $media -Recurse -Force
+    $bootmgr = Set-Media2023BootFiles -Media $media -ExFiles $ExFiles
+    $issuer = Get-EmbeddedSignerIssuer $bootmgr
+    if ($issuer -notmatch 'Windows UEFI CA 2023') { throw "The boot manager on the CA 2023 media ($bootmgr) is signed by '$issuer', not 'Windows UEFI CA 2023'." }
+    Write-Log "VERIFY CA 2023 media: $(Split-Path $bootmgr -Leaf) is signed by $issuer."
+    $std = Get-EmbeddedSignerIssuer (Join-Chain $MediaFolder @('efi', 'boot', (Split-Path $bootmgr -Leaf)))
+    if ($std) { Write-Log "Standard media: $(Split-Path $bootmgr -Leaf) is signed by $std." }
+    Write-Log "CA 2023 media folder ready: $media"
+    return $media
+}
 function New-RefreshedMedia {
     param([string]$OsDrive, [hashtable]$Paths, [string]$InstallWim, [string]$BootWim, [object[]]$SetupDu, [string]$BootFiles)
     $media = Join-Path $Paths.NewWim 'Media'
@@ -1700,16 +1777,19 @@ function New-RefreshedMedia {
     return $media
 }
 function Build-IsoFromMedia {
-    param([string]$MediaFolder, [hashtable]$Paths)
+    # -EfiBootFile efisys_ex.bin for the CA 2023 media (its UEFI boot image), as Microsoft's script does.
+    param([string]$MediaFolder, [hashtable]$Paths, [string]$EfiBootFile = 'efisys.bin', [string]$NamePrefix = 'UpdatedMedia')
     $oscdimg = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools" -Filter oscdimg.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $oscdimg) { throw 'Oscdimg.exe was not found. Install the Windows ADK Deployment Tools.' }
-    $bios = Join-Chain $MediaFolder @('boot', 'etfsboot.com'); $uefi = Join-Chain $MediaFolder @('efi', 'microsoft', 'boot', 'efisys.bin')
-    if (-not (Test-Path -LiteralPath $bios) -or -not (Test-Path -LiteralPath $uefi)) { throw 'Required BIOS or UEFI boot sector files were not found in the media.' }
-    $isoOut = Join-Path $Paths.NewWim ("UpdatedMedia_{0}.iso" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $bios = Join-Chain $MediaFolder @('boot', 'etfsboot.com'); $uefi = Join-Chain $MediaFolder @('efi', 'microsoft', 'boot', $EfiBootFile)
+    if (-not (Test-Path -LiteralPath $bios) -or -not (Test-Path -LiteralPath $uefi)) { throw "Required BIOS or UEFI boot sector files (etfsboot.com, $EfiBootFile) were not found in the media." }
+    $isoOut = Join-Path $Paths.NewWim ("{0}_{1}.iso" -f $NamePrefix, (Get-Date -Format 'yyyyMMdd_HHmmss'))
     $bootData = "-bootdata:2#p0,e,b$bios#pEF,e,b$uefi"
     Write-Log "Building ISO $isoOut"
     & $oscdimg.FullName '-m' '-o' '-u2' '-udfver102' $bootData $MediaFolder $isoOut | ForEach-Object { Write-Log $_ }
     if ($LASTEXITCODE -ne 0) { throw "Oscdimg failed with exit code $LASTEXITCODE." }
+    Write-Log "ISO ready: $isoOut"
+    return $isoOut
 }
 
 # ---------- output safety ----------
@@ -1757,6 +1837,9 @@ function Test-FreeSpace {
     $need = $wimGB * 3 + 6
     if ($Options.BuildMedia -or $Options.BuildIso) { $need += $isoGB }
     if ($Options.BuildIso) { $need += $isoGB }
+    if ([bool](Get-ProfileValue $Options 'Media2023' $false) -and [bool](Get-ProfileValue $Options 'Boot' $false) -and ($Options.BuildMedia -or $Options.BuildIso)) {
+        $need += $isoGB; if ($Options.BuildIso) { $need += $isoGB }   # the CA 2023 media folder and ISO, alongside the standard ones
+    }
     $need = [Math]::Max([Math]::Ceiling($need), $Definition.MinFreeGB)
     $free = Get-FreeSpaceGB -Path $Paths.Root
     if ($null -eq $free) { Write-Log 'Free disk space could not be read; skipping the space check.' 'WARN'; return }
@@ -1851,6 +1934,10 @@ function Invoke-MediaRefresh {
         $doBoot = [bool]$Options.Boot -and $doMedia
         if ([bool]$Options.Boot -and -not $doMedia) { Write-Log 'Patch boot.wim is ticked, but no media folder or ISO is being built; boot.wim is patched only for the media, so it is skipped.' }
         elseif ($doMedia) { Write-Log $(if ($doBoot) { 'Media: boot.wim (WinPE and Setup) is patched, and setup.exe and the boot manager files on the media are refreshed from it.' } else { 'Media: boot.wim is left as on the ISO (Patch boot.wim is not ticked).' }) }
+        $want2023 = [bool](Get-ProfileValue $Options 'Media2023' $false)
+        $do2023 = $want2023 -and $doBoot
+        if ($want2023 -and -not $doBoot) { Write-Log 'CA 2023 media is ticked, but it needs the media and Patch boot.wim (its boot files come from the patched boot.wim); it is skipped.' 'WARN' }
+        elseif ($do2023) { Write-Log "CA 2023 media: built alongside the standard media in NEWWIM\Media_CA2023$(if ($Options.BuildIso) { ', with its own ISO' }), boot manager signed by Windows UEFI CA 2023." }
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
         $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
         Test-PackageSet -Definition $definition -Packages $packages -Enabled $enabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
@@ -1917,6 +2004,7 @@ function Invoke-MediaRefresh {
 
         $workingInstall = Join-Path $paths.Working 'install.working.wim'; Copy-Item -LiteralPath $old -Destination $workingInstall -Force
         $finalInstall = $null; $finalBoot = $null; $verifyIssues = $null; $mediaFolder = $null; $gate = 'Skipped'
+        $iso = $null; $media2023 = $null; $iso2023 = $null; $media2023Error = $null
         if ($Options.Install) {
             $workImages = @(Get-WindowsImage -ImagePath $workingInstall)
             $n = 0
@@ -1958,7 +2046,7 @@ function Invoke-MediaRefresh {
             Set-Phase 'Servicing boot.wim'
             Set-Progress 75 'Servicing boot.wim'
             $finalBoot = Join-Path $paths.Working 'boot.serviced.wim'
-            $bootFiles = Service-BootWim -SourceBoot $sourceBoot -Destination $finalBoot -Paths $paths -Packages $packages
+            $bootFiles = Service-BootWim -SourceBoot $sourceBoot -Destination $finalBoot -Paths $paths -Packages $packages -Save2023:$do2023
             Write-Log "Patched boot.wim ready for the media: $finalBoot"
         }
         if ($doMedia) {
@@ -1967,7 +2055,17 @@ function Invoke-MediaRefresh {
             Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
             $mediaFolder = New-RefreshedMedia -OsDrive $osDrive -Paths $paths -InstallWim $finalInstall -BootWim $finalBoot -SetupDu $packages.SetupDU -BootFiles $bootFiles
             if ($doBoot) { $finalBoot = Join-Chain $mediaFolder @('sources', 'boot.wim') }
-            if ($Options.BuildIso) { Set-Phase 'Building ISO'; Set-Progress 94 'Building ISO'; Build-IsoFromMedia -MediaFolder $mediaFolder -Paths $paths }
+            if ($do2023) {
+                # Not fatal: the standard media and install.wim are already good, so a CA 2023 problem is reported, not thrown.
+                Set-Phase 'Building CA 2023 media'; Set-Progress 91 'Building CA 2023 media'
+                try { $media2023 = New-Media2023 -MediaFolder $mediaFolder -ExFiles (Join-Path $bootFiles 'CA2023') -Paths $paths }
+                catch { $media2023 = $null; $media2023Error = $_.Exception.Message; Write-Log "CA 2023 media was not created: $media2023Error" 'ERROR' }
+            }
+            if ($Options.BuildIso) {
+                Set-Phase 'Building ISO'; Set-Progress 94 'Building ISO'
+                $iso = Build-IsoFromMedia -MediaFolder $mediaFolder -Paths $paths
+                if ($media2023) { Set-Phase 'Building CA 2023 ISO'; $iso2023 = Build-IsoFromMedia -MediaFolder $media2023 -Paths $paths -EfiBootFile 'efisys_ex.bin' -NamePrefix 'UpdatedMedia_CA2023' }
+            }
         }
         $changeLogPaths = $null
         if ($Options.Install) {
@@ -1985,6 +2083,7 @@ function Invoke-MediaRefresh {
         else { Write-Log 'Media refresh completed successfully.' }
         $script:LastResult = [pscustomobject]@{
             NewWim = $paths.NewWim; Install = $finalInstall; Boot = $finalBoot; Media = $mediaFolder; VerifyIssues = $verifyIssues; Preflight = $false
+            Iso = $iso; Media2023 = $media2023; Iso2023 = $iso2023; Media2023Error = $media2023Error
             Gate = $gate; ChangeLogHtml = $(if ($changeLogPaths) { $changeLogPaths.Html } else { $null }); ChangeLogCsv = $(if ($changeLogPaths) { $changeLogPaths.Csv } else { $null })
         }
     } finally { Dismount-AllIso }
@@ -2006,7 +2105,7 @@ function Invoke-MediaRefresh {
    <TabItem Header="Source and targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="F:\mediaRefresh" Height="30" Padding="6"/>
     <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
-    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder or the ISO is built."/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
+    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder or the ISO is built."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
    <TabItem Header="Updates and features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -2034,7 +2133,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -2263,7 +2362,7 @@ function Get-UiOptions {
     return [pscustomobject]@{
         OsName = [string]$script:OsCombo.SelectedItem; Root = [string]$script:RootText.Text
         PreflightOnly = [bool]$script:ChkPreflight.IsChecked; Install = [bool]$script:ChkInstall.IsChecked; Boot = [bool]$script:ChkBoot.IsChecked; WinRE = [bool]$script:ChkWinRE.IsChecked
-        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = [bool]$script:ChkBuildIso.IsChecked
+        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = [bool]$script:ChkBuildIso.IsChecked; Media2023 = [bool]$script:ChkMedia2023.IsChecked
         SSU = [bool]$script:ChkSSU.IsChecked; LCU = [bool]$script:ChkLCU.IsChecked; SafeOS = [bool]$script:ChkSafeOS.IsChecked
         NetCU = [bool]$script:ChkNetCU.IsChecked; SetupDU = [bool]$script:ChkSetupDU.IsChecked; NetFx3 = [bool]$script:ChkNetFx3.IsChecked
         Languages = $langs; ProfilesDir = $script:ProfilesDir
@@ -2274,8 +2373,10 @@ function Update-BootOption {
     # boot.wim is patched only for the media (Terry, 2026-09-27): its checkbox is available while the media folder or the
     # ISO is ticked. Its own tick is kept, so it comes back as it was when media is ticked again.
     $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked -or [bool]$script:ChkBuildIso.IsChecked
+    # The CA 2023 media takes its boot files from the patched boot.wim, so it also needs Patch boot.wim ticked.
+    $script:ChkMedia2023.IsEnabled = $script:ChkBoot.IsEnabled -and [bool]$script:ChkBoot.IsChecked
 }
-foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
+foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso, $script:ChkBoot)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
 $script:SaveSettingsButton.Add_Click({
     if (-not $script:RunButton.IsEnabled) { return }
     try { if (Save-CurrentOsSettings) { $script:Status.Text = "Settings saved for $([string]$script:OsCombo.SelectedItem)" } }
@@ -2478,9 +2579,13 @@ function Complete-BackgroundRun {
         $msg = "Completed successfully.`n`nOutput: $($res.NewWim)"
         if ($res.Preflight) { $msg = 'Preflight passed. No image was changed. See the Log tab for the ISO roles, patch counts and selected edition.' }
         if ($null -ne $res.VerifyIssues -and $res.VerifyIssues -gt 0) { $msg = "Completed with $($res.VerifyIssues) verification issue(s). Review the Log tab.`n`nOutput: $($res.NewWim)" }
+        $m2023 = [string](Get-ProfileValue $res 'Media2023' ''); $e2023 = [string](Get-ProfileValue $res 'Media2023Error' '')
+        if ($m2023) { $msg += "`n`nCA 2023 media: $m2023$(if (Get-ProfileValue $res 'Iso2023' '') { "`nCA 2023 ISO: $($res.Iso2023)" })`n(boots only on PCs whose firmware trusts Windows UEFI CA 2023)" }
         if ($res.Gate -eq 'FAILED') {
             $msg = "Completed, but the VALIDATION GATE FAILED (build, edition or applied-patch check did not pass). Review the change log and Log tab before importing this image into SCCM.`n`nOutput: $($res.NewWim)"
             [System.Windows.MessageBox]::Show($msg, 'WimForge', 'OK', 'Warning') | Out-Null
+        } elseif ($e2023) {
+            [System.Windows.MessageBox]::Show("$msg`n`nThe CA 2023 media was NOT created: $e2023`nThe standard media and install.wim are fine.", 'WimForge', 'OK', 'Warning') | Out-Null
         } else {
             [System.Windows.MessageBox]::Show($msg, 'WimForge', 'OK', 'Information') | Out-Null
         }

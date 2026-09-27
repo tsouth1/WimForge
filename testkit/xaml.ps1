@@ -81,13 +81,18 @@ if ($wpf) {
 
     # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
-    Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso\)\)[^\r\n]*').Value)
+    Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
     $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $false; Update-BootOption
     Check 'Patch boot.wim is below the media option, ticked by default, and unavailable without media' ([string]$script:ChkBoot.Content -like 'Patch boot.wim (WinPE and Setup)*not used by SCCM*' -and $script:DefaultChecks['Boot'] -and -not $script:ChkBoot.IsEnabled -and $script:ChkBoot.Parent.Children.IndexOf($script:ChkBoot) -eq $script:ChkBoot.Parent.Children.IndexOf($script:ChkBuildMedia) + 1)
     $script:ChkBuildMedia.IsChecked = $true
     $en1 = $script:ChkBoot.IsEnabled; $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $true
     $en2 = $script:ChkBoot.IsEnabled; $script:ChkBuildIso.IsChecked = $false
     Check 'ticking the media folder or the ISO makes Patch boot.wim available; unticking both greys it out again' ($en1 -and $en2 -and -not $script:ChkBoot.IsEnabled)
+    Check 'the CA 2023 option sits under Patch boot.wim, unticked by default, and is saved with the other options' ([string]$script:ChkMedia2023.Content -like "Also build CA 2023 media alongside it*Windows UEFI CA 2023*" -and -not $script:DefaultChecks['Media2023'] -and $script:SettingOptionNames -contains 'Media2023' -and $script:ChkMedia2023.Parent.Children.IndexOf($script:ChkMedia2023) -eq $script:ChkMedia2023.Parent.Children.IndexOf($script:ChkBoot) + 1)
+    $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $true; $c1 = $script:ChkMedia2023.IsEnabled
+    $script:ChkBoot.IsChecked = $false; $c2 = $script:ChkMedia2023.IsEnabled
+    $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $false; $c3 = $script:ChkMedia2023.IsEnabled
+    Check 'CA 2023 is available only with media and Patch boot.wim both ticked' ($c1 -and -not $c2 -and -not $c3)
 
     # Colour schemes (General Settings tab) on the real window
     $script:ThemedStyleXaml = [regex]::Match($src, "(?s)\`$script:ThemedStyleXaml = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
