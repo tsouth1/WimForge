@@ -22,7 +22,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | After 2 |
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
 | [9](#s9) | Housekeeping and final documentation | Claude | Ongoing |
-| [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ Terry for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10d Image Inventory waits for Terry's script; 10a, 10b not started |
+| [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ Terry for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10a INSTRUCTIONS.md written; 10d Image Inventory waits for Terry's script; 10b not started |
 | [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Not started |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
@@ -222,7 +222,9 @@ The script only logs a warning when the host DISM is older than the image. Servi
 
 **Owner:** Claude for the mechanism; Terry for the Image Inventory script. **Depends on:** 1 (settings/profile file conventions to reuse), 3 (the header row the menu button sits in; the change-log writer the inventory output can reuse). **Added 2026-09-22 (Terry), four related asks.**
 
-**10a. `INSTRUCTIONS.md`**
+**10a. `INSTRUCTIONS.md` - written 2026-09-27; Terry to read it through on the build machine**
+
+**What was written:** `INSTRUCTIONS.md` beside the script: before you start (elevated Windows PowerShell 5.1, Unblock-File, ADK only for ISOs, internet only for Download patches, free space, antivirus exclusion, NTFS); the folder layout (repository root, the five OS folders, every sub-folder, the ISO roles, PATCHES with the hand-placed SSU per OS, Profiles and Settings beside the script); the recommended order of work; every part of the window (header, Tools, all five tabs, bottom bar); Tools > Cleanup Mountpoints; what a run produces in NEWWIM; where each log lands (`MediaRefresh_*`, `DISM_*`, `ChangeLog_*` per OS, `MountCleanup_*` at the repository root); the validation gate and change log; troubleshooting. Uses only headings, lists, bold and code (no tables), so the Instructions tab (10b) needs only a small Markdown renderer. Keep it in step with the GUI as features are added.
 
 - New file next to the script (same folder as `Profiles\`), written in Markdown so it doubles as the source for the Instructions tab (10b) and is still readable on its own in a text editor or on GitHub.
 - Contents: what the tool does and the folder layout it expects (ISO/LOGS/MOUNT/OLDWIM/NEWWIM/PATCHES/TEMP/WINPE/WINRE/WORKING per OS); a walkthrough of every GUI tab and control (Source and targets, Updates and features, Languages, Log, and whatever this step and step 7 add); the recommended order of operations (Preflight first, then a real run); and — the specific thing Terry asked for — **where the log files for a run land**: `LOGS\MediaRefresh_*.log` (run log), `LOGS\DISM_*.log` (DISM's own log), and the per-image change log `LOGS\ChangeLog_<OS>_<build>_<timestamp>.html`/`.csv` (also copied to `NEWWIM\` beside the output, per step 3b).
@@ -421,6 +423,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: step 10a - `INSTRUCTIONS.md` operator guide written.
 - 2026-09-27: step 12a built - optional CA 2023 media (`NEWWIM\Media_CA2023`) and `_CA2023` ISO alongside the standard ones, with the boot manager, UEFI boot image and boot fonts signed by Windows UEFI CA 2023 from the patched boot.wim (Microsoft's `Make2023BootableMedia.ps1` steps), embedded signature verified. Test kit 412 checks.
 - 2026-09-27: boot.wim is patched only for the media ("Patch boot.wim" under the media option, relabelled); setup.exe / setuphost.exe and the boot manager files on the media come from the patched boot.wim (step 6); archive folders of runs in the same second no longer collide. Test kit 394 checks.
 - 2026-09-27: 10d Cleanup Mountpoints built (Tools menu in the header; check first, confirm, then discard / dismount / empty under the repository root); a servicing run now dismounts this OS's ISOs if they were left mounted (step 8); `Clear-StaleMounts` matches whole folder names. Test kit 383 checks.
