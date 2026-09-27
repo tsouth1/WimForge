@@ -223,7 +223,7 @@ Fake-Iso 'Win11Enterprise_24H2' 'os11' @('sources/install.wim', 'sources/boot.wi
 Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5043080-x64.msu', 'LCU/windows11.0-kb5129195-x64.msu')
 $logs12 = [System.Collections.Generic.List[string]]::new()
 $wl = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs12.Add("[$Level] $Message") }
-Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3=$false; Boot=$true })
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3=$false; Boot=$true; BuildMedia=$true; SetupDU=$false })   # boot.wim is patched only for the media
 Set-Item function:Write-Log $wl
 $add12 = @($script:Calls -match '^AddPkg windows11\.0-kb')
 Check 'the checkpoint KB5043080 is never added directly (install.wim, WinRE or WinPE)' (@($add12 -match 'kb5043080').Count -eq 0) ($add12 -join ' | ')
@@ -283,7 +283,7 @@ Fake-Iso 'Win10_Enterprise_LTSC_2019' 'os2019' @('sources/boot.wim')
 Fake-Iso 'Win10_Enterprise_LTSC_2019' 'lpall' @('Windows Preinstallation Environment/x64/WinPE_OCs/de-de/lp.cab', 'Windows Preinstallation Environment/x64/WinPE_OCs/WinPE-FontSupport-ja-jp.cab')
 $logs14 = [System.Collections.Generic.List[string]]::new()
 $wl14 = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs14.Add("[$Level] $Message") }
-Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' $langs10 @{ WinRE=$true; Boot=$true })
+Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' $langs10 @{ WinRE=$true; Boot=$true; BuildMedia=$true; SetupDU=$false })
 Set-Item function:Write-Log $wl14
 $winpeAdds = @($script:Calls | Where-Object { $_ -match '^AddPkg .* @ (WinRE|WinPE)$' -and $_ -match '(?i)language|lp\.cab|WinPE-' })
 Check 'no language pack or WinPE language cab is added to WinRE or boot.wim' ($winpeAdds.Count -eq 0) ($winpeAdds -join ' | ')
@@ -338,6 +338,57 @@ $wl15 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'IN
 Clear-StaleIsoMounts (Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\ISO')
 Set-Item function:Write-Log $wl15
 Check 'an ISO already mounted at the start of a run is dismounted, with a WARN' ($script:AttachedIsos.Count -eq 0 -and [bool]($logs15 -match '^\[WARN\] ISO os2021kms\.iso was already mounted'))
+Write-Host "`n=== E16 boot.wim is patched only for the media, with setup.exe and the boot manager files from it (Terry, 2026-09-27) ==="
+# boot.wim with two images; index 2 is the Setup image, which carries the patched setup files. The ISO's own copies are 'orig'.
+Reset-Test; $script:ImageCount = 1; $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Enterprise')
+$lcu16 = Join-Path $base 'Win11Enterprise_24H2\PATCHES\LCU'; Get-ChildItem $lcu16 -File -ErrorAction SilentlyContinue | Remove-Item -Force
+Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
+$os16 = Join-Path $isos 'os11'
+foreach ($p in 'sources/boot.wim', 'sources/setup.exe', 'sources/setuphost.exe', 'efi/boot/bootx64.efi', 'bootmgr.efi', 'efi/microsoft/boot/bcd') { New-File (Join-Path $os16 $p) 'orig' }
+$gwi16 = ${function:Get-WindowsImage}; $mwi16 = ${function:Mount-WindowsImage}
+function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
+    if (-not $Mounted -and -not $Index -and $ImagePath -like '*boot*') { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Microsoft Windows Setup' }) }
+    & $gwi16 @PSBoundParameters }
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+    & $mwi16 @PSBoundParameters
+    if ($ImagePath -like '*boot.working.wim' -and $Index -eq 2) {
+        foreach ($p in 'sources/setup.exe', 'sources/setuphost.exe', 'Windows/Boot/EFI/bootmgfw.efi', 'Windows/Boot/EFI/bootmgr.efi', 'Windows/Boot/EFI/boot.stl') { New-File (Join-Path $Path $p) "patched $(Split-Path $p -Leaf)" }
+    } }
+$script:ChangeEvents = $null
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Boot = $true; BuildMedia = $true; SetupDU = $false; WinRE = $false })
+$media16 = Join-Path $base 'Win11Enterprise_24H2\NEWWIM\Media'
+$read16 = { param($rel) (Get-Content -Raw (Join-Path $media16 $rel)).Trim() }
+Check 'both boot.wim images get the LCU' (@($script:Calls -match '^Mount boot\.working\.wim idx[12] ').Count -eq 2 -and @($script:Calls -match '^AddPkg windows11\.0-kb5129195-x64\.msu @ WinPE').Count -eq 2) ($script:Calls -join ' | ')
+Check 'the media gets the patched boot.wim, and there is no separate NEWWIM\boot.wim' ((& $read16 'sources\boot.wim') -eq 'x' -and -not (Test-Path (Join-Path $base 'Win11Enterprise_24H2\NEWWIM\boot.wim')) -and $script:LastResult.Boot -eq (Join-Path $media16 'sources\boot.wim'))
+Check 'gap 1: setup.exe and setuphost.exe on the media come from the patched Setup image' ((& $read16 'sources\setup.exe') -eq 'patched setup.exe' -and (& $read16 'sources\setuphost.exe') -eq 'patched setuphost.exe')
+Check 'gap 2: efi\boot\bootx64.efi <- bootmgfw.efi, bootmgr.efi <- bootmgr.efi, boot.stl added' ((& $read16 'efi\boot\bootx64.efi') -eq 'patched bootmgfw.efi' -and (& $read16 'bootmgr.efi') -eq 'patched bootmgr.efi' -and (& $read16 'efi\microsoft\boot\boot.stl') -eq 'patched boot.stl' -and (& $read16 'efi\microsoft\boot\bcd') -eq 'orig')
+$media16Events = @($script:ChangeEvents | Where-Object { $_.Category -eq 'Media' } | ForEach-Object { $_.Item })
+Check 'the change log records the patched boot.wim and each replaced media file' ($media16Events -contains 'sources\boot.wim' -and $media16Events -contains 'setup.exe' -and $media16Events -contains 'setuphost.exe' -and $media16Events -contains 'efi\boot\bootx64.efi' -and $media16Events -contains 'bootmgr.efi' -and $media16Events -contains 'efi\microsoft\boot\boot.stl') ($media16Events -join ', ')
+# Win10-style Setup image: no setuphost.exe and no boot.stl - the media keeps its own setuphost-less layout
+Reset-Test; Remove-Item (Join-Path $os16 'sources\setuphost.exe') -Force
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+    & $mwi16 @PSBoundParameters
+    if ($ImagePath -like '*boot.working.wim' -and $Index -eq 2) { foreach ($p in 'sources/setup.exe', 'Windows/Boot/EFI/bootmgfw.efi', 'Windows/Boot/EFI/bootmgr.efi') { New-File (Join-Path $Path $p) "patched $(Split-Path $p -Leaf)" } } }
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Boot = $true; BuildMedia = $true; SetupDU = $false; WinRE = $false })
+Check 'files the Setup image does not have (setuphost.exe, boot.stl) are not invented on the media' ((& $read16 'sources\setup.exe') -eq 'patched setup.exe' -and -not (Test-Path (Join-Path $media16 'sources\setuphost.exe')) -and -not (Test-Path (Join-Path $media16 'efi\microsoft\boot\boot.stl')))
+# Media without Patch boot.wim: the ISO's boot.wim and setup files stay as they are
+Reset-Test
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Boot = $false; BuildMedia = $true; SetupDU = $false; WinRE = $false })
+Check 'media with Patch boot.wim unticked keeps the ISO''s boot.wim and setup.exe' (@($script:Calls -match 'boot\.working').Count -eq 0 -and (& $read16 'sources\boot.wim') -eq 'orig' -and (& $read16 'sources\setup.exe') -eq 'orig')
+# Patch boot.wim ticked but no media: boot.wim is not touched at all
+Reset-Test
+$logs16 = [System.Collections.Generic.List[string]]::new()
+$wl16 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs16.Add("[$Level] $Message") }
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Boot = $true; BuildMedia = $false; SetupDU = $false; WinRE = $false })
+Set-Item function:Write-Log $wl16
+Check 'Patch boot.wim without media: boot.wim is skipped, with a log line saying why' (@($script:Calls -match 'boot\.working').Count -eq 0 -and [bool]($logs16 -match 'boot\.wim is patched only for the media, so it is skipped'))
+Set-Item function:Get-WindowsImage $gwi16; Set-Item function:Mount-WindowsImage $mwi16
+# Two runs in the same second share a stamp: the second archive gets _2 instead of failing on Media already being there
+$nw16 = Join-Path $base '_arch16\NEWWIM'; New-File (Join-Path $nw16 'Media\a.txt'); New-File (Join-Path $nw16 'Archive\20260927_101010\Media\old.txt')
+$script:OutputArchived = $false
+Backup-PreviousOutput -Paths @{ NewWim = $nw16 } -Stamp '20260927_101010' -Keep 3
+Check 'an archive stamp already used in the same second gets a _2 folder' ((Test-Path (Join-Path $nw16 'Archive\20260927_101010_2\Media\a.txt')) -and (Test-Path (Join-Path $nw16 'Archive\20260927_101010\Media\old.txt')))
+
 Check 'a servicing run calls the ISO check right after the stale-mount check' ($src -match "Clear-StaleMounts \`$paths\.Root\r?\n\s+Clear-StaleIsoMounts \`$paths\.ISO")
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

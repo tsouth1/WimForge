@@ -1420,12 +1420,28 @@ function Export-OptimizedWim {
         Export-WindowsImage -SourceImagePath $Source -SourceIndex $image.ImageIndex -DestinationImagePath $Destination -DestinationName $image.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null
     }
 }
+function Save-BootMediaFiles {
+    # Microsoft's media steps save these from the patched Setup image of boot.wim: setup.exe, setuphost.exe (24H2 and
+    # later) and the boot manager files. New-RefreshedMedia copies them onto the media (Update-MediaBootFiles).
+    param([string]$Mount, [string]$Destination, [string]$Target)
+    $files = [ordered]@{
+        'setup.exe' = @('sources', 'setup.exe'); 'setuphost.exe' = @('sources', 'setuphost.exe')
+        'bootmgfw.efi' = @('Windows', 'Boot', 'EFI', 'bootmgfw.efi'); 'bootmgr.efi' = @('Windows', 'Boot', 'EFI', 'bootmgr.efi'); 'boot.stl' = @('Windows', 'Boot', 'EFI', 'boot.stl')
+    }
+    foreach ($name in $files.Keys) {
+        $src = Join-Chain $Mount $files[$name]
+        if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $Destination $name) -Force; Write-Log "Saved $name from the patched $Target for the media." }
+    }
+}
 function Service-BootWim {
-    # No languages: boot.wim (WinPE / Setup) stays English-only (Terry, 2026-09-26).
+    # Patches every boot.wim image (1 = WinPE, 2 = WinPE + Windows Setup) for the refreshed media. No languages: boot.wim
+    # stays English-only (Terry, 2026-09-26). Returns the folder holding the files saved from the Setup image.
     param([string]$SourceBoot, [string]$Destination, [hashtable]$Paths, [hashtable]$Packages)
     $dl = $script:DismLogArgs
     $working = Join-Path $Paths.Working 'boot.working.wim'
     $optimized = Join-Path $Paths.Temp 'boot.optimized.wim'
+    $saved = Join-Path $Paths.Working 'bootfiles'
+    Remove-DirectoryContents $saved
     Copy-Item -LiteralPath $SourceBoot -Destination $working -Force
     Set-ItemProperty -LiteralPath $working -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
     foreach ($image in @(Get-WindowsImage -ImagePath $working)) {
@@ -1437,6 +1453,8 @@ function Service-BootWim {
             Add-Packages $Paths.WinPeMount $Packages.SSU $target -Label 'SSU' -IgnoreCombinedLcu7007e
             Add-Packages $Paths.WinPeMount $Packages.LCU $target -Label 'LCU' -IgnoreCombinedLcu7007e
             Invoke-DismExe -Arguments @("/Image:$($Paths.WinPeMount)", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description "Cleaning $target"
+            # The Setup image is the one with sources\setup.exe (index 2 on Microsoft media).
+            if (Test-Path -LiteralPath (Join-Chain $Paths.WinPeMount @('sources', 'setup.exe'))) { Save-BootMediaFiles -Mount $Paths.WinPeMount -Destination $saved -Target $target }
             Dismount-WindowsImage -Path $Paths.WinPeMount -Save -CheckIntegrity @dl -ErrorAction Stop | Out-Null
         } catch {
             Dismount-IfMounted $Paths.WinPeMount
@@ -1448,6 +1466,8 @@ function Service-BootWim {
         Export-WindowsImage -SourceImagePath $working -SourceIndex $image.ImageIndex -DestinationImagePath $optimized -DestinationName $image.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null
     }
     Copy-Item -LiteralPath $optimized -Destination $Destination -Force
+    if (@(Get-ChildItem -LiteralPath $saved -File).Count -eq 0) { Write-Log 'No boot.wim image holds sources\setup.exe; setup.exe and the boot manager files on the media are left as they are.' 'WARN' }
+    return $saved
 }
 
 # ---------- verification ----------
@@ -1626,8 +1646,37 @@ function Write-ChangeLog {
 }
 
 # ---------- refreshed media ----------
+function Update-MediaBootFiles {
+    # Microsoft's last media steps (after the Setup DU): setup.exe / setuphost.exe and the boot manager files saved from
+    # the patched boot.wim replace the media's own, so Setup and the boot files match the patched WinPE. Microsoft: if
+    # setup.exe in sources and in boot.wim differ, Windows Setup fails.
+    param([string]$Media, [string]$BootFiles)
+    foreach ($name in 'setup.exe', 'setuphost.exe') {
+        $src = Join-Path $BootFiles $name
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        Copy-Item -LiteralPath $src -Destination (Join-Chain $Media @('sources', $name)) -Force
+        Write-Log "Media: sources\$name replaced with the one from the patched boot.wim."
+        Add-ChangeEvent -Category 'Media' -Item $name -Target 'Media\sources' -Detail 'from the patched boot.wim (Setup image)'
+    }
+    $fw = Join-Path $BootFiles 'bootmgfw.efi'; $mgr = Join-Path $BootFiles 'bootmgr.efi'
+    foreach ($f in @(Get-ChildItem -LiteralPath $Media -Recurse -File -Force -Filter 'b*.efi')) {
+        $from = if ($f.Name -in @('bootmgfw.efi', 'bootx64.efi', 'bootia32.efi', 'bootaa64.efi')) { $fw } elseif ($f.Name -eq 'bootmgr.efi') { $mgr } else { $null }
+        if (-not $from -or -not (Test-Path -LiteralPath $from)) { continue }
+        Copy-Item -LiteralPath $from -Destination $f.FullName -Force
+        $rel = $f.FullName.Substring($Media.TrimEnd('\').Length + 1)
+        Write-Log "Media: $rel replaced with the patched $(Split-Path $from -Leaf)."
+        Add-ChangeEvent -Category 'Media' -Item $rel -Target 'Media' -Detail "boot manager from the patched boot.wim ($(Split-Path $from -Leaf))"
+    }
+    $stl = Join-Path $BootFiles 'boot.stl'
+    if (Test-Path -LiteralPath $stl) {
+        $dst = Join-Chain $Media @('efi', 'microsoft', 'boot', 'boot.stl'); Ensure-Directory (Split-Path $dst -Parent)
+        Copy-Item -LiteralPath $stl -Destination $dst -Force
+        Write-Log 'Media: efi\microsoft\boot\boot.stl copied from the patched boot.wim.'
+        Add-ChangeEvent -Category 'Media' -Item 'efi\microsoft\boot\boot.stl' -Target 'Media' -Detail 'from the patched boot.wim'
+    }
+}
 function New-RefreshedMedia {
-    param([string]$OsDrive, [hashtable]$Paths, [string]$InstallWim, [string]$BootWim, [object[]]$SetupDu)
+    param([string]$OsDrive, [hashtable]$Paths, [string]$InstallWim, [string]$BootWim, [object[]]$SetupDu, [string]$BootFiles)
     $media = Join-Path $Paths.NewWim 'Media'
     Remove-DirectoryContents $media
     Write-Log "Copying mounted OS media to $media"
@@ -1642,6 +1691,10 @@ function New-RefreshedMedia {
         if ($LASTEXITCODE -ne 0) { throw "Setup DU expansion failed with exit code $LASTEXITCODE." }
         $duName = Split-Path $du.FullName -Leaf
         Add-ChangeEvent -Category 'SetupDU' -Item $duName -Target 'Media\sources' -Kb (Get-KbFromName $duName) -Detail 'Setup DU expanded into the refreshed media'
+    }
+    if ($BootWim -and (Test-Path -LiteralPath $BootWim)) {
+        Add-ChangeEvent -Category 'Media' -Item 'sources\boot.wim' -Target 'Media\sources' -Detail 'patched boot.wim (WinPE and Setup)'
+        if ($BootFiles -and (Test-Path -LiteralPath $BootFiles)) { Update-MediaBootFiles -Media $media -BootFiles $BootFiles }
     }
     Write-Log "Refreshed media folder ready: $media"
     return $media
@@ -1670,6 +1723,8 @@ function Backup-PreviousOutput {
     if ($items.Count -eq 0) { return }
     $archiveRoot = Join-Path $Paths.NewWim 'Archive'
     $dest = Join-Path $archiveRoot $Stamp
+    # Two runs started in the same second would share a stamp; the second gets _2, _3, ... instead of failing.
+    $n = 1; while (Test-Path -LiteralPath $dest) { $n++; $dest = Join-Path $archiveRoot "${Stamp}_$n" }
     Ensure-Directory $dest
     foreach ($i in $items) { Move-Item -LiteralPath $i.FullName -Destination $dest -Force }
     Write-Log "Previous output ($($items.Count) item(s)) archived to $dest"
@@ -1792,6 +1847,10 @@ function Invoke-MediaRefresh {
         $languages = @($Options.Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
         $hasLang = ($languages.Count -gt 0)
         Write-Log ('Languages: ' + $(if ($hasLang) { $languages -join ', ' } else { '(none - English only)' }))
+        $doMedia = [bool]$Options.BuildMedia -or [bool]$Options.BuildIso
+        $doBoot = [bool]$Options.Boot -and $doMedia
+        if ([bool]$Options.Boot -and -not $doMedia) { Write-Log 'Patch boot.wim is ticked, but no media folder or ISO is being built; boot.wim is patched only for the media, so it is skipped.' }
+        elseif ($doMedia) { Write-Log $(if ($doBoot) { 'Media: boot.wim (WinPE and Setup) is patched, and setup.exe and the boot manager files on the media are refreshed from it.' } else { 'Media: boot.wim is left as on the ISO (Patch boot.wim is not ticked).' }) }
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
         $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
         Test-PackageSet -Definition $definition -Packages $packages -Enabled $enabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
@@ -1820,7 +1879,7 @@ function Invoke-MediaRefresh {
             if (@($roles.FodDrives).Count -eq 0) { throw "Languages are selected but no Features on Demand ISO is in $($paths.ISO); language features and fonts need it. Add it or untick the languages." }
             $lpFiles = Resolve-LanguagePacks -LpRoot $roles.LpDrive -Pattern $definition.LpPattern -Languages $languages
             Write-Log "All $($languages.Count) language packs located."
-            if ([bool]$Options.WinRE -or [bool]$Options.Boot) { Write-Log 'Languages are added to install.wim only; WinRE and boot.wim stay English-only.' }
+            if ([bool]$Options.WinRE -or $doBoot) { Write-Log 'Languages are added to install.wim only; WinRE and boot.wim stay English-only.' }
         }
 
         $sourceWim = if (Test-Path -LiteralPath (Join-Chain $osDrive @('sources', 'install.wim'))) { Join-Chain $osDrive @('sources', 'install.wim') } else { Join-Chain $osDrive @('sources', 'install.esd') }
@@ -1889,22 +1948,25 @@ function Invoke-MediaRefresh {
             }
         }
 
-        if ($Options.Boot) {
+        $bootFiles = $null
+        if ($doMedia -and -not $finalInstall) { throw 'Refreshed media requires Create updated install.wim.' }
+        if ($doBoot) {
+            # boot.wim is patched only for the refreshed media / ISO (Terry, 2026-09-27): SCCM task sequences and upgrade
+            # packages never use the OS media's boot.wim, so there is no separate NEWWIM\boot.wim any more.
             $sourceBoot = Join-Chain $osDrive @('sources', 'boot.wim')
             if (-not (Test-Path -LiteralPath $sourceBoot)) { throw "boot.wim not found at $sourceBoot" }
             Set-Phase 'Servicing boot.wim'
             Set-Progress 75 'Servicing boot.wim'
-            Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
-            $finalBoot = Join-Path $paths.NewWim 'boot.wim'
-            Service-BootWim -SourceBoot $sourceBoot -Destination $finalBoot -Paths $paths -Packages $packages
-            Write-Log "Import-ready boot.wim created: $finalBoot"
+            $finalBoot = Join-Path $paths.Working 'boot.serviced.wim'
+            $bootFiles = Service-BootWim -SourceBoot $sourceBoot -Destination $finalBoot -Paths $paths -Packages $packages
+            Write-Log "Patched boot.wim ready for the media: $finalBoot"
         }
-        if ($Options.BuildMedia -or $Options.BuildIso) {
-            if (-not $finalInstall) { throw 'Refreshed media requires Create updated install.wim.' }
+        if ($doMedia) {
             Set-Phase 'Building refreshed media folder'
             Set-Progress 88 'Building refreshed media folder'
             Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
-            $mediaFolder = New-RefreshedMedia -OsDrive $osDrive -Paths $paths -InstallWim $finalInstall -BootWim $finalBoot -SetupDu $packages.SetupDU
+            $mediaFolder = New-RefreshedMedia -OsDrive $osDrive -Paths $paths -InstallWim $finalInstall -BootWim $finalBoot -SetupDu $packages.SetupDU -BootFiles $bootFiles
+            if ($doBoot) { $finalBoot = Join-Chain $mediaFolder @('sources', 'boot.wim') }
             if ($Options.BuildIso) { Set-Phase 'Building ISO'; Set-Progress 94 'Building ISO'; Build-IsoFromMedia -MediaFolder $mediaFolder -Paths $paths }
         }
         $changeLogPaths = $null
@@ -1937,14 +1999,14 @@ function Invoke-MediaRefresh {
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
     <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/></ContextMenu></Button.ContextMenu>
    </Button>
-   <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files (and optional boot.wim, refreshed media folder and ISO)." Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
+   <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files, with optional refreshed media and ISO." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
   </Grid>
   <TabControl Grid.Row="1">
    <TabItem Header="Source and targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="F:\mediaRefresh" Height="30" Padding="6"/>
     <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
-    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Create updated boot.wim (usually only needed per major CM update)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder for an OS Upgrade Package (NEWWIM\Media)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
+    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder or the ISO is built."/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
    <TabItem Header="Updates and features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -2208,6 +2270,12 @@ function Get-UiOptions {
     }
 }
 $script:OsCombo.Add_SelectionChanged({ Set-OsSettings; Update-ProfileInfo; Update-HeaderIdle })
+function Update-BootOption {
+    # boot.wim is patched only for the media (Terry, 2026-09-27): its checkbox is available while the media folder or the
+    # ISO is ticked. Its own tick is kept, so it comes back as it was when media is ticked again.
+    $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked -or [bool]$script:ChkBuildIso.IsChecked
+}
+foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
 $script:SaveSettingsButton.Add_Click({
     if (-not $script:RunButton.IsEnabled) { return }
     try { if (Save-CurrentOsSettings) { $script:Status.Text = "Settings saved for $([string]$script:OsCombo.SelectedItem)" } }
@@ -2232,6 +2300,7 @@ Update-ProfileList
 Set-OsSettings
 Update-ProfileInfo
 Update-HeaderIdle
+Update-BootOption
 
 # ---- Background execution: the engine runs on its own runspace so the window never blocks on DISM ----
 # The engine text is read from this file (the ENGINE region) and loaded into a fresh runspace. It talks to the window through a

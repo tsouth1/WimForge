@@ -79,6 +79,16 @@ if ($wpf) {
     Reset-CurrentOsSettings
     Check 'WPF: Reset to defaults deletes the OS''s settings file and restores the defaults' (-not (Test-Path $savedFile) -and (& $ticks) -eq $defaultTicks -and (& $picked) -eq 'de-de,en-gb,es-es,fr-fr,it-it,ja-jp,ko-kr,pt-br,zh-cn,zh-tw')
 
+    # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
+    Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
+    Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso\)\)[^\r\n]*').Value)
+    $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $false; Update-BootOption
+    Check 'Patch boot.wim is below the media option, ticked by default, and unavailable without media' ([string]$script:ChkBoot.Content -like 'Patch boot.wim (WinPE and Setup)*not used by SCCM*' -and $script:DefaultChecks['Boot'] -and -not $script:ChkBoot.IsEnabled -and $script:ChkBoot.Parent.Children.IndexOf($script:ChkBoot) -eq $script:ChkBoot.Parent.Children.IndexOf($script:ChkBuildMedia) + 1)
+    $script:ChkBuildMedia.IsChecked = $true
+    $en1 = $script:ChkBoot.IsEnabled; $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $true
+    $en2 = $script:ChkBoot.IsEnabled; $script:ChkBuildIso.IsChecked = $false
+    Check 'ticking the media folder or the ISO makes Patch boot.wim available; unticking both greys it out again' ($en1 -and $en2 -and -not $script:ChkBoot.IsEnabled)
+
     # Colour schemes (General Settings tab) on the real window
     $script:ThemedStyleXaml = [regex]::Match($src, "(?s)\`$script:ThemedStyleXaml = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
     foreach ($fn in 'New-SchemeBrush', 'Set-TitleBarDark', 'Set-ColorScheme', 'Add-LogText') {
