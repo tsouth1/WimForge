@@ -20,6 +20,9 @@ Profiles/
 Settings/
 INSTRUCTIONS.md.bak
 
+# Microsoft's Make2023BootableMedia.ps1 -- local reference copy for step 12a, not ours to commit
+Make2023BootableMedia.ps1
+
 # OS/editor noise
 Thumbs.db
 .DS_Store
