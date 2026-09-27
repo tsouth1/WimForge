@@ -311,13 +311,19 @@ function Write-ProfileMessages {
     $script:ProfileMessages.Clear()
 }
 function Save-BuiltInProfiles {
-    param([Parameter(Mandatory)][string]$Directory)
+    # Writes the built-in profile files that are missing; never touches an existing file. Skips a built-in OS that another
+    # file already defines ($SkipNames) or that was switched off by renaming its file to <folder>.json.disabled.
+    # Returns the names of the files written.
+    param([Parameter(Mandatory)][string]$Directory, [string[]]$SkipNames = @())
     Ensure-Directory $Directory
+    $written = [System.Collections.Generic.List[string]]::new()
     foreach ($d in (Get-BuiltInProfileData)) {
         $file = Join-Path $Directory ($d.folder + '.json')
-        if (Test-Path -LiteralPath $file) { continue }
+        if ((Test-Path -LiteralPath $file) -or (Test-Path -LiteralPath "$file.disabled") -or (@($SkipNames) -contains $d.name)) { continue }
         [System.IO.File]::WriteAllText($file, (($d | ConvertTo-Json -Depth 6) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+        $written.Add((Split-Path $file -Leaf))
     }
+    return $written.ToArray()
 }
 function Import-OsProfiles {
     # Returns an ordered table name -> profile. Problems are collected in $script:ProfileMessages (flush with Write-ProfileMessages).
@@ -328,8 +334,13 @@ function Import-OsProfiles {
         try {
             # Languages.json (the Languages tab list, step 10e) lives in the same folder but is not an OS profile.
             $profileFiles = { @(Get-ChildItem -LiteralPath $Directory -Filter '*.json' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne $script:LanguagesFileName } | Sort-Object Name) }
-            $hasJson = (Test-Path -LiteralPath $Directory) -and (@(& $profileFiles).Count -gt 0)
-            if (-not $hasJson) { Save-BuiltInProfiles -Directory $Directory; Add-ProfileMessage 'INFO' "Profile files created from the built-in profiles: $Directory" }
+            # Every start and every Reload: a built-in profile whose file is missing is written again (Terry, 2026-09-27),
+            # so deleting one file and pressing Reload gives a fresh copy of that OS. Existing files are never changed;
+            # an OS is switched off by renaming its file to <folder>.json.disabled. The OS names already defined by the
+            # existing files are read first, so an OS kept under another file name is not duplicated.
+            $definedNames = @(foreach ($f in @(& $profileFiles)) { try { [string](Get-ProfileValue ([System.IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json -ErrorAction Stop) 'name' '') } catch { } })
+            $created = @(Save-BuiltInProfiles -Directory $Directory -SkipNames $definedNames)
+            if ($created.Count -gt 0) { Add-ProfileMessage 'INFO' "Profile files created from the built-in profiles in ${Directory}: $($created -join ', ')" }
             foreach ($f in @(& $profileFiles)) {
                 try {
                     $obj = [System.IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json -ErrorAction Stop

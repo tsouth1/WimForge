@@ -49,7 +49,7 @@ Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO.
 
 **Beside the script** WimForge keeps two folders of its own:
 
-- `Profiles` - one JSON file per operating system (edition, language pack pattern, catalog search rules, end-of-support date, ...) and `Languages.json` (the list on the Languages tab). They are written from the built-in defaults the first time. Edit a file and press "Reload profiles" to use the change; a broken file is reported in the log and skipped. To go back to the built-in defaults, delete the file (or the whole folder) and press "Reload profiles".
+- `Profiles` - one JSON file per operating system (edition, language pack pattern, catalog search rules, end-of-support date, ...) and `Languages.json` (the list on the Languages tab). They are written from the built-in defaults the first time. Edit a file and press "Reload profiles" to use the change; a broken file is reported in the log and skipped. Existing files are never changed by WimForge. To go back to the built-in version of one OS, delete its file and press "Reload profiles": a fresh copy is written (the other files are not touched). To take an OS off the list, rename its file to `<name>.json.disabled`.
 - `Settings` - the choices saved with "Save settings" (one file per OS) and `General.json` (the repository root and the colour scheme).
 
 ## Recommended order of work

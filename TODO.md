@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 480 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 483 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -448,6 +448,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: Reload profiles (and every start) now writes a built-in profile again when its file is missing - so deleting one file and pressing Reload gives a fresh copy of that OS; existing files are never changed; an OS is switched off by renaming its file to <folder>.json.disabled; an OS kept under another file name is not duplicated. Before, built-ins were written only into a folder with no profile file at all. Test kit 483 checks.
 - 2026-09-27: step 7 built - SCCM tab: Connect, distribution target, content source with UNC preview, image name (OS + yyyyMM), package type; check-then-confirm import that copies, creates the OS image / upgrade package and distributes; run record NEWWIM\RunResult.json; FAILED gate refused; duplicates get a number; optional import after the run. Test kit 480 checks.
 - 2026-09-27: step 11 built - Apps tab: the selected edition's provisioned apps (read from the ISO on request, by a preflight when missing or stale, and by every run), ticks saved per OS by name, ticked apps removed as the first servicing step, checked by Verify; Server exempt. Test kit 446 checks.
 - 2026-09-27: step 10b built - Instructions tab renders `INSTRUCTIONS.md` (headings, nested and numbered lists, code, links) in the scheme's colours, with Reload; new `CodeBg` colour role. Test kit 422 checks.

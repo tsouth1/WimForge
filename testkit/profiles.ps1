@@ -31,16 +31,30 @@ $json = Get-Content (Join-Path $dir 'Win10_Enterprise_LTSC_2021_KMS.json') -Raw
 Check 'JSON is readable, camelCase, arrays stay arrays' ($json -match '"editionRegex"' -and $json -match '"altFolders":\s*\[\s*\]' -and $json -match '"defaultLanguages":\s*\[')
 Check 'no BOM in the files' ([System.IO.File]::ReadAllBytes((Join-Path $dir 'Win11_Enterprise_24H2.json'))[0] -eq 0x7B)
 
-Write-Host "`n=== P3 a new OS by file only; deleted built-in stays deleted; edits apply ==="
+Write-Host "`n=== P3 a new OS by file only; a deleted built-in comes back on Reload; .disabled switches one off; edits apply ==="
 $s25 = [ordered]@{ schemaVersion=1; name='Windows Server 2025'; sortOrder=60; folder='Windows_Server_2025'; serviceAllIndexes=$true; lpPattern='Microsoft-Windows-Server-Language-Pack_x64_{0}.cab'; endOfSupport='2034-11-14' }
 [System.IO.File]::WriteAllText((Join-Path $dir 'Windows_Server_2025.json'), ($s25 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+# Hand edits in the 2019 file, then the file is deleted: Reload writes a fresh built-in copy (Terry, 2026-09-27)
+$e19 = Get-Content (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json') -Raw | ConvertFrom-Json; $e19.preferredIndex = 7
+[System.IO.File]::WriteAllText((Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'), ($e19 | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
 Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
 $edit = Get-Content (Join-Path $dir 'Win11_Enterprise_24H2.json') -Raw | ConvertFrom-Json; $edit.preferredIndex = 4
 [System.IO.File]::WriteAllText((Join-Path $dir 'Win11_Enterprise_24H2.json'), ($edit | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
 $t = Import-OsProfiles -Directory $dir
-Check 'Server 2025 appears last, others remain' ($t.Count -eq 5 -and @($t.Keys)[-1] -eq 'Windows Server 2025')
-Check 'deleted 2019 profile is not re-created' (-not $t.Contains('Windows 10 Enterprise LTSC 2019 (IoT)') -and -not (Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')))
-Check 'edit to preferredIndex applied' ($t['Windows 11 Enterprise 24H2'].PreferredIndex -eq 4)
+Check 'Server 2025 appears last, the five built-ins remain' ($t.Count -eq 6 -and @($t.Keys)[-1] -eq 'Windows Server 2025')
+Check 'a deleted built-in profile is written again on Reload, fresh from the built-ins' ((Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')) -and $t['Windows 10 Enterprise LTSC 2019 (IoT)'].PreferredIndex -eq 1 -and [bool]($script:ProfileMessages | Where-Object { $_.Text -like 'Profile files created from the built-in profiles in *: Win10_Enterprise_LTSC_2019.json' }))
+Check 'edit to preferredIndex applied, and existing files are never rewritten' ($t['Windows 11 Enterprise 24H2'].PreferredIndex -eq 4)
+Rename-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json') 'Win10_Enterprise_LTSC_2019.json.disabled'
+$t = Import-OsProfiles -Directory $dir
+Check 'renaming a file to .json.disabled switches that OS off (not written again)' (-not $t.Contains('Windows 10 Enterprise LTSC 2019 (IoT)') -and -not (Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')) -and @($script:ProfileMessages | Where-Object { $_.Text -like 'Profile files created*' }).Count -eq 0)
+Rename-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json.disabled') 'Win10_Enterprise_LTSC_2019.json'
+Rename-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2021_KMS.json') 'KMS - my copy.json'
+$t = Import-OsProfiles -Directory $dir
+Check 'an OS kept under another file name is not duplicated by a new built-in file' (-not (Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2021_KMS.json')) -and $t['Windows 10 Enterprise LTSC 2021 (KMS)'].SourceFile -eq 'KMS - my copy.json' -and @($script:ProfileMessages | Where-Object { $_.Level -eq 'WARN' }).Count -eq 0)
+Rename-Item (Join-Path $dir 'KMS - my copy.json') 'Win10_Enterprise_LTSC_2021_KMS.json'
+Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'); Rename-Item (Join-Path $dir 'Windows_Server_2025.json') 'Windows_Server_2025.json.keep'
+$t = Import-OsProfiles -Directory $dir; Rename-Item (Join-Path $dir 'Windows_Server_2025.json.keep') 'Windows_Server_2025.json'; Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
+$t = Import-OsProfiles -Directory $dir   # leave the folder as the later sections expect: 2019 written again, Server 2025 present
 Check 'defaults filled in for a minimal file' ($t['Windows Server 2025'].KeepArchives -eq 3 -and $t['Windows Server 2025'].SpaceCheck -eq 'enforce' -and $t['Windows Server 2025'].MinFreeGB -eq 30)
 
 Write-Host "`n=== P4 invalid files are skipped with a clear message, the rest still load ==="
@@ -58,7 +72,7 @@ $bad = @{
 }
 foreach ($k in $bad.Keys) { [System.IO.File]::WriteAllText((Join-Path $dir $k), $bad[$k]) }
 $t = Import-OsProfiles -Directory $dir
-Check 'good profiles still load (5)' ($t.Count -eq 5)
+Check 'good profiles still load (the five built-ins and Server 2025)' ($t.Count -eq 6)
 $msgs = @($script:ProfileMessages | ForEach-Object { $_.Text })
 foreach ($k in ($bad.Keys | Where-Object { $_ -ne 'bad9.json' })) { Check "message names $k" (@($msgs | Where-Object { $_ -like "Profile file $k skipped:*" }).Count -eq 1) ($msgs -join ' | ') }
 Check 'duplicate name: first file by name wins, the other is skipped and named' (@($msgs | Where-Object { $_ -like 'Profile file Windows_Server_2025.json skipped: another file already defines*' }).Count -eq 1 -and $t['Windows Server 2025'].SourceFile -eq 'bad9.json')
@@ -70,7 +84,12 @@ $t2 = Import-OsProfiles -Directory $d2
 Check 'empty folder is populated' ($t2.Count -eq 5 -and @(Get-ChildItem $d2 -Filter *.json).Count -eq 5)
 $d3 = Join-Path $tmp 'allbad'; New-Item -ItemType Directory $d3 | Out-Null; Set-Content (Join-Path $d3 'x.json') '{ nope'
 $t3 = Import-OsProfiles -Directory $d3
-Check 'only-invalid folder falls back to built-ins with a warning' ($t3.Count -eq 5 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*using the built-in profiles*' }).Count -eq 1)
+Check 'a folder holding only a broken file gets the built-in files written beside it; the broken one is reported' ($t3.Count -eq 5 -and @(Get-ChildItem $d3 -Filter *.json).Count -eq 6 -and @($script:ProfileMessages | Where-Object { $_.Text -like 'Profile file x.json skipped:*' }).Count -eq 1)
+$d3b = Join-Path $tmp 'readonly_fallback'
+function Save-BuiltInProfiles { param($Directory, $SkipNames) throw 'Access to the path is denied.' }   # a folder that cannot be written
+$t3b = Import-OsProfiles -Directory $d3b
+Check 'a Profiles folder that cannot be written falls back to the built-in profiles with a warning' ($t3b.Count -eq 5 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*could not be used*' }).Count -eq 1 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*using the built-in profiles*' }).Count -eq 1)
+. ([scriptblock]::Create([regex]::Match((Get-Content -Raw $(if ($env:MR_SCRIPT) { $env:MR_SCRIPT } else { (Join-Path $PSScriptRoot '../MediaRefresh_v2.4.ps1') })), '(?s)function Save-BuiltInProfiles \{.*?\r?\n\}\r?\n').Value))   # the real one again
 $t4 = Import-OsProfiles -Directory (Join-Path $tmp 'nested\deep\Profiles')
 Check 'missing nested folder is created' ($t4.Count -eq 5 -and (Test-Path (Join-Path $tmp 'nested\deep\Profiles\Windows_Server_2022.json')))
 
