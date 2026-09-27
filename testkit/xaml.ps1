@@ -39,7 +39,7 @@ if ($wpf) {
     $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'
     Set-DefaultLanguages
     $items = @($script:LanguageList.Items)
-    Check 'WPF: one list item per Languages.json entry, shown as "full name - code"' ($items.Count -eq 20 -and [string]$items[0].Content -eq 'Catalan (Spain) - ca-es' -and [string]$items[0].Tag -eq 'ca-es')
+    Check 'WPF: one list item per Languages.json entry, shown as "full name - code"' ($items.Count -eq 21 -and [string]$items[0].Content -eq 'Catalan (Spain) - ca-es' -and [string]$items[0].Tag -eq 'ca-es')
     $selected = @($items | Where-Object { $_.IsSelected } | ForEach-Object { [string]$_.Tag })
     Check 'WPF: the OS profile defaults are pre-selected by code' (($selected -join ',') -eq 'de-de,en-gb,es-es,fr-fr,it-it,ja-jp,ko-kr,pt-br,zh-cn,zh-tw') ($selected -join ',')
     $langsLine = [regex]::Match($src, '\$langs = @\(foreach \(\$item in \$script:LanguageList\.Items\)[^\r\n]*').Value
@@ -144,11 +144,11 @@ if ($wpf) {
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
     Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
     $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $false; Update-BootOption
-    Check 'Patch boot.wim is below the media option, ticked by default, and unavailable without media' ([string]$script:ChkBoot.Content -like 'Patch boot.wim (WinPE and Setup)*not used by SCCM*' -and $script:DefaultChecks['Boot'] -and -not $script:ChkBoot.IsEnabled -and $script:ChkBoot.Parent.Children.IndexOf($script:ChkBoot) -eq $script:ChkBoot.Parent.Children.IndexOf($script:ChkBuildMedia) + 1)
+    $kids = $script:ChkBoot.Parent.Children
+    Check 'under the media option: the ISO, then Patch boot.wim (ticked by default); both unavailable without media' ([string]$script:ChkBoot.Content -like 'Patch boot.wim (WinPE and Setup)*not used by SCCM*' -and $script:DefaultChecks['Boot'] -and -not $script:ChkBoot.IsEnabled -and -not $script:ChkBuildIso.IsEnabled -and $kids.IndexOf($script:ChkBuildIso) -eq $kids.IndexOf($script:ChkBuildMedia) + 1 -and $kids.IndexOf($script:ChkBoot) -eq $kids.IndexOf($script:ChkBuildMedia) + 2 -and $script:ChkBuildIso.Margin.Left -eq $script:ChkBoot.Margin.Left -and $script:ChkBoot.Margin.Left -gt 0)
     $script:ChkBuildMedia.IsChecked = $true
-    $en1 = $script:ChkBoot.IsEnabled; $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $true
-    $en2 = $script:ChkBoot.IsEnabled; $script:ChkBuildIso.IsChecked = $false
-    Check 'ticking the media folder or the ISO makes Patch boot.wim available; unticking both greys it out again' ($en1 -and $en2 -and -not $script:ChkBoot.IsEnabled)
+    $en1 = $script:ChkBoot.IsEnabled -and $script:ChkBuildIso.IsEnabled; $script:ChkBuildMedia.IsChecked = $false
+    Check 'ticking the media folder makes the ISO and Patch boot.wim available; unticking it greys both out again' ($en1 -and -not $script:ChkBoot.IsEnabled -and -not $script:ChkBuildIso.IsEnabled)
     Check 'the CA 2023 option sits under Patch boot.wim, unticked by default, and is saved with the other options' ([string]$script:ChkMedia2023.Content -like "Also build CA 2023 media alongside it*Windows UEFI CA 2023*" -and -not $script:DefaultChecks['Media2023'] -and $script:SettingOptionNames -contains 'Media2023' -and $script:ChkMedia2023.Parent.Children.IndexOf($script:ChkMedia2023) -eq $script:ChkMedia2023.Parent.Children.IndexOf($script:ChkBoot) + 1)
     $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $true; $c1 = $script:ChkMedia2023.IsEnabled
     $script:ChkBoot.IsChecked = $false; $c2 = $script:ChkMedia2023.IsEnabled
@@ -160,7 +160,7 @@ if ($wpf) {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $tabNames = @(($win.FindName('LogBox').Parent.Parent.Items) | ForEach-Object { [string]$_.Header })
-    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Apps,SCCM,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
+    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and Targets,Updates and Features,Languages,Apps,SCCM,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
     $script:InstructionsViewer = $win.FindName('InstructionsViewer'); $script:InstructionsSource = $win.FindName('InstructionsSource')
     $script:InstructionsPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
     if (Test-Path $script:InstructionsPath) {

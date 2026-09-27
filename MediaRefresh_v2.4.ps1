@@ -368,7 +368,8 @@ function Get-BuiltInLanguageData {
     return @(
         @{ language = 'Catalan (Spain)'; code = 'ca-es' }, @{ language = 'Czech (Czech Republic)'; code = 'cs-cz' },
         @{ language = 'German (Germany)'; code = 'de-de' }, @{ language = 'English (United Kingdom)'; code = 'en-gb' },
-        @{ language = 'Spanish (Spain)'; code = 'es-es' }, @{ language = 'French (France)'; code = 'fr-fr' },
+        @{ language = 'Spanish (Spain)'; code = 'es-es' }, @{ language = 'Spanish (Mexico)'; code = 'es-mx' },
+        @{ language = 'French (France)'; code = 'fr-fr' },
         @{ language = 'Hungarian (Hungary)'; code = 'hu-hu' }, @{ language = 'Italian (Italy)'; code = 'it-it' },
         @{ language = 'Japanese (Japan)'; code = 'ja-jp' }, @{ language = 'Korean (South Korea)'; code = 'ko-kr' },
         @{ language = 'Polish (Poland)'; code = 'pl-pl' }, @{ language = 'Portuguese (Brazil)'; code = 'pt-br' },
@@ -2158,9 +2159,14 @@ function Connect-SccmSite {
     # Loads the module, reads the site code and lists the distribution points and groups (the SCCM tab's Connect button).
     param([Parameter(Mandatory)][string]$SiteServer)
     Write-Log "Connecting to Configuration Manager site server $SiteServer"
+    # Loading the console's module alone usually takes 20-60 seconds (Terry's first Connect took about a minute), so each
+    # step is shown in the status line and the header.
+    Set-Phase 'Loading the Configuration Manager module'; Set-Progress 10 'Loading the Configuration Manager module (can take a minute)'
     Import-SccmModule
+    Set-Phase 'Reading the site code'; Set-Progress 45 "Reading the site code from $SiteServer"
     $code = Get-SccmSiteCode -SiteServer $SiteServer
     Write-Log "Site code: $code"
+    Set-Phase 'Listing distribution points'; Set-Progress 70 "Listing the distribution points and groups of site $code"
     $lists = Invoke-InSccmSite -SiteCode $code -SiteServer $SiteServer -Script {
         [pscustomobject]@{
             DPs    = @(Get-CMDistributionPoint -AllSite | ForEach-Object { ([string]$_.NetworkOSPath).TrimStart('\') } | Where-Object { $_ } | Sort-Object -Unique)
@@ -2349,6 +2355,13 @@ function Invoke-MediaRefresh {
         Write-Log "ISO roles - OS: $($roles.OsDrive)  LanguagePack: $($roles.LpDrive)  FOD: $(@($roles.FodDrives) -join ', ')"
         foreach ($u in $roles.Unclassified) { Write-Log "ISO not recognised as OS, Language Pack or FOD (ignored): $u" 'WARN' }
         $osDrive = $roles.OsDrive
+        if ([bool]$Options.NetFx3 -and -not $appsOnly) {
+            # .NET Framework 3.5 always comes from the OS ISO's own sources\sxs (never Windows Update: -LimitAccess), for
+            # every OS; checked here so a missing source stops the run before any image is touched.
+            $sxsCheck = Join-Chain $osDrive @('sources', 'sxs')
+            if (-not (Test-Path -LiteralPath $sxsCheck)) { throw ".NET Framework 3.5 is ticked, but the OS ISO has no sources\sxs folder ($sxsCheck), which is where its files come from. Use a complete Microsoft OS ISO, or untick .NET Framework 3.5." }
+            Write-Log ".NET Framework 3.5 source: $sxsCheck (the OS ISO)"
+        }
         $fodSource = @(Get-FodSource $roles.FodDrives)
         $driveToFile = @{}
         foreach ($m in $mounted) { $driveToFile[$m.Drive] = (Split-Path $m.Path -Leaf) }
@@ -2524,13 +2537,13 @@ function Invoke-MediaRefresh {
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
   </Grid>
   <TabControl Grid.Row="1">
-   <TabItem Header="Source and targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <TabItem Header="Source and Targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="F:\mediaRefresh" Height="30" Padding="6"/>
     <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
-    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder or the ISO is built."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
+    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" IsEnabled="False" Margin="22,3,0,3" ToolTip="Available when the media folder is created"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder is created."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/></StackPanel></GroupBox>
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
-   <TabItem Header="Updates and features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <TabItem Header="Updates and Features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <GroupBox Grid.Column="0" Header="Patch selection" Margin="0,0,10,0"><StackPanel Margin="12"><CheckBox x:Name="ChkSSU" Content="Servicing Stack Update (PATCHES\SSU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkLCU" Content="Latest Cumulative Update (PATCHES\LCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSafeOS" Content="Safe OS Dynamic Update (PATCHES\SAFEOSDU, used for WinRE)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkNetCU" Content=".NET Cumulative Update (PATCHES\NETCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSetupDU" Content="Setup Dynamic Update (PATCHES\SETUPDU, used for refreshed media)" IsChecked="True" Margin="0,5"/></StackPanel></GroupBox>
     <GroupBox Grid.Column="1" Header="Optional content" Margin="10,0,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkNetFx3" Content="Enable .NET Framework 3.5 from OS ISO sources\sxs" IsChecked="False" Margin="0,5"/><TextBlock Text="Ticked patch types with an empty folder are logged and skipped, except LCU (and the SSU on legacy OSes), which stop the run so you never get an unpatched image by accident." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,16,0,0"/></StackPanel></GroupBox>
    </Grid></TabItem>
@@ -3004,7 +3017,7 @@ function Get-UiOptions {
     return [pscustomobject]@{
         OsName = [string]$script:OsCombo.SelectedItem; Root = [string]$script:RootText.Text
         PreflightOnly = [bool]$script:ChkPreflight.IsChecked; Install = [bool]$script:ChkInstall.IsChecked; Boot = [bool]$script:ChkBoot.IsChecked; WinRE = [bool]$script:ChkWinRE.IsChecked
-        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = [bool]$script:ChkBuildIso.IsChecked; Media2023 = [bool]$script:ChkMedia2023.IsChecked
+        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = ([bool]$script:ChkBuildIso.IsChecked -and [bool]$script:ChkBuildMedia.IsChecked); Media2023 = [bool]$script:ChkMedia2023.IsChecked
         RemoveApps = $(if ([bool]$script:ChkAppRemoval.IsChecked) { @(Get-TickedApps) } else { @() })
         SccmSiteServer = ([string]$script:SccmSiteServer.Text).Trim(); SccmTargetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); SccmTarget = ([string]$script:SccmTarget.Text).Trim()
         SccmContentSource = ([string]$script:SccmContentSource.Text).Trim(); SccmSourceServer = $script:SccmSourceServer; SccmPackageType = (Get-SccmPackageTypeTag); SccmImageName = ([string]$script:SccmImageName.Text).Trim()
@@ -3015,9 +3028,10 @@ function Get-UiOptions {
 }
 $script:OsCombo.Add_SelectionChanged({ Set-OsSettings; Update-ProfileInfo; Update-HeaderIdle })
 function Update-BootOption {
-    # boot.wim is patched only for the media (Terry, 2026-09-27): its checkbox is available while the media folder or the
-    # ISO is ticked. Its own tick is kept, so it comes back as it was when media is ticked again.
-    $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked -or [bool]$script:ChkBuildIso.IsChecked
+    # The ISO and boot.wim options depend on the media folder, so they are available only while it is ticked (Terry,
+    # 2026-09-27); their own ticks are kept, so they come back as they were when the media folder is ticked again.
+    $script:ChkBuildIso.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked
+    $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked
     # The CA 2023 media takes its boot files from the patched boot.wim, so it also needs Patch boot.wim ticked.
     $script:ChkMedia2023.IsEnabled = $script:ChkBoot.IsEnabled -and [bool]$script:ChkBoot.IsChecked
 }
@@ -3098,7 +3112,7 @@ try {
 }
 '@
 
-$script:RunQueue = $null; $script:RunShared = $null; $script:RunPs = $null; $script:RunRs = $null; $script:RunHandle = $null; $script:PendingDownloadOptions = $null; $script:PendingCleanupOptions = $null
+$script:RunQueue = $null; $script:RunShared = $null; $script:RunPs = $null; $script:RunRs = $null; $script:RunHandle = $null; $script:PendingDownloadOptions = $null; $script:PendingCleanupOptions = $null; $script:CurrentRunMode = ''
 $script:RunStatus = 'Ready'; $script:RunStarted = $null
 $script:UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:UiTimer.Interval = [TimeSpan]::FromMilliseconds(250)
@@ -3301,12 +3315,14 @@ function Complete-BackgroundRun {
         if ($script:HeaderPhase) { $script:HeaderPhase.Text = if ($wasCancelled) { 'Cancelled' } else { 'Failed' } }
         $m = if ($wasCancelled -and -not ($shared.ContainsKey('Message') -and $shared['Message'])) { 'The run was cancelled.' } elseif ($shared.ContainsKey('Message') -and $shared['Message']) { [string]$shared['Message'] } elseif ($engineErrors.Count -gt 0) { [string]$engineErrors[0] } else { 'The run ended unexpectedly. See the Log tab.' }
         Add-LogText "[$(if ($wasCancelled) { 'CANCELLED' } else { 'ERROR' })] $m"
+        if ($script:CurrentRunMode -eq 'SccmConnect') { $script:SccmSiteInfo.Text = "Not connected: $m" }
         [System.Windows.MessageBox]::Show($m, 'WimForge', 'OK', $(if ($wasCancelled) { 'Warning' } else { 'Error' })) | Out-Null
     }
 }
 
 function Start-BackgroundRun {
     param($Options)
+    $script:CurrentRunMode = [string](Get-ProfileValue $Options 'Mode' '')
     $script:RunQueue  = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
     $script:RunShared = [hashtable]::Synchronized(@{ Cancel = $false; Done = $false })
     $script:RunStatus = 'Starting...'; $script:RunStarted = [DateTime]::Now
@@ -3391,7 +3407,11 @@ function Start-SccmBackground {
     }
 }
 $script:PendingSccmOptions = $null
-$script:SccmConnectButton.Add_Click({ Start-SccmBackground -Mode 'SccmConnect' })
+$script:SccmConnectButton.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { return }
+    $script:SccmSiteInfo.Text = "Connecting to $(([string]$script:SccmSiteServer.Text).Trim()): loading the Configuration Manager module and reading the site. This usually takes up to a minute; the status line below shows each step."
+    Start-SccmBackground -Mode 'SccmConnect'
+})
 $script:SccmImportButton.Add_Click({ Start-SccmBackground -Mode 'SccmImport' -DryRun $true })
 $script:SccmTargetDP.Add_Checked({ Update-SccmTargetList }); $script:SccmTargetGroup.Add_Checked({ Update-SccmTargetList })
 $script:SccmTargetList.Add_SelectionChanged({ if ($script:SccmTargetList.SelectedItem) { $script:SccmTarget.Text = [string]$script:SccmTargetList.SelectedItem } })

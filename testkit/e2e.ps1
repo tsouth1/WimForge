@@ -24,7 +24,7 @@ function Reset-Test { $script:Calls.Clear(); $script:MountedList=@(); $script:Mo
 function New-File($p,$c='x'){ New-Item -ItemType Directory -Force (Split-Path $p) | Out-Null; Set-Content $p $c }
 $base = Join-Path $PWD 'e2e'; if (Test-Path $base) { Remove-Item -Recurse -Force $base }; New-Item -ItemType Directory $base | Out-Null
 $isos = Join-Path $base '_isos'
-function Fake-Iso($repoOsFolder,$isoName,$files){ $d = Join-Path $isos $isoName; foreach($f in $files){ New-File (Join-Path $d $f) }; New-File (Join-Path (Join-Path (Join-Path $base $repoOsFolder) 'ISO') "$isoName.iso"); $script:IsoMap["$isoName.iso"] = $d }
+function Fake-Iso($repoOsFolder,$isoName,$files){ $d = Join-Path $isos $isoName; foreach($f in $files){ New-File (Join-Path $d $f) }; New-File (Join-Path $d 'sources\sxs\microsoft-windows-netfx3-ondemand-package~31bf3856ad364e35~amd64~~.cab'); New-File (Join-Path (Join-Path (Join-Path $base $repoOsFolder) 'ISO') "$isoName.iso"); $script:IsoMap["$isoName.iso"] = $d }
 function Opts($os,$langs,[hashtable]$o=@{}) {
   $d = @{ Preflight=$false;Install=$true;Boot=$false;WinRE=$true;Verify=$true;BuildMedia=$false;BuildIso=$false;SSU=$true;LCU=$true;SafeOS=$true;NetCU=$true;SetupDU=$true;NetFx3=$true }
   foreach($k in $o.Keys){$d[$k]=$o[$k]}
@@ -594,5 +594,28 @@ Check 'a content source outside every share is refused' (Test-Refused19 (Opts19 
 Check 'an empty field is named' (Test-Refused19 (Opts19 @{ SccmTarget = '' }) 'Distribution point or group is empty*')
 Remove-Item (Join-Path $nw19 'RunResult.json') -Force
 Check 'no finished run: refused with what to do' (Test-Refused19 (Opts19) 'There is no finished run to import*')
+
+Write-Host "`n=== E20 .NET Framework 3.5: every OS, always from the OS ISO's sources\sxs (Terry's question, 2026-09-27) ==="
+$ewof20 = ${function:Enable-WindowsOptionalFeature}; $script:Nfx20 = [System.Collections.Generic.List[string]]::new()
+function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path, $FeatureName, [switch]$All, $Source, [switch]$LimitAccess, $LogPath) $script:Nfx20.Add("$FeatureName|$Source|All=$All|LimitAccess=$LimitAccess") }
+Get-ChildItem (Join-Path $base 'Windows_Server_2022\ISO') -Filter '*15.iso' | Remove-Item -Force   # E15's dummy ISO files
+Reset-Test; $script:ImageCount = 4; $script:SourceNames = @('Windows Server 2022 Standard'); Patches 'Windows_Server_2022' @('LCU/windows10.0-kb2-x64.msu')
+$srvIso20 = @(Get-ChildItem (Join-Path $base 'Windows_Server_2022\ISO') -Filter *.iso)[0].BaseName
+Invoke-MediaRefresh (Opts 'Windows Server 2022' @() @{ NetFx3 = $true; Verify = $false; SetupDU = $false })
+$expSxs20 = Join-Path (Join-Path $isos $srvIso20) 'sources\sxs'
+Check 'Server 2022: NetFx3 is enabled in all four indexes, from the OS ISO''s sources\sxs, never from Windows Update' ($script:Nfx20.Count -eq 4 -and @($script:Nfx20 | Where-Object { $_ -ne "NetFx3|$expSxs20|All=True|LimitAccess=True" }).Count -eq 0) ($script:Nfx20 -join ' / ')
+$script:ImageCount = 1; $script:Nfx20.Clear(); Reset-Test
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise')
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $true; Verify = $false; SetupDU = $false })
+Check 'Windows 11 24H2: the same - NetFx3 from the Win11 OS ISO''s sources\sxs' ($script:Nfx20.Count -eq 1 -and $script:Nfx20[0] -like "NetFx3|$(Join-Path $isos 'os11')\sources\sxs|All=True|LimitAccess=True")
+Remove-Item (Join-Path $isos 'os11\sources\sxs') -Recurse -Force
+Reset-Test; $script:Nfx20.Clear(); $threw = $false
+try { Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $true; Preflight = $true }) } catch { $threw = $true; $m20 = $_.Exception.Message }
+Check 'NetFx3 ticked but the OS ISO has no sources\sxs: stopped in the preflight with what to do, nothing mounted' ($threw -and $m20 -like '*.NET Framework 3.5 is ticked, but the OS ISO has no sources\sxs folder*' -and @($script:Calls -match '^Mount').Count -eq 0)
+Reset-Test
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Preflight = $true })
+Check 'with NetFx3 unticked, a missing sources\sxs does not matter' ($script:LastResult.Preflight)
+New-File (Join-Path $isos 'os11\sources\sxs\microsoft-windows-netfx3-ondemand-package~31bf3856ad364e35~amd64~~.cab')
+Set-Item function:Enable-WindowsOptionalFeature $ewof20
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

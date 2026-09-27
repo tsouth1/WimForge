@@ -4,6 +4,7 @@
   { "language": "German (Germany)", "code": "de-de" },
   { "language": "English (United Kingdom)", "code": "en-gb" },
   { "language": "Spanish (Spain)", "code": "es-es" },
+  { "language": "Spanish (Mexico)", "code": "es-mx" },
   { "language": "French (France)", "code": "fr-fr" },
   { "language": "Hungarian (Hungary)", "code": "hu-hu" },
   { "language": "Italian (Italy)", "code": "it-it" },

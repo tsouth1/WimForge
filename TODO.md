@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 483 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 487 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -26,6 +26,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Built: Apps tab, list read from the image, ticked apps removed first (confirm on a real run) |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
+| [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Not started (Terry, 2026-09-27) |
 
 Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
@@ -378,6 +379,20 @@ Add these three OSes to the set the tool services, alongside the existing five (
 
 **Done when:** a profile exists for each of the three OSes (built-in or added the same way Terry can add any custom OS profile), the servicing engine runs against each with no code changes beyond the profile files, and at least one real (or dry-run) catalog search per OS confirms the search strings actually return the right update.
 
+<a id="s14"></a>
+## 14. Download patches: download only what is missing; option to use the patches already in the folders
+
+**Owner:** Claude. **Asked by Terry, 2026-09-27.**
+
+**How it works today (for reference):** "Download patches..." searches the catalog, shows the picks, and on confirmation downloads **every** pick again - `-Force` is passed since 2026-09-24, because MSCatalogLTS 2.1.0.1 skips an existing file without it and the pruning then removed the LCU it had just picked (step 2A). So a repeat run re-downloads files it already has (several GB for the Win11 LCU + checkpoint). Servicing runs never download anything: they always use what is in the PATCHES folders.
+
+**Wanted:**
+- **Download only what is missing.** After the search, compare each pick with what is already in its `PATCHES\<class>` folder and download only the picks that are not there. When every detected patch is already in the folders, download nothing and say so ("PATCHES is up to date"). The dry-run list should show, per pick, "already in PATCHES\LCU" or "will be downloaded".
+  - Design notes: match by KB number *and* file name (a catalog entry can carry several files - the combined 1809 .NET CU, the Win11 LCU with its checkpoint - so an entry counts as present only when all its files are); remember that 2.1.0.1 names saved files without the `_<hash>` part, and that older downloads may carry the long name (the pruning already treats a same-KB long-name file as a duplicate). Keep the safety net that pruning never removes a file whose KB was picked. A file of the right name but a wrong size (an interrupted download) should count as missing - compare with the catalog's size where the module gives one.
+- **A checkbox to skip automatic patching entirely** ("use the patches already in the folders"): when ticked, the latest detected updates are not used - the run services with exactly the files that are in `PATCHES`. To settle with Terry when designing: today a run never downloads on its own (downloading is only the button), so this checkbox matters once runs fetch the latest patches themselves (for example a "download the latest patches before the run" option, or the scheduled monthly run in step 8). Options: (a) add "Download the latest patches first" to the run, with this checkbox as its opposite; or (b) make the checkbox disable "Download patches..." and the catalog step of a scheduled run. Saved per OS like the other options.
+
+**Done when:** a repeat "Download patches..." with nothing new downloads nothing and says so; a partly current folder gets only the missing files; the dry-run list shows present vs to-download per pick; the checkbox makes runs use only what is in PATCHES; tests cover all-present, some-missing, multi-file entries, long-name files and an interrupted download.
+
 ---
 
 <a id="built"></a>
@@ -448,6 +463,8 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: Spanish (Mexico) - es-mx added to the built-in language list and the repo Languages.json (21 entries). An existing Profiles\Languages.json is not changed: add the line there, or delete the file and press Reload profiles to get the new list.
+- 2026-09-27: small fixes from Terry's first SCCM Connect and review - tabs 'Source and Targets' / 'Updates and Features'; 'Also build an ISO' nested under the media option (available only while it is ticked); Connect shows each step (loading the console module takes up to a minute) and 'Not connected: ...' on failure; a preflight stops early when .NET Framework 3.5 is ticked and the OS ISO has no sources\sxs; the guide's .NET 3.5 text clarified (every OS, always from the OS ISO). Step 14 added (Download patches: only what is missing; option to use the folders as they are). Test kit 487 checks.
 - 2026-09-27: Reload profiles (and every start) now writes a built-in profile again when its file is missing - so deleting one file and pressing Reload gives a fresh copy of that OS; existing files are never changed; an OS is switched off by renaming its file to <folder>.json.disabled; an OS kept under another file name is not duplicated. Before, built-ins were written only into a folder with no profile file at all. Test kit 483 checks.
 - 2026-09-27: step 7 built - SCCM tab: Connect, distribution target, content source with UNC preview, image name (OS + yyyyMM), package type; check-then-confirm import that copies, creates the OS image / upgrade package and distributes; run record NEWWIM\RunResult.json; FAILED gate refused; duplicates get a number; optional import after the run. Test kit 480 checks.
 - 2026-09-27: step 11 built - Apps tab: the selected edition's provisioned apps (read from the ISO on request, by a preflight when missing or stale, and by every run), ticks saved per OS by name, ticked apps removed as the first servicing step, checked by Verify; Server exempt. Test kit 446 checks.

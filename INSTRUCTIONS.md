@@ -17,7 +17,7 @@ This guide covers the folders WimForge expects, every part of the window, the re
 
 ## Folder layout
 
-Everything lives under one **repository root** (the default is `F:\mediaRefresh`; change it on the Source and targets tab). Inside it there is one folder per operating system:
+Everything lives under one **repository root** (the default is `F:\mediaRefresh`; change it on the Source and Targets tab). Inside it there is one folder per operating system:
 
 - `Win10_Enterprise_LTSC_2019` - Windows 10 Enterprise LTSC 2019 (IoT)
 - `Win10_IoT_Enterprise_LTSC_2021` - Windows 10 IoT Enterprise LTSC 2021
@@ -30,7 +30,7 @@ WimForge creates the sub-folders of an OS folder the first time that OS is run:
 - `ISO` - put the ISOs here (see below).
 - `PATCHES` - the updates, one sub-folder per kind:
   - `PATCHES\SSU` - the servicing stack update, **always placed by hand** (LTSC 2019: KB5005112; LTSC 2021 IoT and KMS: `ssu-19041.3562-x64.msu`). WimForge never downloads into or deletes from this folder.
-  - `PATCHES\LCU` - the latest cumulative update. On Windows 11 24H2 this folder may also hold a checkpoint update; that is expected (see "Updates and features").
+  - `PATCHES\LCU` - the latest cumulative update. On Windows 11 24H2 this folder may also hold a checkpoint update; that is expected (see "Updates and Features").
   - `PATCHES\NETCU` - the .NET Framework cumulative update (one or two files).
   - `PATCHES\SAFEOSDU` - the Safe OS Dynamic Update, used for WinRE.
   - `PATCHES\SETUPDU` - the Setup Dynamic Update, used for the refreshed media.
@@ -54,7 +54,7 @@ Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO.
 
 ## Recommended order of work
 
-1. **Select the operating system** on the Source and targets tab.
+1. **Select the operating system** on the Source and Targets tab.
 2. **Fill PATCHES:** press "Download patches...", check the list it shows, and confirm. Put the SSU into `PATCHES\SSU` by hand (LTSC 2019 and LTSC 2021 only).
 3. **Run a preflight:** tick "Preflight check only" and press "Start refresh". It takes about a minute and changes nothing. In the log, check the ISO roles, the patch counts, the language packs and the `Selected client image index` line.
 4. **Run the real build:** untick "Preflight check only", choose the outputs, updates, languages and the apps to remove (Apps tab), and press "Start refresh". A run takes one to four hours depending on the OS and the number of languages.
@@ -71,7 +71,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 - **Right:** the operating system being worked on and the current phase (for example "Servicing install.wim (index 1)", then "Done", "Failed" or "Cancelled"). While nothing runs it shows the selected OS and "Idle".
 - **Tools** (top right): a menu with maintenance tools - see "Tools menu".
 
-### Source and targets tab
+### Source and Targets tab
 
 - **Repository root** - the folder that holds the OS folders.
 - **Operating system** - the OS to work on. The line under it shows the profile file in use and the end-of-support date (in red when support ends within 180 days or has ended).
@@ -84,16 +84,15 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 - **Create updated install.wim** - the main output.
 - **Service embedded WinRE** - patches the recovery environment inside the image once and reuses it for every index. WinRE gets the servicing stack from the LCU (the log says "LCU (servicing stack only)"; the rest of the LCU does not apply to WinRE) and the Safe OS Dynamic Update.
 - **Verify the final install.wim** - mounts the result read-only, logs its version, and checks that the cumulative update, the language packs and their fonts are really installed. Needed for the validation gate and for the full change log.
-- **Create refreshed media folder** - a complete installation media folder in `NEWWIM\Media`, for an OS Upgrade Package, a bootable USB stick or the ISO. It carries the new `install.wim` and the Setup Dynamic Update.
-  - **Patch boot.wim** - available when the media folder or the ISO is built, ticked by default. Patches the WinPE and Setup images in `boot.wim`, and copies `setup.exe`, `setuphost.exe` and the boot manager files from the patched `boot.wim` onto the media, so the media boots and installs with up-to-date files. SCCM task sequences and upgrade packages do not use this `boot.wim`; it matters only when a PC is booted from the media, ISO or USB.
+- **Create refreshed media folder** - a complete installation media folder in `NEWWIM\Media`, for an OS Upgrade Package, a bootable USB stick or the ISO. It carries the new `install.wim` and the Setup Dynamic Update. The options below it are available only while it is ticked.
+  - **Also build an ISO from that media** - builds `UpdatedMedia_<date>.iso` in `NEWWIM` (needs the Windows ADK).
+  - **Patch boot.wim** - ticked by default. Patches the WinPE and Setup images in `boot.wim`, and copies `setup.exe`, `setuphost.exe` and the boot manager files from the patched `boot.wim` onto the media, so the media boots and installs with up-to-date files. SCCM task sequences and upgrade packages do not use this `boot.wim`; it matters only when a PC is booted from the media, ISO or USB.
     - **Also build CA 2023 media alongside it** - available when Patch boot.wim is ticked. Builds a second copy, `NEWWIM\Media_CA2023` (and a `_CA2023` ISO), whose boot manager is signed by the newer "Windows UEFI CA 2023" certificate. It boots only on PCs whose firmware already trusts that certificate; the standard media is still built for all others. The log line `VERIFY CA 2023 media` confirms the signature.
-- **Also build an ISO from that media** - builds `UpdatedMedia_<date>.iso` in `NEWWIM` (needs the Windows ADK).
-
-### Updates and features tab
+### Updates and Features tab
 
 - **Servicing Stack Update**, **Latest Cumulative Update**, **Safe OS Dynamic Update**, **.NET Cumulative Update**, **Setup Dynamic Update** - which PATCHES folders are used. A ticked folder that is empty is logged and skipped, except the LCU (and the SSU on LTSC 2019 and LTSC 2021), which stop the run so an unpatched image is never produced by accident.
-- **Enable .NET Framework 3.5** - from the OS ISO's `sources\sxs`.
-- Windows 11 24H2 only: when `PATCHES\LCU` holds the LCU and its checkpoint update, only the LCU is installed and DISM takes what it needs from the checkpoint in the same folder (Microsoft's method). Keep both files in that folder and nothing else.
+  - About the LCU on Windows 11 24H2: when `PATCHES\LCU` holds the LCU and its checkpoint update, only the LCU is installed and DISM takes what it needs from the checkpoint in the same folder (Microsoft's method). Keep both files in that folder and nothing else.
+- **Enable .NET Framework 3.5** - available for **every** operating system (on Windows Server 2022 it is enabled in all four indexes). Its files always come from the **OS ISO's own `sources\sxs` folder**, never from Windows Update. It is enabled after the component cleanup and before the .NET cumulative update, so the .NET CU also updates it. A preflight stops with a clear message if the OS ISO has no `sources\sxs`. The tick is saved per OS.
 
 ### Languages tab
 
@@ -115,7 +114,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 Imports the latest finished run of the selected OS into Configuration Manager. Needs the Configuration Manager console on the build machine and rights on the site.
 
-- **Site server** - the site server's name (FQDN). **Connect** checks the console module and the site, reads the site code, and fills the pick list with the site's distribution points and groups.
+- **Site server** - the site server's name (FQDN). **Connect** checks the console module and the site, reads the site code, and fills the pick list with the site's distribution points and groups. It usually takes up to a minute (loading the console's PowerShell module is the slow part); the status line shows each step.
 - **Distribute to** - a distribution point or a distribution point group; type the name, or pick it from the list after Connect.
 - **Content source folder** - a folder on this server inside a shared folder (**Browse...** to pick it). The line under it shows the UNC path Configuration Manager imports from. Each import creates a new sub-folder named after the image; nothing already there is overwritten.
 - **Image name** - the OS name with the month (`yyyyMM`), following the selected OS; type another name if wanted (50 characters at most), **Reset** to go back. If an image of that name already exists, the new one gets " (2)", " (3)", ...; the existing one is never changed.

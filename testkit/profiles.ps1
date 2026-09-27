@@ -195,7 +195,7 @@ $langDir = Join-Path $tmp 'langprof'
 $script:ProfileMessages.Clear()
 $l1 = @(Import-LanguageList -Directory $langDir)
 $langFile = Join-Path $langDir 'Languages.json'
-Check 'a missing Languages.json is created from the built-in list and loaded' ((Test-Path $langFile) -and $l1.Count -eq 20 -and [bool]($script:ProfileMessages | Where-Object { $_.Text -like 'Language list created*' }))
+Check 'a missing Languages.json is created from the built-in list and loaded' ((Test-Path $langFile) -and $l1.Count -eq 21 -and [bool]($script:ProfileMessages | Where-Object { $_.Text -like 'Language list created*' }))
 Check 'the created file has the same content as the repo Languages.json' ((((Get-Content $langFile -Raw) | ConvertFrom-Json) | ForEach-Object { "$($_.language)|$($_.code)" }) -join ';' -eq (($repoLangs | ForEach-Object { "$($_.language)|$($_.code)" }) -join ';'))
 Check 'the created file has no BOM (same as the profile files)' ([System.IO.File]::ReadAllBytes($langFile)[0] -eq [byte][char]'[')
 [System.IO.File]::WriteAllText($langFile, '[ { "language": "German (Germany)", "code": "de-de" }, { "language": "Welsh (United Kingdom)", "code": "CY-GB" } ]')
@@ -204,7 +204,7 @@ Check 'an edited file wins over the built-in list (codes lower-cased)' ((($l2 | 
 foreach ($bad in @('not json', '[]', '[ { "language": "German" } ]', '[ { "language": "German", "code": "german" } ]', '[ { "language": "A", "code": "de-de" }, { "language": "B", "code": "DE-DE" } ]')) {
     [System.IO.File]::WriteAllText($langFile, $bad); $script:ProfileMessages.Clear()
     $lb = @(Import-LanguageList -Directory $langDir)
-    Check "a bad file falls back to the built-in list with a WARN: $bad" ($lb.Count -eq 20 -and [bool]($script:ProfileMessages | Where-Object { $_.Level -eq 'WARN' -and $_.Text -like 'Language list * could not be used*' }))
+    Check "a bad file falls back to the built-in list with a WARN: $bad" ($lb.Count -eq 21 -and [bool]($script:ProfileMessages | Where-Object { $_.Level -eq 'WARN' -and $_.Text -like 'Language list * could not be used*' }))
 }
 # Languages.json sits in the Profiles folder but is not an OS profile
 $mixDir = Join-Path $tmp 'mixprof'; $script:ProfileMessages.Clear()
