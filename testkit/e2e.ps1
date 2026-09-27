@@ -487,8 +487,17 @@ $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterp
 # Read apps from the ISO: works with empty PATCHES folders (it needs no patches), only mounts read-only, saves the list
 Reset-Test; Reset-Prov18; Remove-Item $appsFile18 -Force -ErrorAction SilentlyContinue
 Get-ChildItem (Join-Path $os18 'PATCHES\LCU') -File -ErrorAction SilentlyContinue | Remove-Item -Force
+Fake-Iso 'Win11Enterprise_24H2' 'aaa_lp11' @('x64/langpacks/Microsoft-Windows-Client-Language-Pack_x64_de-de.cab')   # sorts before os11.iso
+$logs18a = [System.Collections.Generic.List[string]]::new(); $phases18a = [System.Collections.Generic.List[string]]::new()
+$wl18a = ${function:Write-Log}; $sp18a = ${function:Set-Phase}
+function Write-Log { param($Message, $Level = 'INFO') $logs18a.Add("[$Level] $Message") }
+function Set-Phase { param([string]$Phase, [string]$OsName = $null) $phases18a.Add($Phase) }
 $a18 = Invoke-MediaRefresh ([pscustomobject]@{ OsName = 'Windows 11 Enterprise 24H2'; Root = $base; Mode = 'Apps'; PreflightOnly = $false; Install = $true; Boot = $false; WinRE = $true; Verify = $true; BuildMedia = $false; BuildIso = $false; SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; Languages = @('de-de') })
+Set-Item function:Write-Log $wl18a; Set-Item function:Set-Phase $sp18a
 $inv18 = Read-AppInventory -OsRoot $os18
+Check 'Read apps: only the OS ISO stays mounted; the Language Pack ISO found first is dismounted again at once' ((@($script:Calls -match '^(IsoDismount|Mount )') -join '|') -eq 'IsoDismount aaa_lp11.iso|Mount install.wim idx3 -> MainOS|IsoDismount os11.iso' -and [bool]($logs18a -match 'aaa_lp11\.iso is not the OS ISO; dismounted again') -and -not [bool]($logs18a -match 'ISO roles -')) ($script:Calls -join '; ')
+Check 'Read apps: the status shows each step' ((@($phases18a) -join ' > ') -eq 'Reading provisioned apps > Clearing stale mounts > Mounting ISOs > Finding the OS ISO > Mounting the edition read-only > Reading the provisioned apps > Discarding the read-only mount > Done') (@($phases18a) -join ' > ')
+Remove-Item (Join-Path $os18 'ISO\aaa_lp11.iso') -Force
 Check 'Read apps: the selected edition (index 3) is read from the OS ISO and saved for the Apps tab' ($a18.Mode -eq 'Apps' -and $a18.Count -eq 3 -and $a18.Index -eq 3 -and $inv18.Index -eq 3 -and $inv18.ImageName -eq 'Windows 11 Enterprise' -and (@($inv18.Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot,Microsoft.WindowsCalculator')
 Check 'Read apps: needs no patches and changes nothing (one read-only mount, discarded)' ((@($script:Calls | Where-Object { $_ -match '^(Mount|Dismount|Export|AddPkg|RemoveAppx)' }) -join '|') -eq 'Mount install.wim idx3 -> MainOS|Dismount MainOS discard') ($script:Calls -join '; ')
 $threw = $false; try { Invoke-MediaRefresh ([pscustomobject]@{ OsName = 'Windows Server 2022'; Root = $base; Mode = 'Apps'; PreflightOnly = $false; Languages = @() }) } catch { $threw = $true; $m18 = $_.Exception.Message }

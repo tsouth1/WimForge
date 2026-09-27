@@ -1506,7 +1506,9 @@ function Update-AppInventoryFromIso {
     param([hashtable]$Paths, [string]$SourceWim, [object]$Selected, [string]$IsoFile)
     $dl = if ($script:DismLogArgs) { $script:DismLogArgs } else { @{} }
     $wim = $SourceWim; $idx = [int]$Selected.ImageIndex; $tmp = $null
+    # Each step is shown in the status line and the header, as a read takes a few minutes (mostly the mount and discard).
     if ($SourceWim -like '*.esd') {
+        Set-Phase 'Exporting the edition from install.esd'; Set-Progress 25 'Exporting the edition from install.esd (ESD files cannot be mounted; can take several minutes)'
         $tmp = Join-Path $Paths.Temp 'apps.read.wim'; Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         Export-WindowsImage -SourceImagePath $SourceWim -SourceIndex $idx -DestinationImagePath $tmp -CompressionType Max @dl -ErrorAction Stop | Out-Null
         $wim = $tmp; $idx = 1
@@ -1514,8 +1516,11 @@ function Update-AppInventoryFromIso {
     Write-Log "Reading the provisioned apps of index $($Selected.ImageIndex) ($($Selected.ImageName)) from $IsoFile (read-only mount)"
     Remove-DirectoryContents $Paths.MainMount
     try {
+        Set-Phase 'Mounting the edition read-only'; Set-Progress 40 "Mounting index $($Selected.ImageIndex) ($($Selected.ImageName)) read-only"
         Mount-WindowsImage -ImagePath $wim -Index $idx -Path $Paths.MainMount -ReadOnly @dl -ErrorAction Stop | Out-Null
+        Set-Phase 'Reading the provisioned apps'; Set-Progress 70 'Reading the provisioned apps'
         $apps = @(Get-ProvisionedApps $Paths.MainMount)
+        Set-Phase 'Discarding the read-only mount'; Set-Progress 85 "Discarding the read-only mount ($($apps.Count) app(s) found)"
         Dismount-WindowsImage -Path $Paths.MainMount -Discard @dl -ErrorAction Stop | Out-Null
     } catch { Dismount-IfMounted $Paths.MainMount; throw }
     finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
@@ -2349,6 +2354,30 @@ function Invoke-MediaRefresh {
         Set-Progress 3 'Mounting source media'
         $isoFiles = @(Get-ChildItem -LiteralPath $paths.ISO -Filter '*.iso' -File)
         if ($isoFiles.Count -eq 0) { throw "No ISO files found in $($paths.ISO)." }
+        if ($appsOnly) {
+            # Apps tab > Read apps from the ISO needs only the OS ISO (Terry, 2026-09-27: "at least a few minutes"). The full
+            # role detection below searches the Language Pack and FOD ISOs file by file, so here each ISO is mounted in turn
+            # until the one with sources\install.wim (or .esd) is found; any other ISO is dismounted again at once.
+            Set-Phase 'Finding the OS ISO'; Set-Progress 10 'Finding the OS ISO'
+            $osDrive = $null; $osIsoFile = $null
+            foreach ($f in $isoFiles) {
+                $drv = Mount-IsoFile $f.FullName
+                if ((Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.wim'))) -or (Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.esd')))) { $osDrive = $drv; $osIsoFile = $f.Name; break }
+                try { Dismount-DiskImage -ImagePath $f.FullName -ErrorAction Stop | Out-Null } catch { }
+                [void]$script:MountedIsoPaths.Remove($f.FullName)
+                Write-Log "$($f.Name) is not the OS ISO; dismounted again."
+            }
+            if (-not $osDrive) { throw "No OS ISO (one with sources\install.wim or install.esd) was found in $($paths.ISO)." }
+            Write-Log "OS ISO: $osIsoFile"
+            $sourceWim = if (Test-Path -LiteralPath (Join-Chain $osDrive @('sources', 'install.wim'))) { Join-Chain $osDrive @('sources', 'install.wim') } else { Join-Chain $osDrive @('sources', 'install.esd') }
+            $inventory = @(Get-WindowsImage -ImagePath $sourceWim)
+            Write-Log ('Detected indexes: ' + (($inventory | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" }) -join '; '))
+            $selected = Select-SourceImage -Inventory $inventory -Definition $definition -Name $name
+            $appsRead = @(Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile)
+            Set-Progress 100 'App list read'; Set-Phase 'Done'
+            $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = (Join-Path $paths.Root $script:AppInventoryFileName) }
+            return $script:LastResult
+        }
         $mounted = @()
         foreach ($f in $isoFiles) { $mounted += [pscustomobject]@{ Path = $f.FullName; Drive = (Mount-IsoFile $f.FullName) } }
         $roles = Get-IsoRoleMap $mounted
@@ -2386,14 +2415,6 @@ function Invoke-MediaRefresh {
         else { Write-Log "All $($inventory.Count) indexes will be serviced and recombined." }
         $osIsoPath = @($mounted | Where-Object { $_.Drive -eq $osDrive } | Select-Object -First 1 | ForEach-Object { $_.Path })[0]
         $osIsoFile = $driveToFile[$osDrive]
-        if ($appsOnly) {
-            # Apps tab > Read apps from the ISO: only the app list, nothing else.
-            Set-Phase 'Reading provisioned apps'; Set-Progress 50 'Reading provisioned apps'
-            $appsRead = @(Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile)
-            Set-Progress 100 'App list read'; Set-Phase 'Done'
-            $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = (Join-Path $paths.Root $script:AppInventoryFileName) }
-            return $script:LastResult
-        }
         Test-FreeSpace -Definition $definition -Paths $paths -SourceWim $sourceWim -OsIsoPath $osIsoPath -Options $Options
         if ($selected) {
             # The Apps tab's list: read during a preflight when there is none yet, or it came from another ISO or index.

@@ -105,7 +105,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 - Lists the **provisioned apps** of the selected edition (the apps every new user gets, such as Clipchamp or Xbox apps on Windows 11). Tick the apps to remove; they are removed from `install.wim` as the very first servicing step, before WinRE, updates and languages.
 - **Remove the ticked apps** - untick to keep the ticks but skip removal for a run.
-- **Read apps from the ISO** - mounts the edition from the OS ISO read-only (about a minute) and fills the list. Changes nothing. A preflight also reads the list when there is none yet or the ISO has changed, and every run refreshes it. The line above the list says which ISO and edition it came from.
+- **Read apps from the ISO** - mounts only the OS ISO, then the edition read-only, and fills the list; usually a few minutes (mostly mounting and discarding the image), with each step shown in the status line. Changes nothing. The LTSC editions have no provisioned apps, so their list is empty. A preflight also reads the list when there is none yet or the ISO has changed, and every run refreshes it. The line above the list says which ISO and edition it came from.
 - Press **Save settings** to keep the ticks for this OS. Ticks are kept by app name, so they carry over to newer ISOs. A ticked app that is not in the current list stays on it, marked, and is skipped (logged) if the image does not have it.
 - After the run, **Verify** checks that every ticked app is really gone; a leftover fails the validation gate. Each removal is a row in the change log.
 - Windows Server has no provisioned consumer apps, so the tab is greyed out for it.
