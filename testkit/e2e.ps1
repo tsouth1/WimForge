@@ -137,6 +137,19 @@ Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'os2021kms' @('sources/install.wim')
 Patches 'Win10_Enterprise_LTSC_2021_KMS' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb3-x64.msu')
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8b
 Check 'KMS profile selected index 1 (the non-IoT edition)' ($out8b -match 'Selected client image index 1: Windows 10 Enterprise LTSC 2021')
+# real ISO layouts (Terry, 2026-09-27): KMS = [1] Enterprise LTSC, [2] Enterprise N LTSC; IoT = [1] Enterprise LTSC, [2] IoT Enterprise LTSC
+Reset-Test; $script:SourceNames=@('Windows 10 Enterprise LTSC','Windows 10 Enterprise N LTSC')
+Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8c
+Check 'KMS real layout: index 1 (Enterprise LTSC), not the N edition' ($out8c -match 'Selected client image index 1: Windows 10 Enterprise LTSC\r?\n' -and $out8c -notmatch 'preferred index')
+Reset-Test; $script:SourceNames=@('Windows 10 Enterprise LTSC','Windows 10 IoT Enterprise LTSC')
+Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8d
+Check 'IoT real layout: index 2 (IoT Enterprise LTSC), no index warning' ($out8d -match 'Selected client image index 2: Windows 10 IoT Enterprise LTSC' -and $out8d -notmatch 'preferred index')
+Reset-Test; $script:SourceNames=@('Windows 10 Enterprise LTSC','Windows 10 IoT Ent LTSC renamed')
+Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8e
+Check 'IoT name not recognised: falls back to index 2, never index 1' ($out8e -match 'falling back to preferred index 2' -and $out8e -match 'Selected client image index 2:')
+Reset-Test; $script:SourceNames=@('Windows 10 IoT Enterprise LTSC','Windows 10 Enterprise LTSC')
+Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8f
+Check 'IoT edition found at an unexpected index: used, with a WARN naming the preferred index' ($out8f -match 'Selected client image index 1: Windows 10 IoT Enterprise LTSC' -and $out8f -match "not the profile's preferred index 2")
 # genuinely ambiguous ISO: the message must list indexes and names
 Reset-Test; $script:SourceNames=@('Windows 10 IoT Enterprise LTSC 2021','Windows 10 IoT Enterprise LTSC')
 $threw=$false; try { Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight=$true }) } catch { $threw=$true; $m8=$_.Exception.Message }

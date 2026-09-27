@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 335 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 339 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -81,8 +81,8 @@ Run with the regenerated profiles (`Profiles_corrected_2026-09-24.zip`, written 
 | OS folder | Needed | Why |
 |---|---|---|
 | Win10_Enterprise_LTSC_2019 | ~~1809 Language Pack ISO~~ **done 2026-09-25**: `SW_DVD9_NTRL_Win_10_1809_32_64_ARM64_MultiLang_LangPackAll_LIP_X21-91305.ISO` | The first attempt (`MediaRefresh_20260925_143636.log`) stopped because only the FOD ISOs were present. FOD ISOs carry `Microsoft-Windows-LanguageFeatures-*` capability cabs, which add spelling, fonts, OCR and speech on top of a language; the display language itself comes only from `Microsoft-Windows-Client-Language-Pack_x64_<lang>.cab` on the Language Pack ISO. |
-| Win10_Enterprise_LTSC_2021_KMS | Copy the `LangPackAll` (2004 family) ISO into this folder | It currently has only the OS ISO and FOD part 1. |
-| Win10_IOT_Enterprise_LTSC_2021 | FOD part 1 ISO, **or** confirmation that the LangPackAll ISO already carries `Microsoft-Windows-LanguageFeatures-*` cabs | Check with `Get-ChildItem X:\ -Recurse -Filter 'Microsoft-Windows-LanguageFeatures-*'` on the mounted ISO. |
+| Win10_Enterprise_LTSC_2021_KMS | ~~`LangPackAll` (2004 family) ISO~~ **done 2026-09-27** (Terry): the folder now holds four ISOs - OS, FOD part 1, FOD part 2 and the full Language Pack ISO | Preflight will confirm the ISO roles and that every selected language pack is found. |
+| Win10_IOT_Enterprise_LTSC_2021 | ~~FOD part 1 ISO~~ **done 2026-09-27** (Terry): same four ISOs as KMS - OS, FOD part 1, FOD part 2, full Language Pack ISO | Preflight will confirm the ISO roles. |
 | Win11 24H2, Server 2022 | Fresh Microsoft ISOs each cycle | English only, no LP/FOD ISOs needed. |
 
 **Questions to answer**
@@ -99,7 +99,9 @@ Run with the regenerated profiles (`Profiles_corrected_2026-09-24.zip`, written 
 
 **Runs, in order** (full test plan in `MediaRefresh_Review_and_Roadmap.md`, section 0)
 
-1. [ ] Preflight only, on every OS folder. Check the ISO role lines, patch counts, the language pack check and the `Detected indexes` / `Selected client image index` lines. Done so far: Win11 24H2 (2026-09-25) and LTSC 2019 (2026-09-25, all 10 language packs located).
+1. [ ] Preflight only, on every OS folder. Check the ISO role lines, patch counts, the language pack check and the `Detected indexes` / `Selected client image index` lines. Done so far: Win11 24H2 (2026-09-25), LTSC 2019 (2026-09-25, all 10 language packs located), LTSC 2021 KMS and IoT (2026-09-27: all ISO roles identified, FOD recognised). Server 2022 still to do.
+   - **Index selection, confirmed with Terry 2026-09-27:** LTSC 2019 has one index; KMS [1] Enterprise LTSC / [2] Enterprise N LTSC - build **index 1**; IoT [1] Enterprise LTSC / [2] IoT Enterprise LTSC - build **index 2, always**; Win11 24H2 has 10 indexes - build **index 3** (Enterprise) only; Server 2022 has 4 indexes - **all** serviced. The built-in IoT profile had `preferredIndex = 1` (used only when no image name matches, but then it would have fallen back to the non-IoT edition) - **fixed to 2**. A run also WARNs now when the edition name matches an index other than the profile's `preferredIndex`. 4 new checks on the real layouts (test kit 339).
+   - **Action for Terry:** the build machine's `Profiles\Win10_IoT_Enterprise_LTSC_2021.json` still has `"preferredIndex": 1` - set it to 2, or delete the file and press Reload profiles to regenerate it.
 2. [ ] First v2.4 servicing run: **LTSC 2021 KMS, de-de + ja-jp only**, WinRE on, NetFx3 on, Verify on (about 1.5 hours).
 3. [ ] LTSC 2021 KMS with all ten languages.
 4. [ ] Server 2022 (English only, four indexes). Confirm WinRE is serviced once and the same winre.wim is reused for every index.
@@ -371,6 +373,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: decision - languages go into install.wim only, never WinRE or boot.wim (the WinRE-with-languages test is dropped; removing the WinRE and boot.wim language steps is an open item). `Languages.json` committed (20 entries: en-gb and zh-tw added, en-us removed); Languages tab to be driven by it (step 10e).
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
+- 2026-09-27: IoT LTSC 2021 profile `preferredIndex` 1 -> 2 (index 2 is IoT Enterprise LTSC on the real ISO); a WARN when the edition name matches a different index than `preferredIndex`. Test kit 339 checks.
 - 2026-09-27: step 10c built - "Save settings" / "Reset to defaults" buttons; choices saved per OS in `Settings\<folder>.json`, repository root in `Settings\General.json`, loaded when the OS is selected. Test kit 335 checks.
 - 2026-09-25: second real Win11 24H2 run (gate PASSED) confirms the LCU/checkpoint fix on real DISM; change log fixed (per-step times in Section A, Setup DU recorded, WindowsApps housekeeping folders dropped from Section B); unpassed `[string[]]` parameters given an empty default (Windows PowerShell 5.1 throws on `@($x).Count` for an unbound typed array under StrictMode). Test kit 286 checks.
 - 2026-09-25: LCU step installs only the target LCU and leaves checkpoint(s) in the folder for DISM (Microsoft's method); open point added on the LCU not applying to WinRE. Test kit 282 checks.
