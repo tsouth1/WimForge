@@ -15,7 +15,7 @@ Dynamic Updates from the Microsoft Update Catalog (via the MSCatalogLTS
 module), with a dry-run preview before anything is downloaded.
 ![WimForge Screenshot](images/WimForge.png)
 ![WimForge Screenshot](images/Updates.png)
-![WimForge Screenshot](images/General.png)
+![WimForge Screenshot](images/general.png)
 ![WimForge Screenshot](images/lang.png)
 
 
