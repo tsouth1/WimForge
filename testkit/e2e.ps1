@@ -10,7 +10,10 @@ $script:SourceNames = @('Windows 10 Enterprise LTSC')
 function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath)
   return @([pscustomobject]@{ PackageName='Package_for_RollupFix~31bf3856ad364e35~amd64~~17763.9121.1.9'; PackageState='Installed'; ReleaseType='Update' }) + $script:ExtraPkgs + @($script:MockImagePackages) }
 function Get-WindowsCapability { [CmdletBinding()] param($Path,$LogPath) return $script:Caps }
-function Dismount-DiskImage { [CmdletBinding()] param($ImagePath) Note "IsoDismount $(Split-Path $ImagePath -Leaf)" }
+$script:AttachedIsos = [System.Collections.Generic.List[string]]::new()   # ISO files "mounted" outside a run (E15)
+function Dismount-DiskImage { [CmdletBinding()] param($ImagePath) Note "IsoDismount $(Split-Path $ImagePath -Leaf)"; [void]$script:AttachedIsos.Remove([string]$ImagePath) }
+function Get-DiskImage { [CmdletBinding()] param($ImagePath) [pscustomobject]@{ ImagePath = $ImagePath; Attached = $script:AttachedIsos.Contains([string]$ImagePath) } }
+function Clear-WindowsCorruptMountPoint { [CmdletBinding()] param() Note 'ClearCorruptMountPoint' }
 $script:IsoMap = @{}
 function Mount-IsoFile { param([string]$ImagePath) $script:MountedIsoPaths.Add($ImagePath); return $script:IsoMap[(Split-Path $ImagePath -Leaf)] }
 $script:ExtraPkgs = @(); $script:Caps = @()
@@ -289,5 +292,52 @@ Check 'WinRE and boot.wim were still serviced (LCU added to both)' (@($script:Ca
 Check 'the log says languages go into install.wim only' ([bool]($logs14 -match 'Languages are added to install.wim only; WinRE and boot.wim stay English-only'))
 
 Check 'Test-AppxPackageFolder keeps the real package folders and drops Deleted / Merged / other housekeeping folders' ($kept13.Count -eq 3 -and $kept13 -notcontains 'Deleted' -and $kept13 -notcontains 'Merged') ($kept13 -join ',')
+
+Write-Host "`n=== E15 Tools > Cleanup Mountpoints, and ISOs already mounted when a run starts (TODO 10d / step 8) ==="
+Check 'Test-PathUnder matches whole folder names only' ((Test-PathUnder 'F:\mr\Win11\MOUNT\MainOS\' 'F:\mr\Win11') -and (Test-PathUnder 'F:\MR\WIN11' 'f:\mr\win11\') -and -not (Test-PathUnder 'F:\mr\Win11_old\MOUNT' 'F:\mr\Win11') -and -not (Test-PathUnder 'G:\other' 'F:\mr'))
+# A crashed run: install.wim still mounted in LTSC 2019's MOUNT\MainOS, its WinRE mount failed and left files behind,
+# two ISOs still attached, plus an image mounted elsewhere on the machine that is none of our business.
+Reset-Test; $script:AttachedIsos.Clear()
+$c15 = Join-Path $base 'Win10_Enterprise_LTSC_2019'
+$main15 = Join-Path $c15 'MOUNT\MainOS'; $re15 = Join-Path $c15 'MOUNT\WinRE'
+New-File (Join-Path $main15 'Windows\x.txt'); New-File (Join-Path $re15 'leftover.txt')
+$script:MountedList = @([pscustomobject]@{ Path = $main15 + '\'; ImagePath = (Join-Path $c15 'WORKING\install.wim'); MountStatus = 'Invalid' },
+                        [pscustomobject]@{ Path = 'D:\SomeoneElse\Mount'; ImagePath = 'D:\x.wim'; MountStatus = 'Ok' })
+$iso15a = Join-Path $c15 'ISO\lp15.iso'; $iso15b = Join-Path $base 'Windows_Server_2022\ISO\srv15.iso'; $iso15c = Join-Path $base 'Windows_Server_2022\ISO\notmounted15.iso'
+foreach ($f in $iso15a, $iso15b, $iso15c) { New-File $f }
+$script:AttachedIsos.Add($iso15a); $script:AttachedIsos.Add($iso15b)
+$dry15 = Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'Cleanup'; DryRun = $true; Root = $base; OsName = '' })
+Check 'check-only pass finds the mounted image, both ISOs and the leftover WinRE folder' ($dry15.Mode -eq 'Cleanup' -and $dry15.DryRun -and @($dry15.Plan.WimMounts).Count -eq 1 -and (@($dry15.Plan.Isos | Sort-Object) -join '|') -eq ((@($iso15a, $iso15b) | Sort-Object) -join '|') -and (@($dry15.Plan.LeftoverFolders) -join '|') -eq $re15)
+Check 'the mounted folder itself is not listed as leftover files (it is discarded instead)' (@($dry15.Plan.LeftoverFolders) -notcontains $main15)
+Check 'an image mounted outside the repository root is listed as left alone' ((@($dry15.Plan.OtherWimMounts).Path -join '|') -eq 'D:\SomeoneElse\Mount')
+Check 'the check-only pass changes nothing and writes no log file' ($script:Calls.Count -eq 0 -and $script:AttachedIsos.Count -eq 2 -and (Test-Path (Join-Path $re15 'leftover.txt')) -and -not (Test-Path (Join-Path $base 'LOGS')))
+$real15 = Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'Cleanup'; DryRun = $false; Root = $base; OsName = '' })
+Check 'the image under the root is discarded, never saved; the other one is left mounted' (@($script:Calls -match '^Dismount MainOS discard').Count -eq 1 -and @($script:Calls -match 'save').Count -eq 0 -and @($script:MountedList).Count -eq 1 -and $script:MountedList[0].Path -eq 'D:\SomeoneElse\Mount') ($script:Calls -join '; ')
+Check 'corrupt mount points are cleared after discarding' ([bool]($script:Calls -contains 'ClearCorruptMountPoint'))
+Check 'both ISOs are dismounted; an ISO that was not mounted is not touched' ($script:AttachedIsos.Count -eq 0 -and @($script:Calls -match '^IsoDismount').Count -eq 2 -and -not ($script:Calls -contains 'IsoDismount notmounted15.iso'))
+Check 'the leftover WinRE mount folder is emptied' (@(Get-ChildItem $re15 -Force).Count -eq 0)
+Check 'the result lists four cleaned items and nothing left' (@($real15.Done).Count -eq 4 -and @($real15.Remaining).Count -eq 0 -and -not $real15.DryRun) (@($real15.Done) -join '; ')
+Check 'the real pass logs to <root>\LOGS\MountCleanup_<time>.log' ((Test-Path (Join-Path $base 'LOGS')) -and $script:LogFile -like (Join-Path $base 'LOGS\MountCleanup_*.log'))
+$script:LogFile = $null
+$dwi15 = ${function:Dismount-WindowsImage}
+# A discard that keeps failing is reported as still left, not as cleaned
+Reset-Test; $script:AttachedIsos.Clear()
+$script:MountedList = @([pscustomobject]@{ Path = $main15; ImagePath = 'x.wim'; MountStatus = 'Invalid' })
+function Dismount-WindowsImage { [CmdletBinding()] param($Path, [switch]$Save, [switch]$Discard, [switch]$CheckIntegrity, $LogPath) Note 'DismountFail'; throw 'Access is denied' }
+$stuck15 = Invoke-MountCleanup -Root $base
+Check 'an image that cannot be discarded is reported as still left, with a WARN' (@($stuck15.Remaining).Count -eq 1 -and @($stuck15.Remaining)[0] -like "Mounted image*MainOS" -and @($stuck15.Done).Count -eq 0)
+$script:MountedList = @()
+Check 'nothing mounted: the check finds nothing to do' ((Invoke-MountCleanup -Root $base -DryRun).Plan.Count -eq 0)
+$threw = $false; try { Invoke-MountCleanup -Root (Join-Path $base 'no_such_root') -DryRun } catch { $threw = $true }
+Check 'a repository root that does not exist is an error' $threw
+# Step 8: an ISO of this OS left attached is dismounted before a run mounts the ISOs itself
+Set-Item function:Dismount-WindowsImage $dwi15; Reset-Test
+$script:AttachedIsos.Clear(); $iso15k = Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\ISO\os2021kms.iso'; $script:AttachedIsos.Add($iso15k)
+$logs15 = [System.Collections.Generic.List[string]]::new()
+$wl15 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs15.Add("[$Level] $Message") }
+Clear-StaleIsoMounts (Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\ISO')
+Set-Item function:Write-Log $wl15
+Check 'an ISO already mounted at the start of a run is dismounted, with a WARN' ($script:AttachedIsos.Count -eq 0 -and [bool]($logs15 -match '^\[WARN\] ISO os2021kms\.iso was already mounted'))
+Check 'a servicing run calls the ISO check right after the stale-mount check' ($src -match "Clear-StaleMounts \`$paths\.Root\r?\n\s+Clear-StaleIsoMounts \`$paths\.ISO")
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

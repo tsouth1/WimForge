@@ -627,11 +627,16 @@ function Dismount-IfMounted {
         catch { Write-Log "Could not discard mounted image at ${Path}: $($_.Exception.Message)" 'WARN' }
     }
 }
+function Test-PathUnder {
+    # True when $Path is $Root or inside it, by whole folder names (F:\mr\Win11_old is not under F:\mr\Win11).
+    param([string]$Path, [string]$Root)
+    $p = Get-NormalizedPath $Path; $r = Get-NormalizedPath $Root
+    return [bool]($r -and ($p -eq $r -or $p.StartsWith($r + '\')))
+}
 function Clear-StaleMounts {
     param([string]$Root)
-    $rootN = Get-NormalizedPath $Root
     foreach ($m in @(Get-WindowsImage -Mounted -ErrorAction SilentlyContinue)) {
-        if ((Get-NormalizedPath $m.Path).StartsWith($rootN)) {
+        if (Test-PathUnder $m.Path $Root) {
             Write-Log "Found stale mount $($m.Path) (status $($m.MountStatus)); discarding it." 'WARN'
             try { Dismount-WindowsImage -Path $m.Path -Discard -ErrorAction Stop | Out-Null }
             catch {
@@ -640,6 +645,88 @@ function Clear-StaleMounts {
             }
         }
     }
+}
+function Test-IsoAttached {
+    param([string]$Path)
+    try { return [bool](Get-DiskImage -ImagePath $Path -ErrorAction Stop).Attached } catch { return $false }
+}
+function Clear-StaleIsoMounts {
+    # ISOs from an OS's ISO folder that are still mounted (left by a crashed run, or mounted by hand) are dismounted
+    # before a run mounts them itself (TODO step 8, ISO mount hygiene).
+    param([string]$IsoFolder)
+    foreach ($f in @(Get-ChildItem -LiteralPath $IsoFolder -Filter '*.iso' -File -ErrorAction SilentlyContinue)) {
+        if (-not (Test-IsoAttached $f.FullName)) { continue }
+        Write-Log "ISO $($f.Name) was already mounted (left by an earlier run, or mounted by hand); dismounting it." 'WARN'
+        try { Dismount-DiskImage -ImagePath $f.FullName -ErrorAction Stop | Out-Null }
+        catch { Write-Log "Could not dismount ISO $($f.FullName): $($_.Exception.Message)" 'WARN' }
+    }
+}
+function Get-MountCleanupPlan {
+    # What "Cleanup Mountpoints" (Tools menu) finds under the repository root: images mounted anywhere under it, mounted
+    # ISOs from any <OS>\ISO folder, and MOUNT sub-folders holding leftover files while nothing is mounted there.
+    # Images mounted outside the root are listed separately and never touched.
+    param([Parameter(Mandatory)][string]$Root)
+    $wim = @(); $other = @()
+    foreach ($m in @(Get-WindowsImage -Mounted -ErrorAction SilentlyContinue)) {
+        $e = [pscustomobject]@{ Path = ([string]$m.Path).TrimEnd('\'); ImagePath = [string](Get-ProfileValue $m 'ImagePath' ''); Status = [string](Get-ProfileValue $m 'MountStatus' '') }
+        if (Test-PathUnder $e.Path $Root) { $wim += $e } else { $other += $e }
+    }
+    $isos = @(); $folders = @()
+    foreach ($os in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
+        foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $os.FullName 'ISO') -Filter '*.iso' -File -ErrorAction SilentlyContinue)) {
+            if (Test-IsoAttached $f.FullName) { $isos += $f.FullName }
+        }
+        foreach ($d in @(Get-ChildItem -LiteralPath (Join-Path $os.FullName 'MOUNT') -Directory -ErrorAction SilentlyContinue)) {
+            if (@($wim | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $d.FullName) }).Count -gt 0) { continue }
+            if (@(Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0) { $folders += $d.FullName }
+        }
+    }
+    return [pscustomobject]@{ Root = $Root; WimMounts = @($wim); OtherWimMounts = @($other); Isos = @($isos); LeftoverFolders = @($folders); Count = ($wim.Count + $isos.Count + $folders.Count) }
+}
+function Invoke-MountCleanup {
+    # "Cleanup Mountpoints" (Tools menu, TODO step 10d). -DryRun only reports. Otherwise: discards every image mounted
+    # under the repository root (changes in it are lost), clears corrupt mount points, dismounts the ISOs and empties
+    # MOUNT sub-folders left with files, then checks again. Nothing outside the repository root is touched.
+    param([Parameter(Mandatory)][string]$Root, [switch]$DryRun)
+    Set-Phase -OsName 'Cleanup Mountpoints' -Phase $(if ($DryRun) { 'Checking mounts' } else { 'Cleaning up mounts' })
+    if (-not (Test-Path -LiteralPath $Root)) { throw "Repository root $Root does not exist." }
+    $plan = Get-MountCleanupPlan -Root $Root
+    Write-Log "Mount cleanup under $Root$(if ($DryRun) { ' (check only)' }): $($plan.WimMounts.Count) mounted image(s), $($plan.Isos.Count) mounted ISO(s), $($plan.LeftoverFolders.Count) mount folder(s) with leftover files."
+    foreach ($m in $plan.WimMounts) { Write-Log "  Mounted image: $($m.Path) ($($m.ImagePath), status $($m.Status))" }
+    foreach ($i in $plan.Isos) { Write-Log "  Mounted ISO: $i" }
+    foreach ($d in $plan.LeftoverFolders) { Write-Log "  Leftover files in: $d" }
+    foreach ($m in $plan.OtherWimMounts) { Write-Log "  Left alone (outside the repository root): $($m.Path)" }
+    $done = [System.Collections.Generic.List[string]]::new()
+    $remaining = @()
+    if (-not $DryRun) {
+        foreach ($m in $plan.WimMounts) {
+            Assert-NotCancelled
+            Write-Log "Discarding mounted image $($m.Path) (changes in it are not saved)."
+            try { Dismount-WindowsImage -Path $m.Path -Discard -ErrorAction Stop | Out-Null; $done.Add("Discarded mounted image $($m.Path)") }
+            catch { Write-Log "Discard failed for $($m.Path): $($_.Exception.Message)" 'WARN' }
+        }
+        if ($plan.WimMounts.Count -gt 0) {
+            Write-Log 'Clearing corrupt mount points (DISM /Cleanup-Mountpoints).'
+            try { Clear-WindowsCorruptMountPoint -ErrorAction Stop | Out-Null } catch { Write-Log "Clearing corrupt mount points failed: $($_.Exception.Message)" 'WARN' }
+        }
+        foreach ($i in $plan.Isos) {
+            Assert-NotCancelled
+            try { Dismount-DiskImage -ImagePath $i -ErrorAction Stop | Out-Null; Write-Log "Dismounted ISO $i"; $done.Add("Dismounted ISO $i") }
+            catch { Write-Log "Could not dismount ISO ${i}: $($_.Exception.Message)" 'WARN' }
+        }
+        # Checked again: a discard can leave files behind, and a failed discard may have been cleared above.
+        foreach ($d in (Get-MountCleanupPlan -Root $Root).LeftoverFolders) {
+            try { Get-ChildItem -LiteralPath $d -Force | Remove-Item -Recurse -Force -ErrorAction Stop; Write-Log "Emptied $d"; $done.Add("Emptied $d") }
+            catch { Write-Log "Could not empty ${d}: $($_.Exception.Message)" 'WARN' }
+        }
+        $after = Get-MountCleanupPlan -Root $Root
+        $remaining = @(@($after.WimMounts | ForEach-Object { "Mounted image $($_.Path)" }) + @($after.Isos | ForEach-Object { "Mounted ISO $_" }) + @($after.LeftoverFolders | ForEach-Object { "Leftover files in $_" }))
+        if ($remaining.Count -gt 0) { Write-Log "Mount cleanup finished; still left: $($remaining -join '; '). Restarting the build machine usually releases these; then run Cleanup Mountpoints again." 'WARN' }
+        else { Write-Log "Mount cleanup completed successfully ($($done.Count) item(s) cleaned)." }
+    }
+    Set-Phase 'Done'
+    $script:LastResult = [pscustomobject]@{ Mode = 'Cleanup'; DryRun = [bool]$DryRun; Root = $Root; Plan = $plan; Done = @($done); Remaining = @($remaining) }
+    return $script:LastResult
 }
 function Remove-DirectoryContents {
     param([string]$Path)
@@ -1657,6 +1744,16 @@ function Invoke-MediaRefresh {
     $script:VerifyBuildAfter = $null
     $script:BuildBefore = $null
     if ($Options.PSObject.Properties['ProfilesDir'] -and $Options.ProfilesDir) { $script:OsDefinitions = Import-OsProfiles -Directory ([string]$Options.ProfilesDir) }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Cleanup') {
+        # Tools menu > Cleanup Mountpoints: the whole repository root, not one OS. The real pass logs to <root>\LOGS.
+        $cleanRoot = ([string]$Options.Root).Trim()
+        $dry = [bool](Get-ProfileValue $Options 'DryRun' $true)
+        if (-not $dry -and (Test-Path -LiteralPath $cleanRoot)) {
+            $cleanLogs = Join-Path $cleanRoot 'LOGS'; Ensure-Directory $cleanLogs
+            $script:LogFile = Join-Path $cleanLogs ("MountCleanup_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        }
+        return (Invoke-MountCleanup -Root $cleanRoot -DryRun:$dry)
+    }
     $name = [string]$Options.OsName
     if (-not $name) { throw 'Select an operating system.' }
     $definition = $script:OsDefinitions[$name]
@@ -1689,6 +1786,7 @@ function Invoke-MediaRefresh {
     try {
         Set-Phase 'Clearing stale mounts'
         Clear-StaleMounts $paths.Root
+        Clear-StaleIsoMounts $paths.ISO
         foreach ($d in @($paths.Working, $paths.Temp, $paths.WinRE, $paths.MainMount, $paths.WinReMount, $paths.WinPeMount)) { Remove-DirectoryContents $d }
 
         $languages = @($Options.Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
@@ -1835,7 +1933,10 @@ function Invoke-MediaRefresh {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="WimForge v2.4" Height="780" Width="1040" WindowStartupLocation="CenterScreen" Background="{DynamicResource WF.WindowBg}" Foreground="{DynamicResource WF.Text}">
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-  <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+  <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
+    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/></ContextMenu></Button.ContextMenu>
+   </Button>
    <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files (and optional boot.wim, refreshed media folder and ISO)." Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
   </Grid>
@@ -1871,7 +1972,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -1930,6 +2031,8 @@ $script:ThemedStyleXaml = @'
     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.8"/></Trigger>
     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
  </Setter.Value></Setter></Style>
+ <Style TargetType="ContextMenu"><Setter Property="Background" Value="{DynamicResource WF.ControlBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/></Style>
+ <Style TargetType="MenuItem"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/></Style>
  <Style TargetType="TabControl"><Setter Property="Background" Value="{DynamicResource WF.PanelBg}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/></Style>
  <!-- The header colour is set on the header presenter only: the tab's page content inherits the TabItem's Foreground. -->
  <Style TargetType="TabItem"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
@@ -2177,7 +2280,7 @@ try {
 }
 '@
 
-$script:RunQueue = $null; $script:RunShared = $null; $script:RunPs = $null; $script:RunRs = $null; $script:RunHandle = $null; $script:PendingDownloadOptions = $null
+$script:RunQueue = $null; $script:RunShared = $null; $script:RunPs = $null; $script:RunRs = $null; $script:RunHandle = $null; $script:PendingDownloadOptions = $null; $script:PendingCleanupOptions = $null
 $script:RunStatus = 'Ready'; $script:RunStarted = $null
 $script:UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:UiTimer.Interval = [TimeSpan]::FromMilliseconds(250)
@@ -2220,6 +2323,35 @@ function Complete-BackgroundRun {
     $wasCancelled = ($script:Cancelled -or ($shared.ContainsKey('Cancel') -and $shared['Cancel']))
     $res = if ($shared.ContainsKey('Result')) { $shared['Result'] } else { $null }
     $isDownload = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Download')
+    $isCleanup = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Cleanup')
+
+    # Tools > Cleanup Mountpoints: the check-only pass finished. Show what it found and ask before discarding anything.
+    if ($isCleanup -and [bool]$res.DryRun -and -not $wasCancelled) {
+        $script:Status.Text = 'Ready'; $script:Progress.Value = 0
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        Update-HeaderIdle
+        $plan = $res.Plan
+        $outside = @($plan.OtherWimMounts | ForEach-Object { "  $($_.Path)" })
+        $outsideText = if ($outside.Count -gt 0) { "`n`nMounted outside the repository root (left alone):`n$($outside -join "`n")" } else { '' }
+        if ($plan.Count -eq 0) {
+            [System.Windows.MessageBox]::Show("Nothing to clean up under $($res.Root): no mounted images, no mounted ISOs and no leftover files in the MOUNT folders.$outsideText", 'WimForge - Cleanup Mountpoints', 'OK', 'Information') | Out-Null
+            return
+        }
+        $lines = @(@($plan.WimMounts | ForEach-Object { "  Discard mounted image: $($_.Path)" }) + @($plan.Isos | ForEach-Object { "  Dismount ISO: $_" }) + @($plan.LeftoverFolders | ForEach-Object { "  Empty leftover files in: $_" }))
+        $warnWim = if ($plan.WimMounts.Count -gt 0) { "`n`nDiscarding a mounted image throws away any changes in it. Only do this when no WimForge run or other DISM work is using it." } else { '' }
+        $answer = [System.Windows.MessageBox]::Show("Found under $($res.Root):`n`n$($lines -join "`n")$warnWim$outsideText`n`nClean these up now?", 'WimForge - Cleanup Mountpoints', 'YesNo', 'Warning')
+        if ($answer -eq 'Yes' -and $script:PendingCleanupOptions) {
+            $go = $script:PendingCleanupOptions
+            $go | Add-Member -NotePropertyName DryRun -NotePropertyValue $false -Force
+            $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+            try { Start-BackgroundRun -Options $go }
+            catch {
+                $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+                [System.Windows.MessageBox]::Show("Could not start the cleanup: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+            }
+        }
+        return
+    }
 
     # Step 5: a dry-run search finished. Show what it found and ask before really downloading, instead of unlocking
     # the buttons - the user's answer either restarts the background run for real, or returns everything to Ready.
@@ -2255,6 +2387,15 @@ function Complete-BackgroundRun {
     if ($ok) {
         $script:Status.Text = 'Done'; $script:Progress.Value = 100
         if ($script:HeaderPhase) { $script:HeaderPhase.Text = 'Done' }
+        if ($isCleanup) {
+            $left = @($res.Remaining)
+            $msg = "Cleaned up $(@($res.Done).Count) item(s) under $($res.Root)."
+            if (@($res.Done).Count -gt 0) { $msg += "`n`n" + ((@($res.Done) | ForEach-Object { "  $_" }) -join "`n") }
+            if ($left.Count -gt 0) { $msg += "`n`nStill left:`n" + (($left | ForEach-Object { "  $_" }) -join "`n") + "`n`nRestarting the build machine usually releases these; then run Cleanup Mountpoints again." }
+            [System.Windows.MessageBox]::Show($msg, 'WimForge - Cleanup Mountpoints', 'OK', $(if ($left.Count -gt 0) { 'Warning' } else { 'Information' })) | Out-Null
+            Update-HeaderIdle
+            return
+        }
         if ($isDownload) {
             $dl = @($res.Downloaded); $rm = @($res.Removed); $skip = @($res.SkippedClasses)
             $msg = "Downloaded $($dl.Count) file(s)."
@@ -2346,6 +2487,31 @@ $script:AcquirePatchesButton.Add_Click({
     } else {
         $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         [System.Windows.MessageBox]::Show('Downloading patches needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null
+    }
+})
+$script:ToolsButton.Add_Click({
+    $menu = $script:ToolsButton.ContextMenu
+    $menu.PlacementTarget = $script:ToolsButton; $menu.Placement = 'Bottom'; $menu.IsOpen = $true
+})
+$script:CleanupMountsItem.Add_Click({
+    # Tools > Cleanup Mountpoints: a check-only background pass first; Complete-BackgroundRun lists what it found and
+    # asks before a second pass discards / dismounts anything.
+    if (-not $script:RunButton.IsEnabled) {
+        [System.Windows.MessageBox]::Show('A run is in progress. Cleanup Mountpoints is available once it has finished or been cancelled.', 'WimForge', 'OK', 'Information') | Out-Null
+        return
+    }
+    if (-not $script:EngineText) {
+        [System.Windows.MessageBox]::Show('Cleanup Mountpoints needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null
+        return
+    }
+    $opts = [pscustomobject]@{ Mode = 'Cleanup'; DryRun = $true; Root = ([string]$script:RootText.Text).Trim(); OsName = [string]$script:OsCombo.SelectedItem }
+    $script:PendingCleanupOptions = $opts
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start Cleanup Mountpoints: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
     }
 })
 $script:CancelButton.Add_Click({

@@ -89,6 +89,9 @@ if ($wpf) {
     Check 'the General Settings tab has the scheme picker, swatches and a rich-text Log' ($null -ne $win.FindName('ColorSchemeCombo') -and $null -ne $script:SchemeSwatches -and $script:LogBox -is [System.Windows.Controls.RichTextBox])
     $threw = $null; try { $parsed = [Windows.Markup.XamlReader]::Parse($script:ThemedStyleXaml) } catch { $threw = $_.Exception.Message }
     Check 'the dark-scheme control styles load in WPF' ($null -eq $threw -and $parsed.Count -ge 10) $threw
+    $tools = $win.FindName('ToolsButton'); $cleanItem = $win.FindName('CleanupMountsItem')
+    Check 'the header has a Tools button whose menu holds Cleanup Mountpoints' ($null -ne $tools -and $null -ne $cleanItem -and @($tools.ContextMenu.Items) -contains $cleanItem -and [string]$cleanItem.Header -eq 'Cleanup Mountpoints...')
+    Check 'the dark-scheme styles cover the Tools menu (ContextMenu and MenuItem)' ($parsed.Contains([System.Windows.Controls.ContextMenu]) -and $parsed.Contains([System.Windows.Controls.MenuItem]))
     $col = { param($k) $win.FindResource($k).Color.ToString().Substring(3) }   # '#AARRGGBB' -> 'RRGGBB'
     [void](Set-ColorScheme 'Industrial Forge')
     Check 'WPF: a dark scheme sets its brushes and adds the control styles' ((& $col 'WF.WindowBg') -eq '2B2B2B' -and (& $col 'WF.Accent') -eq 'FF6A00' -and $win.Resources.MergedDictionaries.Count -eq 2 -and $script:SchemeSwatches.Children.Count -eq 5)
