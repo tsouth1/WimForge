@@ -123,6 +123,22 @@ Check 'preflight passes and flags itself' ($script:LastResult.Preflight -eq $tru
 Check 'no image is changed: no export, package, capability or feature call, and nothing is saved' (@($script:Calls | Where-Object { $_ -match '^(Export|AddPkg|AddCap|EnableFeature)|save$' }).Count -eq 0) ($script:Calls -join '; ')
 Check 'the only mount is the read-only one for the Apps tab list (no list yet), discarded again' ((@($script:Calls | Where-Object { $_ -match '^Mount ' }) -join '|') -eq 'Mount install.wim idx1 -> MainOS' -and ($script:Calls -contains 'Dismount MainOS discard')) ($script:Calls -join '; ')
 Check 'ISOs dismounted afterwards' (@($script:Calls | Where-Object {$_ -like 'IsoDismount*'}).Count -eq 3)
+# Host DISM vs image (TODO step 4): checked in preflight too, before anything is exported
+$script:HostDism = '10.0.20348.2849'
+$out7h = (Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','ja-jp') @{ Preflight=$true }) *>&1 | Out-String)
+Check 'preflight logs the host DISM and image versions' ($out7h -match 'Host DISM 10\.0\.20348\.2849; image 10\.0\.17763\.9121 \(index 1\)')
+Check 'preflight: no host-DISM WARN when the host is newer than the image' ($out7h -notmatch 'is older than the image build')
+$script:HostDism = '10.0.17134.1'
+$out7h = (Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','ja-jp') @{ Preflight=$true }) *>&1 | Out-String)
+Check 'preflight WARNs when the host DISM is older than the image, and still passes' ($out7h -match '\[WARN\] Host DISM build 17134 is older than the image build 17763' -and $script:LastResult.Preflight -eq $true)
+$hd = Test-DismHostVersion -ImagePath 'x.wim' -Index 2
+Check 'Test-DismHostVersion reads the given index and reports the result' ($hd.HostOlder -and $hd.Image -eq [version]'10.0.17763.9121' -and $hd.Host -eq [version]'10.0.17134.1')
+function Get-HostDismVersion { throw 'dism.exe not found' }
+$out7h = (Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','ja-jp') @{ Preflight=$true }) *>&1 | Out-String)
+Check 'a host DISM that cannot be read is a WARN, never fatal' ($out7h -match 'Could not compare host DISM and image versions: dism.exe not found' -and $script:LastResult.Preflight -eq $true)
+function Get-HostDismVersion { return [version]$script:HostDism }
+$script:HostDism = '10.0.26100.1'
+Reset-Test
 $threw=$false; try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','fr-fr') @{ Preflight=$true }) } catch { $threw=$true; $m7=$_.Exception.Message }
 Check 'preflight catches a language pack that is not on the ISO (fr-fr)' ($threw -and $m7 -like '*fr-fr*')
 

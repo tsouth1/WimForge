@@ -6,7 +6,7 @@ Last updated: 2026-09-27. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 480 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 485 checks (480 passing on Windows PowerShell 5.1 and PowerShell 7.6 on 2026-09-27; the 5 host-DISM checks added the same day were run on PowerShell 7.4 on Linux only).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -49,14 +49,14 @@ The script only logs a warning when the host DISM is older than the image. Servi
 - **The test this step waits for will not happen.** The decision was held open "until a Win11 run with languages", but Win11 24H2 (and Server 2022) are English-only by design (step 2B inputs table). The criterion needs replacing, not waiting on.
 - **What the three runs cover.** The host is Server 2022 with DISM 10.0.20348.2849. For today's five profiles only Win11 24H2 (26100) is newer than the host; LTSC 2019 (17763) and LTSC 2021 (19041) are older and Server 2022 (20348) is the same build. Win11 was serviced twice with no failure: LCU + checkpoint, Safe OS DU into WinRE, .NET CU, cleanup, export, Setup DU into the media. That is the whole Win11 path except what was built after 2026-09-25.
 - **Not yet covered on Win11 with the host DISM:** provisioned-app removal (step 11, now the first servicing step), and the boot.wim / CA 2023 media path (6, 12a). These are the operations where an older host is most likely to differ, so they are the real test now. They are all in the next Win11 run with apps ticked and media + ISO on (step 6).
-- **The check itself:** `Test-DismHostVersion` (`MediaRefresh_v2.4.ps1`, called after the export) runs only in a real run, not in preflight, so the operator learns about the mismatch only after the run has started. It compares `dism.exe` only; the PowerShell cmdlets load the same host DISM, so that is fine today, but it would not be if only one of the two were switched. No test in the test kit.
+- **The check itself (before 2026-09-27):** `Test-DismHostVersion` (`MediaRefresh_v2.4.ps1`, called after the export) ran only in a real run, not in preflight, so the operator learned about the mismatch only after the run had started. It compares `dism.exe` only; the PowerShell cmdlets load the same host DISM, so that is fine today, but it would not be if only one of the two were switched. It had no test (both fixed, see recommendation 2).
 - **Size of the switch, if made:** three places - `Import-Module Dism` at start-up and in the background runner (must load the ADK's `Microsoft.Dism.Powershell.dll` instead, before any Dism module is loaded in that session), and `dism.exe` in `Invoke-DismExe`. `Build-IsoFromMedia` already finds the ADK for oscdimg, so the ADK is installed; its version is still unknown.
 - **Where it will matter:** step 13. Win11 25H2 / 26H2 and Server 2025 are all newer than the Server 2022 host, - unlike Server 2022 today, Server 2025 is not the same build as the host.
 
 **Recommendation (Terry to decide):**
 
 1. Close the ADK question for the current five profiles: keep the host DISM (evidence above).
-2. Small change now: run the host-vs-image check in preflight too (image version comes from the ISO's WIM), and add a test.
+2. ~~Small change now: run the host-vs-image check in preflight too~~ **Built 2026-09-27:** `Test-DismHostVersion` now runs in preflight and in every run, before the export, reading the version of the selected index (the first index on Server) from the ISO's install.wim / .esd. It logs `Host DISM <ver>; image <ver> (index N)`, WARNs when the host is older, and is never fatal (an unreadable version is a WARN). `Get-HostDismVersion` is split out so the test kit can set the host version. 5 new checks in `e2e.ps1` E7 (test kit 485).
 3. Deciding data point: the next Win11 24H2 run with apps ticked and media + ISO on (step 6). A failure there reopens this step before step 13.
 4. Before step 13: either upgrade the build host to Server 2025, or add an ADK DISM option (ADK 10.1.26100 or later) covering both the cmdlets and `dism.exe`. Answer needed from Terry: the ADK version installed on the build host.
 
@@ -488,6 +488,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 
 ## History
 
+- 2026-09-27: host DISM vs image check runs in preflight too, before the export in a real run (step 4, recommendation 2). Test kit 485 checks.
 - 2026-09-27: step 2 closed (Terry) - catalog layer and three real runs with gate PASSED; the remaining real runs (LTSC 2021 KMS / IoT, Server 2022), feature checks and profile dates moved to step 6. Step 4 reviewed.
 - Recommendation: refactor MediaRefresh_v2 rather than start over or fork WimWizard (`MediaRefresh_Review_and_Roadmap.md`).
 - v2.1: null-safe patch/language handling, ISO roles detected by content, language packs checked before any mount, Microsoft servicing order (WinRE once, SSU, LP/FOD/fonts, LCU last, cleanup, NetFx3/.NET CU), stale-mount cleanup, DISM log in LOGS, verification mount, refreshed media folder, Preflight-only mode, per-OS default languages, folder aliases. Console "hang until Enter" fixed; IoT 2021 edition matching fixed; GUI kept responsive with a background runspace and soft cancel.

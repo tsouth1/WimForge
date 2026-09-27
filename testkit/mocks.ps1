@@ -39,6 +39,9 @@ $script:OptionalFeatures = @()
 $script:ProvisionedAppx = @()
 $script:FreeGB = 500.0
 function Get-FreeSpaceGB { param([string]$Path) return $script:FreeGB }
+# Host DISM version (step 4): newer than every mock image unless a test sets it.
+$script:HostDism = '10.0.26100.1'
+function Get-HostDismVersion { return [version]$script:HostDism }
 function Invoke-DismExe { param([string[]]$Arguments,[string]$Description,[switch]$AllowPending) Note "DISM: $Description" }
 
 $pass = 0; $fail = 0

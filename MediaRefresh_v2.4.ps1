@@ -819,17 +819,27 @@ function Invoke-DismExe {
         } else { throw "$Description failed with exit code $code." }
     }
 }
+function Get-HostDismVersion {
+    # dism.exe and the Dism cmdlets both use the host's DISM, so one version covers both.
+    return [version](Get-Command dism.exe -ErrorAction Stop).Version
+}
 function Test-DismHostVersion {
-    param([string]$ImageVersion)
+    # Runs in preflight and in every run, before anything is exported, so a mismatch is known before a run starts.
+    # Reads the version from the source WIM / ESD (the listing without -Index carries no version). Never fatal.
+    param([string]$ImagePath, [int]$Index)
     try {
-        $cmd = Get-Command dism.exe -ErrorAction Stop
-        $hostVer = [version]$cmd.Version
-        $imgVer  = [version]$ImageVersion
-        Write-Log "Host DISM $hostVer; image $imgVer"
-        if ($imgVer.Build -gt $hostVer.Build) {
+        $hostVer = Get-HostDismVersion
+        $imgVer  = [version](Get-WindowsImage -ImagePath $ImagePath -Index $Index -ErrorAction Stop).Version
+        $older = $imgVer.Build -gt $hostVer.Build
+        Write-Log "Host DISM $hostVer; image $imgVer (index $Index)"
+        if ($older) {
             Write-Log "Host DISM build $($hostVer.Build) is older than the image build $($imgVer.Build). Servicing may fail; use the ADK's DISM or a newer host." 'WARN'
         }
-    } catch { Write-Log "Could not compare host DISM and image versions: $($_.Exception.Message)" 'WARN' }
+        return [pscustomobject]@{ Host = $hostVer; Image = $imgVer; HostOlder = $older }
+    } catch {
+        Write-Log "Could not compare host DISM and image versions: $($_.Exception.Message)" 'WARN'
+        return $null
+    }
 }
 
 # ---------- change log helpers ----------
@@ -2370,6 +2380,7 @@ function Invoke-MediaRefresh {
             $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = (Join-Path $paths.Root $script:AppInventoryFileName) }
             return $script:LastResult
         }
+        [void](Test-DismHostVersion -ImagePath $sourceWim -Index $(if ($selected) { [int]$selected.ImageIndex } else { [int]$inventory[0].ImageIndex }))
         Test-FreeSpace -Definition $definition -Paths $paths -SourceWim $sourceWim -OsIsoPath $osIsoPath -Options $Options
         if ($selected) {
             # The Apps tab's list: read during a preflight when there is none yet, or it came from another ISO or index.
@@ -2405,7 +2416,6 @@ function Invoke-MediaRefresh {
             Export-WindowsImage -SourceImagePath $sourceWim -SourceIndex $selected.ImageIndex -DestinationImagePath $old -DestinationName $selected.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null
         }
         $first = Get-WindowsImage -ImagePath $old -Index (@(Get-WindowsImage -ImagePath $old)[0].ImageIndex)
-        Test-DismHostVersion -ImageVersion $first.Version
         $script:BuildBefore = [string]$first.Version
 
         $workingInstall = Join-Path $paths.Working 'install.working.wim'; Copy-Item -LiteralPath $old -Destination $workingInstall -Force
