@@ -286,6 +286,26 @@ $in13 = @(Split-MarkdownInline 'Run **it elevated** with `Unblock-File .\x.ps1`,
 Check 'inline: bold, code, link and italic runs, with the plain text between them' ((($in13 | ForEach-Object { "$($_.Kind):$($_.Text)" }) -join '|') -eq 'Text:Run |Bold:it elevated|Text: with |Code:Unblock-File .\x.ps1|Text:, see |Link:KB|Text: or |Italic:this|Text:.' -and $in13[5].Url -eq 'https://support.microsoft.com/kb')
 $in13b = @(Split-MarkdownInline 'Paths like NEWWIM\Media_CA2023 and `MediaRefresh_*` and C:\*.iso stay as written')
 Check 'underscores and a lone * are not markup; a * inside code stays in the code' ((($in13b | ForEach-Object { "$($_.Kind):$($_.Text)" }) -join '|') -eq 'Text:Paths like NEWWIM\Media_CA2023 and |Code:MediaRefresh_*|Text: and C:\*.iso stay as written')
+Write-Host "`n=== P14 provisioned apps: the saved list and the ticks (TODO step 11) ==="
+$os14 = Join-Path $tmp 'apps14\Win11_Enterprise_24H2'
+Check 'no app list yet reads as none' ($null -eq (Read-AppInventory -OsRoot $os14))
+$apps14 = @([pscustomobject]@{ DisplayName = 'Microsoft.BingNews'; Version = '4.1.0.0'; PackageName = 'Microsoft.BingNews_4.1.0.0_neutral_~_8wekyb3d8bbwe' },
+            [pscustomobject]@{ DisplayName = 'Microsoft.Copilot'; Version = '1.0.0.0'; PackageName = 'Microsoft.Copilot_1.0.0.0_neutral_~_8wekyb3d8bbwe' })
+$f14 = Save-AppInventory -OsRoot $os14 -Apps $apps14 -Source 'os11.iso' -Index 3 -ImageName 'Windows 11 Enterprise' -Version '10.0.26100.1'
+$r14 = Read-AppInventory -OsRoot $os14
+Check 'the app list is saved in <OS folder>\ProvisionedApps.json and read back with its source, index and apps' ((Split-Path $f14 -Leaf) -eq 'ProvisionedApps.json' -and $r14.Source -eq 'os11.iso' -and $r14.Index -eq 3 -and (@($r14.Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot' -and $r14.Apps[1].PackageName -like 'Microsoft.Copilot_*')
+[System.IO.File]::WriteAllText($f14, '{ "apps": [ { "version": "1" } ] }'); $script:LogLines.Clear()
+Check 'an unusable app list reads as none, with a WARN' ($null -eq (Read-AppInventory -OsRoot $os14) -and [bool]($script:LogLines -match 'WARN.*App list .* could not be used'))
+$sf14 = Save-OsSettings -Directory (Join-Path $tmp 'apps14\Settings') -Definition $kms -Options @{ AppRemoval = $true } -Languages @() -RemoveApps @('Microsoft.BingNews', 'Microsoft.Copilot')
+$rs14 = Read-OsSettings -Directory (Join-Path $tmp 'apps14\Settings') -Definition $kms -LanguageList $builtLangs
+Check 'the ticked apps (by name) and the Remove the ticked apps option are saved per OS and read back' ((@($rs14.RemoveApps) -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot' -and $rs14.Options['AppRemoval'] -eq $true)
+[System.IO.File]::WriteAllText($sf14, '{ "schemaVersion": 1, "options": { "LCU": true }, "languages": [ "de-de" ] }')
+$old14 = Read-OsSettings -Directory (Join-Path $tmp 'apps14\Settings') -Definition $kms -LanguageList $builtLangs
+Check 'a settings file saved before the Apps tab existed reads back with no ticked apps' ($null -ne $old14 -and @($old14.RemoveApps).Count -eq 0 -and (@($old14.Languages) -join ',') -eq 'de-de')
+$w11def = [pscustomobject]@{ Folder = 'Win11_Enterprise_24H2'; AltFolders = @('Win11Enterprise_24H2') }
+New-Item -ItemType Directory -Force (Join-Path $tmp 'apps14b\Win11Enterprise_24H2') | Out-Null
+Check 'Get-OsRootPath uses an accepted alternative folder name that exists, and never throws for a missing drive' ((Get-OsRootPath -Root (Join-Path $tmp 'apps14b') -Definition $w11def) -like '*\Win11Enterprise_24H2' -and (Get-OsRootPath -Root 'Q:\nowhere' -Definition $w11def) -eq 'Q:\nowhere\Win11_Enterprise_24H2')
+
 $guide13 = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
 if (Test-Path $guide13) {
     $gb13 = @(ConvertFrom-MarkdownBlocks ([System.IO.File]::ReadAllText($guide13)))

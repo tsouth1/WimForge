@@ -120,7 +120,8 @@ Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'lp2021' @('x64/langpacks/Microsoft-Wi
 $script:ExtraPkgs=@(); $script:Caps=@()
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','ja-jp') @{ Preflight=$true })
 Check 'preflight passes and flags itself' ($script:LastResult.Preflight -eq $true)
-Check 'no mount / export / package / capability call was made' (@($script:Calls | Where-Object { $_ -match '^(Mount|Export|AddPkg|AddCap|Dismount MainOS|EnableFeature)' }).Count -eq 0) ($script:Calls -join '; ')
+Check 'no image is changed: no export, package, capability or feature call, and nothing is saved' (@($script:Calls | Where-Object { $_ -match '^(Export|AddPkg|AddCap|EnableFeature)|save$' }).Count -eq 0) ($script:Calls -join '; ')
+Check 'the only mount is the read-only one for the Apps tab list (no list yet), discarded again' ((@($script:Calls | Where-Object { $_ -match '^Mount ' }) -join '|') -eq 'Mount install.wim idx1 -> MainOS' -and ($script:Calls -contains 'Dismount MainOS discard')) ($script:Calls -join '; ')
 Check 'ISOs dismounted afterwards' (@($script:Calls | Where-Object {$_ -like 'IsoDismount*'}).Count -eq 3)
 $threw=$false; try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @('de-de','fr-fr') @{ Preflight=$true }) } catch { $threw=$true; $m7=$_.Exception.Message }
 Check 'preflight catches a language pack that is not on the ISO (fr-fr)' ($threw -and $m7 -like '*fr-fr*')
@@ -466,5 +467,72 @@ if ((Test-Path $exReal) -and (Test-Path $stdReal)) {
     Check 'real files: the embedded signer tells CA 2023 and PCA 2011 boot managers apart' ((Get-EmbeddedSignerIssuer $exReal) -match 'Windows UEFI CA 2023' -and (Get-EmbeddedSignerIssuer $stdReal) -match 'Windows Production PCA 2011')
 } else { Write-Host 'SKIP  real boot manager signature check (no C:\Windows\Boot\EFI_EX on this PC)' }
 Check 'an unsigned or missing file gives an empty issuer, not an error' ((Get-EmbeddedSignerIssuer (Join-Path $arm17 'efi\boot\bootaa64.efi')) -eq '' -and (Get-EmbeddedSignerIssuer 'C:\no\such.efi') -eq '')
+
+Write-Host "`n=== E18 provisioned apps: the Apps tab list and removing ticked apps first (TODO step 11) ==="
+# The source edition has three provisioned apps; removing one takes it out of what later mounts see.
+function New-App18($n) { [pscustomobject]@{ DisplayName = $n; Version = '1.0.0.0'; PackageName = "$($n)_1.0.0.0_neutral_~_8wekyb3d8bbwe" } }
+$script:Prov18 = [System.Collections.Generic.List[object]]::new()
+function Reset-Prov18 { $script:Prov18.Clear(); foreach ($n in 'Microsoft.BingNews', 'Microsoft.Copilot', 'Microsoft.WindowsCalculator') { $script:Prov18.Add((New-App18 $n)) } }
+$gap18 = ${function:Get-AppxProvisionedPackage}; $gwi18 = ${function:Get-WindowsImage}
+function Get-AppxProvisionedPackage { [CmdletBinding()] param($Path) return @($script:Prov18) }
+function Remove-AppxProvisionedPackage { [CmdletBinding()] param($Path, $PackageName)
+    if ($script:FailRemove18) { throw 'Access is denied' }
+    Note "RemoveAppx $PackageName"; $hit = @($script:Prov18 | Where-Object { $_.PackageName -eq $PackageName }); foreach ($h in $hit) { [void]$script:Prov18.Remove($h) } }
+function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
+    if (-not $Mounted -and $ImagePath -like '*boot*' -and -not $Index) { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }) }
+    & $gwi18 @PSBoundParameters }
+$script:FailRemove18 = $false
+$os18 = Join-Path $base 'Win11Enterprise_24H2'; $appsFile18 = Join-Path $os18 'ProvisionedApps.json'
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise')
+# Read apps from the ISO: works with empty PATCHES folders (it needs no patches), only mounts read-only, saves the list
+Reset-Test; Reset-Prov18; Remove-Item $appsFile18 -Force -ErrorAction SilentlyContinue
+Get-ChildItem (Join-Path $os18 'PATCHES\LCU') -File -ErrorAction SilentlyContinue | Remove-Item -Force
+$a18 = Invoke-MediaRefresh ([pscustomobject]@{ OsName = 'Windows 11 Enterprise 24H2'; Root = $base; Mode = 'Apps'; PreflightOnly = $false; Install = $true; Boot = $false; WinRE = $true; Verify = $true; BuildMedia = $false; BuildIso = $false; SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; Languages = @('de-de') })
+$inv18 = Read-AppInventory -OsRoot $os18
+Check 'Read apps: the selected edition (index 3) is read from the OS ISO and saved for the Apps tab' ($a18.Mode -eq 'Apps' -and $a18.Count -eq 3 -and $a18.Index -eq 3 -and $inv18.Index -eq 3 -and $inv18.ImageName -eq 'Windows 11 Enterprise' -and (@($inv18.Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot,Microsoft.WindowsCalculator')
+Check 'Read apps: needs no patches and changes nothing (one read-only mount, discarded)' ((@($script:Calls | Where-Object { $_ -match '^(Mount|Dismount|Export|AddPkg|RemoveAppx)' }) -join '|') -eq 'Mount install.wim idx3 -> MainOS|Dismount MainOS discard') ($script:Calls -join '; ')
+$threw = $false; try { Invoke-MediaRefresh ([pscustomobject]@{ OsName = 'Windows Server 2022'; Root = $base; Mode = 'Apps'; PreflightOnly = $false; Languages = @() }) } catch { $threw = $true; $m18 = $_.Exception.Message }
+Check 'Read apps on Windows Server: refused with a clear message' ($threw -and $m18 -like 'App removal is for client editions*')
+# A real run with two ticked apps (one not in the image): removed first - before WinRE and the SSU / LCU
+Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
+Reset-Test; Reset-Prov18; $script:ChangeEvents = $null
+$logs18 = [System.Collections.Generic.List[string]]::new()
+$wl18 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
+$o18 = Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; SetupDU = $false }
+$o18 | Add-Member -NotePropertyName RemoveApps -NotePropertyValue @('Microsoft.BingNews', 'Contoso.NotThere') -Force
+Invoke-MediaRefresh $o18
+Set-Item function:Write-Log $wl18
+$c18 = @($script:Calls)
+$iRemove = [array]::IndexOf($c18, @($c18 -match '^RemoveAppx Microsoft\.BingNews')[0]); $iFirstPkg = [array]::IndexOf($c18, @($c18 -match '^(AddPkg|Mount winre)')[0])
+Check 'the ticked app is removed right after the mount, before WinRE and any package' ($iRemove -ge 0 -and ($iFirstPkg -lt 0 -or $iRemove -lt $iFirstPkg) -and @($c18 -match '^RemoveAppx').Count -eq 1) ($c18 -join ' | ')
+Check 'a ticked app the image does not have is logged and skipped' ([bool]($logs18 -match 'App removal: Contoso\.NotThere is not provisioned in install\.wim index 1'))
+Check 'the change log records the removed app (category AppRemoved)' (@($script:ChangeEvents | Where-Object { $_.Category -eq 'AppRemoved' -and $_.Item -eq 'Microsoft.BingNews' }).Count -eq 1)
+Check 'Verify confirms the ticked apps are gone and the gate passes' ([bool]($logs18 -match 'VERIFY   none of the 2 app\(s\) ticked for removal is provisioned') -and $script:LastResult.Gate -eq 'PASSED')
+Check 'the run refreshes the Apps tab list from the mounted image (before removal: the edition''s own apps)' ((@((Read-AppInventory -OsRoot $os18).Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot,Microsoft.WindowsCalculator')
+# A removal that fails: WARN, the run goes on, Verify catches that the app is still there
+Reset-Test; Reset-Prov18; $script:FailRemove18 = $true
+Invoke-MediaRefresh $o18
+$script:FailRemove18 = $false
+Check 'a removal that fails is caught by Verify (app still provisioned) and fails the gate' ($script:LastResult.Gate -eq 'FAILED' -and $script:LastResult.VerifyIssues -ge 1)
+# Preflight: an up-to-date list is not read again; a list from another index is; ticked apps missing from the list are named
+Reset-Test; Reset-Prov18; $logs18.Clear()
+function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
+$p18 = Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; SetupDU = $false }; $p18 | Add-Member -NotePropertyName RemoveApps -NotePropertyValue @('Microsoft.BingNews', 'Contoso.NotThere') -Force
+Invoke-MediaRefresh $p18
+Check 'preflight with an up-to-date app list: no mount; ticked apps missing from the list are named' (@($script:Calls -match '^Mount').Count -eq 0 -and [bool]($logs18 -match '^\[WARN\] App removal: not in this image''s app list .*: Contoso\.NotThere$'))
+$j18 = Get-Content -Raw $appsFile18 | ConvertFrom-Json; $j18.index = 2; ($j18 | ConvertTo-Json -Depth 4) | Set-Content $appsFile18
+Reset-Test; $logs18.Clear()
+Invoke-MediaRefresh $p18
+Set-Item function:Write-Log $wl18
+Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list is from os11\.iso index 2; reading it again') -and (Read-AppInventory -OsRoot $os18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
+# Windows Server: ticked apps are ignored with a WARN
+Reset-Test; $logs18.Clear(); $script:ImageCount = 4
+function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
+$s18 = Opts 'Windows Server 2022' @() @{ Preflight = $true }; $s18 | Add-Member -NotePropertyName RemoveApps -NotePropertyValue @('Microsoft.BingNews') -Force
+try { Invoke-MediaRefresh $s18 } catch { }
+Set-Item function:Write-Log $wl18
+Check 'Windows Server: ticked apps are ignored with a WARN' ([bool]($logs18 -match '^\[WARN\] App removal is for client editions; the ticked apps are ignored') -and @($script:Calls -match '^RemoveAppx').Count -eq 0)
+$script:ImageCount = 1
+Set-Item function:Get-AppxProvisionedPackage $gap18; Set-Item function:Get-WindowsImage $gwi18
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

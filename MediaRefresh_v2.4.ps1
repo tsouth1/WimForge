@@ -409,20 +409,21 @@ function Import-LanguageList {
 # ---------- saved GUI settings per OS (TODO step 10c) ----------
 # Settings\<profile folder>.json holds one OS's checkboxes and ticked languages; Settings\General.json the repository
 # root. Kept apart from Profiles\ on purpose: profile files get regenerated, which must not wipe saved choices.
-$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3')
+$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval')
 function Get-OsSettingsFile {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition)
     return (Join-Path $Directory ($Definition.Folder + '.json'))
 }
 function Save-OsSettings {
     # Writes the selected OS's choices; returns the file path. Only the known option names are stored, as true/false.
-    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition, [hashtable]$Options = @{}, [string[]]$Languages = @())
+    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @())
     Ensure-Directory $Directory
     $opts = [ordered]@{}
     foreach ($k in $script:SettingOptionNames) { if ($Options.ContainsKey($k)) { $opts[$k] = [bool]$Options[$k] } }
     $data = [ordered]@{
         schemaVersion = 1; os = $Definition.Name; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); options = $opts
         languages = @($Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        removeApps = @($RemoveApps | Where-Object { $_ } | ForEach-Object { [string]$_ })   # provisioned apps ticked on the Apps tab, by DisplayName
     }
     $file = Get-OsSettingsFile -Directory $Directory -Definition $Definition
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json -Depth 4) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
@@ -448,7 +449,8 @@ function Read-OsSettings {
         }
         $codes = @(@(Get-ProfileValue $obj 'languages' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
         $known = @($LanguageList | ForEach-Object { $_.Code })
-        return [pscustomobject]@{ File = $file; Options = $opts; Languages = @($codes | Where-Object { $known -contains $_ }); MissingLanguages = @($codes | Where-Object { $known -notcontains $_ }) }
+        $apps = @(@(Get-ProfileValue $obj 'removeApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ })
+        return [pscustomobject]@{ File = $file; Options = $opts; Languages = @($codes | Where-Object { $known -contains $_ }); MissingLanguages = @($codes | Where-Object { $known -notcontains $_ }); RemoveApps = $apps }
     } catch {
         Write-Log "Saved settings $file could not be used ($($_.Exception.Message)); using the defaults." 'WARN'
         return $null
@@ -1405,9 +1407,94 @@ function Service-WinRe {
         throw
     }
 }
+# ---------- provisioned apps (TODO step 11) ----------
+# The Apps tab lists the provisioned apps of the selected edition, from <OS folder>\ProvisionedApps.json. That file is
+# written by "Read apps from the ISO", by a preflight when it is missing or from another ISO / index, and by every run
+# from the image it has just mounted. Ticked apps are kept by DisplayName (versions change with every ISO).
+$script:AppInventoryFileName = 'ProvisionedApps.json'
+function Get-ProvisionedApps {
+    param([Parameter(Mandatory)][string]$Mount)
+    return @(Get-AppxProvisionedPackage -Path $Mount -ErrorAction Stop | Sort-Object DisplayName | ForEach-Object {
+        [pscustomobject]@{ DisplayName = [string]$_.DisplayName; Version = [string]$_.Version; PackageName = [string]$_.PackageName } })
+}
+function Save-AppInventory {
+    param([Parameter(Mandatory)][string]$OsRoot, [object[]]$Apps = @(), [string]$Source, [int]$Index, [string]$ImageName, [string]$Version)
+    Ensure-Directory $OsRoot
+    $file = [System.IO.Path]::Combine($OsRoot, $script:AppInventoryFileName)
+    $data = [ordered]@{
+        schemaVersion = 1; read = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); source = $Source; index = $Index; imageName = $ImageName; version = $Version
+        apps = @(@($Apps) | ForEach-Object { [ordered]@{ displayName = $_.DisplayName; version = $_.Version; packageName = $_.PackageName } })
+    }
+    [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json -Depth 4) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Log "App list: $(@($Apps).Count) provisioned app(s) in $Source index $Index ($ImageName) saved to $file"
+    return $file
+}
+function Read-AppInventory {
+    # The saved app list for an OS folder, or $null when there is none or it is unusable (WARN).
+    param([string]$OsRoot)
+    if (-not $OsRoot) { return $null }
+    $file = [System.IO.Path]::Combine($OsRoot, $script:AppInventoryFileName)
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try {
+        $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
+        $apps = @(@(Get-ProfileValue $o 'apps' @()) | ForEach-Object {
+            $n = [string](Get-ProfileValue $_ 'displayName' '')
+            if (-not $n) { throw 'an app has no displayName.' }
+            [pscustomobject]@{ DisplayName = $n; Version = [string](Get-ProfileValue $_ 'version' ''); PackageName = [string](Get-ProfileValue $_ 'packageName' '') } })
+        return [pscustomobject]@{ File = $file; Read = [string](Get-ProfileValue $o 'read' ''); Source = [string](Get-ProfileValue $o 'source' ''); Index = [int](Get-ProfileValue $o 'index' 0)
+            ImageName = [string](Get-ProfileValue $o 'imageName' ''); Version = [string](Get-ProfileValue $o 'version' ''); Apps = $apps }
+    } catch { Write-Log "App list $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
+}
+function Remove-ProvisionedApps {
+    # Removes the ticked provisioned apps from a mounted image, matched by DisplayName. A ticked app the image does not
+    # have is logged and skipped; a removal that fails is a WARN (the image stays valid). Returns the number removed.
+    param([Parameter(Mandatory)][string]$Mount, [string[]]$Names = @(), [string]$Target)
+    $want = @($Names | Where-Object { $_ })
+    if ($want.Count -eq 0) { return 0 }
+    $present = @(Get-ProvisionedApps $Mount)
+    $removed = 0
+    foreach ($name in $want) {
+        $hits = @($present | Where-Object { $_.DisplayName -eq $name })
+        if ($hits.Count -eq 0) { Write-Log "App removal: $name is not provisioned in $Target; nothing to remove."; continue }
+        foreach ($h in $hits) {
+            Assert-NotCancelled
+            try {
+                Remove-AppxProvisionedPackage -Path $Mount -PackageName $h.PackageName -ErrorAction Stop | Out-Null
+                Write-Log "Removed provisioned app $($h.DisplayName) $($h.Version) from $Target"
+                Add-ChangeEvent -Category 'AppRemoved' -Item $h.DisplayName -Target $Target -Detail "provisioned app removed ($($h.PackageName))"
+                $removed++
+            } catch { Write-Log "Could not remove provisioned app $($h.DisplayName) from ${Target}: $($_.Exception.Message)" 'WARN' }
+        }
+    }
+    return $removed
+}
+function Update-AppInventoryFromIso {
+    # Reads the selected edition's provisioned apps straight from the OS ISO (read-only mount; an install.esd is first
+    # exported to a temporary WIM, as ESD files cannot be mounted) and saves them for the Apps tab.
+    param([hashtable]$Paths, [string]$SourceWim, [object]$Selected, [string]$IsoFile)
+    $dl = if ($script:DismLogArgs) { $script:DismLogArgs } else { @{} }
+    $wim = $SourceWim; $idx = [int]$Selected.ImageIndex; $tmp = $null
+    if ($SourceWim -like '*.esd') {
+        $tmp = Join-Path $Paths.Temp 'apps.read.wim'; Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Export-WindowsImage -SourceImagePath $SourceWim -SourceIndex $idx -DestinationImagePath $tmp -CompressionType Max @dl -ErrorAction Stop | Out-Null
+        $wim = $tmp; $idx = 1
+    }
+    Write-Log "Reading the provisioned apps of index $($Selected.ImageIndex) ($($Selected.ImageName)) from $IsoFile (read-only mount)"
+    Remove-DirectoryContents $Paths.MainMount
+    try {
+        Mount-WindowsImage -ImagePath $wim -Index $idx -Path $Paths.MainMount -ReadOnly @dl -ErrorAction Stop | Out-Null
+        $apps = @(Get-ProvisionedApps $Paths.MainMount)
+        Dismount-WindowsImage -Path $Paths.MainMount -Discard @dl -ErrorAction Stop | Out-Null
+    } catch { Dismount-IfMounted $Paths.MainMount; throw }
+    finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
+    $version = [string](Get-WindowsImage -ImagePath $SourceWim -Index ([int]$Selected.ImageIndex)).Version
+    [void](Save-AppInventory -OsRoot $Paths.Root -Apps $apps -Source $IsoFile -Index ([int]$Selected.ImageIndex) -ImageName $Selected.ImageName -Version $version)
+    return $apps
+}
 function Service-InstallIndex {
     param([string]$ImagePath, [int]$Index, [hashtable]$Paths, [hashtable]$Packages, [string]$OsDrive,
-          [hashtable]$LpFiles, [string[]]$FodSource = @(), [string[]]$Languages = @(), [bool]$DoWinRe, [bool]$DoNetFx3)
+          [hashtable]$LpFiles, [string[]]$FodSource = @(), [string[]]$Languages = @(), [bool]$DoWinRe, [bool]$DoNetFx3,
+          [string[]]$RemoveApps = @(), [hashtable]$AppInventory = $null)
     Assert-NotCancelled
     $dl = $script:DismLogArgs
     $target = "install.wim index $Index"
@@ -1416,6 +1503,17 @@ function Service-InstallIndex {
     Write-Log "Mounting $target"
     try {
         Mount-WindowsImage -ImagePath $ImagePath -Index $Index -Path $Paths.MainMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
+
+        # 0. Provisioned apps (step 11): the Apps tab's list is refreshed from this mount, then the ticked apps are removed -
+        #    the first change to the image, so every later step only services the apps that stay (Terry, 2026-09-22).
+        if ($AppInventory) {
+            try { [void](Save-AppInventory -OsRoot $AppInventory.OsRoot -Apps @(Get-ProvisionedApps $Paths.MainMount) -Source $AppInventory.Source -Index $AppInventory.Index -ImageName $AppInventory.ImageName -Version $AppInventory.Version) }
+            catch { Write-Log "The app list for the Apps tab could not be refreshed: $($_.Exception.Message)" 'WARN' }
+        }
+        if (@($RemoveApps).Count -gt 0) {
+            $nRemoved = Remove-ProvisionedApps -Mount $Paths.MainMount -Names $RemoveApps -Target $target
+            Write-Log "App removal: $nRemoved provisioned app(s) removed from $target."
+        }
 
         # 1. WinRE: serviced once (from the first index processed), then reused for every index.
         if ($DoWinRe) {
@@ -1538,7 +1636,7 @@ function Service-BootWim {
 function Test-OutputWim {
     # Read-only mounts each index of the final WIM, logs what is really in it, returns the number of issues, and (as a side
     # effect, in $script:VerifyInventory / $script:VerifyBuildAfter) collects the change log's Section B: the image's final state.
-    param([string]$WimPath, [hashtable]$Paths, [string[]]$Languages = @(), [bool]$ExpectLcu)
+    param([string]$WimPath, [hashtable]$Paths, [string[]]$Languages = @(), [bool]$ExpectLcu, [string[]]$RemovedApps = @())
     $dl = $script:DismLogArgs
     $issues = 0
     $script:VerifyInventory = [System.Collections.Generic.List[object]]::new()
@@ -1585,8 +1683,14 @@ function Test-OutputWim {
             foreach ($f in @(Get-WindowsOptionalFeature -Path $Paths.MainMount -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Enabled' })) {
                 $script:VerifyInventory.Add([pscustomobject]@{ Index = $img.ImageIndex; Category = 'Optional feature'; Item = $f.FeatureName; Version = ''; Kb = ''; State = 'Enabled' })
             }
-            foreach ($a in @(Get-AppxProvisionedPackage -Path $Paths.MainMount -ErrorAction SilentlyContinue)) {
+            $provisioned = @(Get-AppxProvisionedPackage -Path $Paths.MainMount -ErrorAction SilentlyContinue)
+            foreach ($a in $provisioned) {
                 $script:VerifyInventory.Add([pscustomobject]@{ Index = $img.ImageIndex; Category = 'Provisioned appx'; Item = $a.DisplayName; Version = [string]$a.Version; Kb = ''; State = 'Provisioned' })
+            }
+            if (@($RemovedApps).Count -gt 0) {
+                $still = @($RemovedApps | Where-Object { $n = $_; @($provisioned | Where-Object { $_.DisplayName -eq $n }).Count -gt 0 })
+                if ($still.Count -gt 0) { Write-Log "VERIFY   app(s) ticked for removal are still provisioned: $($still -join ', ')" 'WARN'; $issues += $still.Count }
+                else { Write-Log "VERIFY   none of the $(@($RemovedApps).Count) app(s) ticked for removal is provisioned" }
             }
             # No per-user appx exists offline; the closest offline equivalent is what is actually staged under WindowsApps.
             $appxFolder = Join-Chain $Paths.MainMount @('Program Files', 'WindowsApps')
@@ -1899,13 +2003,32 @@ function Test-FreeSpace {
 }
 
 # ---------- repository ----------
-function Initialize-Repository {
+function Get-OsRootPath {
+    # The OS folder under the repository root: its folder name, or an accepted alternative name that exists. Creates nothing.
+    # [IO.Path]::Combine, not Join-Path: Join-Path throws for a drive that does not exist (the window asks with any root typed).
     param([string]$Root, [pscustomobject]$Definition)
     $leaf = $Definition.Folder
-    if (-not (Test-Path -LiteralPath (Join-Path $Root $leaf))) {
-        foreach ($alt in @($Definition.AltFolders)) { if (Test-Path -LiteralPath (Join-Path $Root $alt)) { $leaf = $alt; break } }
+    if (-not (Test-Path -LiteralPath ([System.IO.Path]::Combine($Root, $leaf)))) {
+        foreach ($alt in @($Definition.AltFolders)) { if (Test-Path -LiteralPath ([System.IO.Path]::Combine($Root, $alt))) { $leaf = $alt; break } }
     }
-    $osRoot = Join-Path $Root $leaf
+    return [System.IO.Path]::Combine($Root, $leaf)
+}
+function Select-SourceImage {
+    # The edition to service on a client OS: by name (EditionRegex), falling back to PreferredIndex, with a WARN when the
+    # name matched a different index than preferred. Shared by servicing runs, preflights and reading the app list.
+    param([object[]]$Inventory, [pscustomobject]$Definition, [string]$Name)
+    $edMatches = @($Inventory | Where-Object { $_.ImageName -match $Definition.EditionRegex })
+    if ($edMatches.Count -gt 1) { throw "Edition pattern '$($Definition.EditionRegex)' matched more than one image: $((@($edMatches | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" })) -join '; '). Tighten EditionRegex for '$Name' in OsDefinitions, or set PreferredIndex." }
+    $selected = if ($edMatches.Count -eq 1) { $edMatches[0] } else { $Inventory | Where-Object { $_.ImageIndex -eq $Definition.PreferredIndex } | Select-Object -First 1 }
+    if (-not $selected) { throw "No edition matched '$($Definition.EditionRegex)' and preferred index $($Definition.PreferredIndex) is unavailable. Images found: $((@($Inventory | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" })) -join '; ')" }
+    if ($edMatches.Count -eq 0) { Write-Log "No image name matched '$($Definition.EditionRegex)'; falling back to preferred index $($Definition.PreferredIndex). Check the detected indexes above." 'WARN' }
+    elseif ($Definition.PreferredIndex -gt 0 -and $selected.ImageIndex -ne $Definition.PreferredIndex) { Write-Log "The edition name matched index $($selected.ImageIndex), not the profile's preferred index $($Definition.PreferredIndex); using index $($selected.ImageIndex). Check the detected indexes above and correct 'preferredIndex' in the profile if the ISO layout changed." 'WARN' }
+    Write-Log "Selected client image index $($selected.ImageIndex): $($selected.ImageName)"
+    return $selected
+}
+function Initialize-Repository {
+    param([string]$Root, [pscustomobject]$Definition)
+    $osRoot = Get-OsRootPath -Root $Root -Definition $Definition
     $p = @{
         Root = $osRoot; ISO = (Join-Path $osRoot 'ISO'); Patches = (Join-Path $osRoot 'PATCHES')
         OldWim = (Join-Path $osRoot 'OLDWIM'); NewWim = (Join-Path $osRoot 'NEWWIM')
@@ -1956,7 +2079,7 @@ function Invoke-MediaRefresh {
         $script:LastResult = $result
         return $result
     }
-    Set-Phase -OsName $name -Phase $(if ($Options.PreflightOnly) { 'Preflight' } else { 'Starting' })
+    Set-Phase -OsName $name -Phase $(if ([string](Get-ProfileValue $Options 'Mode' '') -eq 'Apps') { 'Reading provisioned apps' } elseif ($Options.PreflightOnly) { 'Preflight' } else { 'Starting' })
     $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
@@ -1975,7 +2098,11 @@ function Invoke-MediaRefresh {
         Clear-StaleIsoMounts $paths.ISO
         foreach ($d in @($paths.Working, $paths.Temp, $paths.WinRE, $paths.MainMount, $paths.WinReMount, $paths.WinPeMount)) { Remove-DirectoryContents $d }
 
-        $languages = @($Options.Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $appsOnly = ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Apps')
+        if ($appsOnly -and $definition.ServiceAllIndexes) { throw 'App removal is for client editions; Windows Server has no provisioned consumer apps to list.' }
+        $removeApps = @(@(Get-ProfileValue $Options 'RemoveApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+        if ($removeApps.Count -gt 0 -and $definition.ServiceAllIndexes) { Write-Log 'App removal is for client editions; the ticked apps are ignored for this Windows Server profile.' 'WARN'; $removeApps = @() }
+        $languages = @(if (-not $appsOnly) { $Options.Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } })
         $hasLang = ($languages.Count -gt 0)
         Write-Log ('Languages: ' + $(if ($hasLang) { $languages -join ', ' } else { '(none - English only)' }))
         $doMedia = [bool]$Options.BuildMedia -or [bool]$Options.BuildIso
@@ -1987,8 +2114,10 @@ function Invoke-MediaRefresh {
         if ($want2023 -and -not $doBoot) { Write-Log 'CA 2023 media is ticked, but it needs the media and Patch boot.wim (its boot files come from the patched boot.wim); it is skipped.' 'WARN' }
         elseif ($do2023) { Write-Log "CA 2023 media: built alongside the standard media in NEWWIM\Media_CA2023$(if ($Options.BuildIso) { ', with its own ISO' }), boot manager signed by Windows UEFI CA 2023." }
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
-        $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
-        Test-PackageSet -Definition $definition -Packages $packages -Enabled $enabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
+        if (-not $appsOnly) {
+            $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
+            Test-PackageSet -Definition $definition -Packages $packages -Enabled $enabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
+        }
 
         # ISO discovery by content
         Set-Phase 'Mounting ISOs'
@@ -2021,17 +2150,38 @@ function Invoke-MediaRefresh {
         $inventory = @(Get-WindowsImage -ImagePath $sourceWim)
         Write-Log ('Detected indexes: ' + (($inventory | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" }) -join '; '))
         $selected = $null
-        if (-not $definition.ServiceAllIndexes) {
-            $edMatches = @($inventory | Where-Object { $_.ImageName -match $definition.EditionRegex })
-            if ($edMatches.Count -gt 1) { throw "Edition pattern '$($definition.EditionRegex)' matched more than one image: $((@($edMatches | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" })) -join '; '). Tighten EditionRegex for '$name' in OsDefinitions, or set PreferredIndex." }
-            $selected = if ($edMatches.Count -eq 1) { $edMatches[0] } else { $inventory | Where-Object { $_.ImageIndex -eq $definition.PreferredIndex } | Select-Object -First 1 }
-            if (-not $selected) { throw "No edition matched '$($definition.EditionRegex)' and preferred index $($definition.PreferredIndex) is unavailable. Images found: $((@($inventory | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" })) -join '; ')" }
-            if ($edMatches.Count -eq 0) { Write-Log "No image name matched '$($definition.EditionRegex)'; falling back to preferred index $($definition.PreferredIndex). Check the detected indexes above." 'WARN' }
-            elseif ($definition.PreferredIndex -gt 0 -and $selected.ImageIndex -ne $definition.PreferredIndex) { Write-Log "The edition name matched index $($selected.ImageIndex), not the profile's preferred index $($definition.PreferredIndex); using index $($selected.ImageIndex). Check the detected indexes above and correct 'preferredIndex' in the profile if the ISO layout changed." 'WARN' }
-            Write-Log "Selected client image index $($selected.ImageIndex): $($selected.ImageName)"
-        } else { Write-Log "All $($inventory.Count) indexes will be serviced and recombined." }
+        if (-not $definition.ServiceAllIndexes) { $selected = Select-SourceImage -Inventory $inventory -Definition $definition -Name $name }
+        else { Write-Log "All $($inventory.Count) indexes will be serviced and recombined." }
         $osIsoPath = @($mounted | Where-Object { $_.Drive -eq $osDrive } | Select-Object -First 1 | ForEach-Object { $_.Path })[0]
+        $osIsoFile = $driveToFile[$osDrive]
+        if ($appsOnly) {
+            # Apps tab > Read apps from the ISO: only the app list, nothing else.
+            Set-Phase 'Reading provisioned apps'; Set-Progress 50 'Reading provisioned apps'
+            $appsRead = @(Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile)
+            Set-Progress 100 'App list read'; Set-Phase 'Done'
+            $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = (Join-Path $paths.Root $script:AppInventoryFileName) }
+            return $script:LastResult
+        }
         Test-FreeSpace -Definition $definition -Paths $paths -SourceWim $sourceWim -OsIsoPath $osIsoPath -Options $Options
+        if ($selected) {
+            # The Apps tab's list: read during a preflight when there is none yet, or it came from another ISO or index.
+            $appInv = Read-AppInventory -OsRoot $paths.Root
+            if ($Options.PreflightOnly -and (-not $appInv -or $appInv.Source -ne $osIsoFile -or $appInv.Index -ne [int]$selected.ImageIndex)) {
+                Set-Phase 'Reading provisioned apps'
+                Write-Log $(if ($appInv) { "The app list is from $($appInv.Source) index $($appInv.Index); reading it again from $osIsoFile." } else { 'No app list yet for this OS; reading it for the Apps tab.' })
+                # Not fatal: a preflight checks the run's inputs; the app list is a convenience for the Apps tab.
+                try { [void](Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile) }
+                catch { Write-Log "The app list could not be read ($($_.Exception.Message)); use Read apps from the ISO on the Apps tab." 'WARN' }
+                $appInv = Read-AppInventory -OsRoot $paths.Root
+            }
+            if ($removeApps.Count -gt 0) {
+                Write-Log "App removal: $($removeApps.Count) app(s) ticked: $($removeApps -join ', ')"
+                if ($appInv) {
+                    $absent = @($removeApps | Where-Object { $n = $_; @($appInv.Apps | Where-Object { $_.DisplayName -eq $n }).Count -eq 0 })
+                    if ($absent.Count -gt 0) { Write-Log "App removal: not in this image's app list (skipped when the run gets there): $($absent -join ', ')" 'WARN' }
+                }
+            }
+        }
         if ($Options.PreflightOnly) {
             Set-Progress 100 'Preflight passed'
             Set-Phase 'Done'
@@ -2061,8 +2211,10 @@ function Invoke-MediaRefresh {
                 $indexLabel = if ($workImages.Count -gt 1) { "index $($img.ImageIndex) of $($workImages.Count)" } else { "index $($img.ImageIndex)" }
                 Set-Progress (15 + [int](45 * $n / $workImages.Count)) "Servicing install.wim $indexLabel"
                 Set-Phase "Servicing install.wim ($indexLabel)"
+                $appInvArgs = if ($selected) { @{ OsRoot = $paths.Root; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; Version = $script:BuildBefore } } else { $null }
                 Service-InstallIndex -ImagePath $workingInstall -Index $img.ImageIndex -Paths $paths -Packages $packages -OsDrive $osDrive `
-                    -LpFiles $lpFiles -FodSource $fodSource -Languages $languages -DoWinRe ([bool]$Options.WinRE) -DoNetFx3 ([bool]$Options.NetFx3)
+                    -LpFiles $lpFiles -FodSource $fodSource -Languages $languages -DoWinRe ([bool]$Options.WinRE) -DoNetFx3 ([bool]$Options.NetFx3) `
+                    -RemoveApps $removeApps -AppInventory $appInvArgs
             }
             Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
             $finalInstall = Join-Path $paths.NewWim 'install.wim'
@@ -2075,7 +2227,7 @@ function Invoke-MediaRefresh {
             if ($Options.Verify) {
                 Set-Phase 'Verifying image'
                 Set-Progress 68 'Verifying final install.wim'
-                $verifyIssues = Test-OutputWim -WimPath $finalInstall -Paths $paths -Languages $languages -ExpectLcu $enabled.LCU
+                $verifyIssues = Test-OutputWim -WimPath $finalInstall -Paths $paths -Languages $languages -ExpectLcu $enabled.LCU -RemovedApps $removeApps
                 $gate = if ($verifyIssues -eq 0) { 'PASSED' } else { 'FAILED' }
                 if ($gate -eq 'FAILED') { Write-Log "VALIDATION GATE: FAILED ($verifyIssues issue(s)). Review the VERIFY lines above before importing this image into SCCM." 'ERROR' }
                 else { Write-Log 'VALIDATION GATE: PASSED.' }
@@ -2161,6 +2313,12 @@ function Invoke-MediaRefresh {
     <GroupBox Grid.Column="1" Header="Optional content" Margin="10,0,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkNetFx3" Content="Enable .NET Framework 3.5 from OS ISO sources\sxs" IsChecked="False" Margin="0,5"/><TextBlock Text="Ticked patch types with an empty folder are logged and skipped, except LCU (and the SSU on legacy OSes), which stop the run so you never get an unpatched image by accident." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,16,0,0"/></StackPanel></GroupBox>
    </Grid></TabItem>
    <TabItem Header="Languages"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Language packs, language features and fonts to add to install.wim (WinRE and boot.wim stay English-only). Requires a Language Pack ISO and a Features on Demand ISO. Leave empty for English only. Defaults follow the selected operating system. The list comes from Profiles\Languages.json." TextWrapping="Wrap"/><ListBox x:Name="LanguageList" Grid.Row="1" SelectionMode="Multiple" Margin="0,12,0,0"/></Grid></TabItem>
+   <TabItem Header="Apps"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <TextBlock TextWrapping="Wrap" Text="Provisioned apps in the selected operating system's edition. Ticked apps are removed from install.wim as the first servicing step, before WinRE, updates and languages. The list is read from the edition in the OS's ISO folder: with Read apps from the ISO, by a preflight when there is no list yet or the ISO has changed, and again by every run. Ticks are saved by app name with Save settings, so they carry over to newer ISOs."/>
+    <DockPanel Grid.Row="1" Margin="0,12,0,0"><Button x:Name="ReadAppsButton" DockPanel.Dock="Right" Content="Read apps from the ISO" Padding="12,3" ToolTip="Mounts the selected edition from the OS ISO read-only (about a minute) and lists its provisioned apps. Changes nothing."/><CheckBox x:Name="ChkAppRemoval" Content="Remove the ticked apps" IsChecked="True" VerticalAlignment="Center"/></DockPanel>
+    <TextBlock x:Name="AppsSource" Grid.Row="2" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/>
+    <ListBox x:Name="AppList" Grid.Row="3" SelectionMode="Multiple" Margin="0,8,0,0"/>
+   </Grid></TabItem>
    <TabItem Header="Log"><RichTextBox x:Name="LogBox" Margin="12" IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="{DynamicResource WF.LogBg}" Foreground="{DynamicResource WF.LogText}"><FlowDocument PagePadding="4"><Paragraph Margin="0"/></FlowDocument></RichTextBox></TabItem>
    <TabItem Header="Instructions"><Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <DockPanel Margin="0,0,0,8"><Button x:Name="ReloadInstructionsButton" DockPanel.Dock="Right" Content="Reload" Padding="14,3" ToolTip="Read INSTRUCTIONS.md again, for example after editing it"/><TextBlock x:Name="InstructionsSource" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource WF.SubtleText}"/></DockPanel>
@@ -2185,7 +2343,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -2464,20 +2622,47 @@ function Set-OsSettings {
         if (@($saved.MissingLanguages).Count -gt 0) { Write-Log "Saved language(s) $(@($saved.MissingLanguages) -join ', ') for $($def.Name) are not in $($script:LanguagesFileName) and were not selected." 'WARN' }
         Write-Log "Settings for $($def.Name) loaded from $($saved.File)"
     } else { Set-DefaultLanguages }
+    Update-AppList -Ticked $(if ($saved) { @($saved.RemoveApps) } else { @() })
 }
 function Get-SelectedSettings {
     $opts = @{}
     foreach ($n in $script:SettingOptionNames) { $opts[$n] = [bool](Get-Variable -Name "Chk$n" -Scope Script -ValueOnly).IsChecked }
     $langs = @(foreach ($item in $script:LanguageList.Items) { if ($item.IsSelected) { [string]$item.Tag } })
-    return [pscustomobject]@{ Options = $opts; Languages = $langs }
+    return [pscustomobject]@{ Options = $opts; Languages = $langs; RemoveApps = @(Get-TickedApps) }
+}
+function Get-TickedApps { return @(foreach ($item in $script:AppList.Items) { if ($item.IsSelected) { [string]$item.Tag } }) }
+function Update-AppList {
+    # Fills the Apps tab for the selected OS from <OS folder>\ProvisionedApps.json, ticking $Ticked (app names). A ticked
+    # app that is not in the current list stays on it, marked, so a tick never disappears silently.
+    param([string[]]$Ticked = @())
+    $script:AppList.Items.Clear()
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
+    if (-not $def) { return }
+    $client = -not $def.ServiceAllIndexes
+    $script:AppList.IsEnabled = $client; $script:ReadAppsButton.IsEnabled = $client; $script:ChkAppRemoval.IsEnabled = $client
+    if (-not $client) { $script:AppsSource.Text = 'App removal is for client editions; Windows Server has no provisioned consumer apps.'; return }
+    $inv = Read-AppInventory -OsRoot (Get-OsRootPath -Root ([string]$script:RootText.Text).Trim() -Definition $def)
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($a in @(if ($inv) { $inv.Apps })) {
+        if ($names.Contains($a.DisplayName)) { continue }
+        $names.Add($a.DisplayName)
+        $li = New-Object System.Windows.Controls.ListBoxItem; $li.Content = "$($a.DisplayName)   ($($a.Version))"; $li.Tag = $a.DisplayName
+        [void]$script:AppList.Items.Add($li)
+    }
+    foreach ($t in @($Ticked | Where-Object { $_ -and -not $names.Contains($_) })) {
+        $li = New-Object System.Windows.Controls.ListBoxItem; $li.Content = "$t   (ticked, but not in the current app list)"; $li.Tag = $t
+        [void]$script:AppList.Items.Add($li); $names.Add($t)
+    }
+    foreach ($item in $script:AppList.Items) { $item.IsSelected = (@($Ticked) -contains [string]$item.Tag) }
+    $script:AppsSource.Text = if ($inv) { "$(@($inv.Apps).Count) provisioned app(s) in $($inv.Source), index $($inv.Index) ($($inv.ImageName), $($inv.Version)); read $($inv.Read)." } else { 'No app list for this OS yet: run a preflight, or press Read apps from the ISO.' }
 }
 function Save-CurrentOsSettings {
     $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
     if (-not $def) { return $null }
     $sel = Get-SelectedSettings
-    $file = Save-OsSettings -Directory $script:SettingsDir -Definition $def -Options $sel.Options -Languages $sel.Languages
+    $file = Save-OsSettings -Directory $script:SettingsDir -Definition $def -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps
     Save-GeneralSettings -Directory $script:SettingsDir -Root ([string]$script:RootText.Text)
-    Write-Log "Settings for $($def.Name) saved to $file ($(@($sel.Languages).Count) language(s)); repository root saved."
+    Write-Log "Settings for $($def.Name) saved to $file ($(@($sel.Languages).Count) language(s), $(@($sel.RemoveApps).Count) app(s) to remove); repository root saved."
     return $file
 }
 function Reset-CurrentOsSettings {
@@ -2516,6 +2701,7 @@ function Get-UiOptions {
         OsName = [string]$script:OsCombo.SelectedItem; Root = [string]$script:RootText.Text
         PreflightOnly = [bool]$script:ChkPreflight.IsChecked; Install = [bool]$script:ChkInstall.IsChecked; Boot = [bool]$script:ChkBoot.IsChecked; WinRE = [bool]$script:ChkWinRE.IsChecked
         Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = [bool]$script:ChkBuildIso.IsChecked; Media2023 = [bool]$script:ChkMedia2023.IsChecked
+        RemoveApps = $(if ([bool]$script:ChkAppRemoval.IsChecked) { @(Get-TickedApps) } else { @() })
         SSU = [bool]$script:ChkSSU.IsChecked; LCU = [bool]$script:ChkLCU.IsChecked; SafeOS = [bool]$script:ChkSafeOS.IsChecked
         NetCU = [bool]$script:ChkNetCU.IsChecked; SetupDU = [bool]$script:ChkSetupDU.IsChecked; NetFx3 = [bool]$script:ChkNetFx3.IsChecked
         Languages = $langs; ProfilesDir = $script:ProfilesDir
@@ -2647,6 +2833,9 @@ function Complete-BackgroundRun {
     $res = if ($shared.ContainsKey('Result')) { $shared['Result'] } else { $null }
     $isDownload = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Download')
     $isCleanup = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Cleanup')
+    $isApps = ($ok -and $res -and ([string](Get-ProfileValue $res 'Mode' '')) -eq 'Apps')
+    # A preflight, a run or Read apps may have written the OS's app list: refresh the Apps tab, keeping the ticks.
+    try { Update-AppList -Ticked @(Get-TickedApps) } catch { }
 
     # Tools > Cleanup Mountpoints: the check-only pass finished. Show what it found and ask before discarding anything.
     if ($isCleanup -and [bool]$res.DryRun -and -not $wasCancelled) {
@@ -2710,6 +2899,11 @@ function Complete-BackgroundRun {
     if ($ok) {
         $script:Status.Text = 'Done'; $script:Progress.Value = 100
         if ($script:HeaderPhase) { $script:HeaderPhase.Text = 'Done' }
+        if ($isApps) {
+            [System.Windows.MessageBox]::Show("$($res.Count) provisioned app(s) read from $($res.Source), index $($res.Index) ($($res.ImageName)).`n`nTick the apps to remove on the Apps tab, then press Save settings.", 'WimForge - Apps', 'OK', 'Information') | Out-Null
+            Update-HeaderIdle
+            return
+        }
         if ($isCleanup) {
             $left = @($res.Remaining)
             $msg = "Cleaned up $(@($res.Done).Count) item(s) under $($res.Root)."
@@ -2819,6 +3013,23 @@ $script:AcquirePatchesButton.Add_Click({
 $script:ToolsButton.Add_Click({
     $menu = $script:ToolsButton.ContextMenu
     $menu.PlacementTarget = $script:ToolsButton; $menu.Placement = 'Bottom'; $menu.IsOpen = $true
+})
+$script:ReadAppsButton.Add_Click({
+    # Apps tab: read the selected edition's provisioned apps from the OS ISO on the background runspace (read-only).
+    if (-not $script:RunButton.IsEnabled) { return }
+    if (-not $script:EngineText) {
+        [System.Windows.MessageBox]::Show('Reading the apps needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null
+        return
+    }
+    $opts = Get-UiOptions
+    $opts | Add-Member -NotePropertyName Mode -NotePropertyValue 'Apps' -Force
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start reading the apps: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+    }
 })
 $script:CleanupMountsItem.Add_Click({
     # Tools > Cleanup Mountpoints: a check-only background pass first; Complete-BackgroundRun lists what it found and

@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 422 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 446 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -23,7 +23,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
 | [9](#s9) | Housekeeping and final documentation | Claude | Ongoing |
 | [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ Terry for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10a INSTRUCTIONS.md written and 10b Instructions tab built; 10d Image Inventory waits for Terry's script |
-| [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Not started |
+| [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Built: Apps tab, list read from the image, ticked apps removed first (confirm on a real run) |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
 
@@ -294,7 +294,17 @@ The script only logs a warning when the host DISM is older than the image. Servi
 
 **Ordering decision (settled):** app removal runs **before any other injection** — before WinRE servicing, SSU, LCU, language packs and FODs. It is effectively the first thing that happens to the mounted image, right after mount and before the SSU/LCU/language block in `Service-InstallIndex`. Reasoning from Terry: removing apps first means every later step (LCU, language packs, capabilities) only ever has to deal with the leaner, final app set, instead of servicing apps that are about to be removed anyway, or having a later removal step interact with capabilities/language content that was just added.
 
-**Still open (not yet designed in detail):**
+**Built 2026-09-27 (Terry: "populate the list of provisioned apps from the image after it's been selected and mounted, or whenever it makes sense"); confirm on a real run:**
+- **Apps tab** (after Languages): the selected edition's provisioned apps, one line each (name and version); tick the ones to remove. **Remove the ticked apps** (saved option `AppRemoval`, on by default) lets a run skip removal without losing the ticks. The line above the list says which ISO, index, edition and build it came from and when.
+- **Where the list comes from** (`<OS folder>\ProvisionedApps.json`, read with `Get-AppxProvisionedPackage`): **Read apps from the ISO** (background, read-only mount of the selected edition; an `install.esd` is exported to a temporary WIM first; needs no patches); a **preflight** reads it when there is none yet or it came from another ISO or index (read-only; a failure there is only a WARN); and **every run** refreshes it from the image it has just mounted, before removing anything. The edition is chosen by the same code as a run (`Select-SourceImage`, factored out of the run).
+- **Ticks** are saved per OS by **DisplayName** in `Settings\<folder>.json` (`removeApps`), so they carry over to newer ISOs whose package versions differ. A ticked app missing from the current list stays on it, marked "ticked, but not in the current app list"; a preflight names such apps (WARN) and a run logs and skips them.
+- **Removal** (`Remove-ProvisionedApps`): the first step after mounting in `Service-InstallIndex`, before WinRE, SSU, LCU and languages (the ordering decision above); `Remove-AppxProvisionedPackage` per matching package; each removal is a change-log row (category `AppRemoved`); a failed removal is a WARN and the run goes on. **Verify** checks every ticked app is gone; a leftover counts as an issue and fails the gate.
+- **Server exemption (decided):** the tab is greyed out for Server profiles with the reason; Read apps is refused for them; ticked apps in a Server run are ignored with a WARN.
+- **Also fixed:** `Get-OsRootPath` (shared with `Initialize-Repository`) no longer throws for a repository root on a drive that does not exist (the window asks as the root is typed).
+- **Tests:** 12 in `e2e.ps1` (E18: Read apps - edition, saved list, read-only, no patches needed, refused on Server; a run - removal right after mount and before WinRE / packages, a ticked app not in the image logged and skipped, change-log row, Verify and gate, list refreshed; a failed removal caught by Verify; preflight - no re-read when current, re-read when from another index, missing ticked apps named; Server ignores ticks), 6 in `profiles.ps1` (P14: list save / read / bad file, ticks and option saved per OS, an older settings file, `Get-OsRootPath`), 5 in `xaml.ps1` (Apps tab on the real window: list and source line, a stale tick kept and marked, ticks per OS through Save settings, the master checkbox, Server greyed out); the E7 preflight check now allows the read-only mount for the list. Also rendered with sample data and started for real (unelevated copy, Windows PowerShell 5.1).
+- **To confirm on a real run:** Win11 24H2 - Read apps from the ISO, tick two or three apps, Save settings, run; the log shows `Removed provisioned app ...` right after `Mounting install.wim index 1`, Verify shows none of them provisioned, and Section A lists them. The LTSC editions ship very few provisioned apps; their lists will be short or empty.
+
+**Original open points (now answered above):**
 
 - **What gets removed and how it's specified.** Likely a per-profile list (same shape as the package order manifest in step 1b) of Appx package family names / provisioned-package name patterns to remove, with a sensible built-in default list per OS family (client only — Server 2022 ships basically no provisioned consumer apps, so this is mostly a Win10/Win11 client concern). Needs Terry's input on the actual removal list per OS.
 - **Removal mechanism:** `Remove-AppxProvisionedPackage -Path <mount> -PackageName <...>` offline, one call per matched provisioned package. Log what was removed the same way `Add-ChangeEvent` logs additions (Category `AppRemoved`), so the change log's Section A shows removals alongside everything that was added.
@@ -430,6 +440,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: step 11 built - Apps tab: the selected edition's provisioned apps (read from the ISO on request, by a preflight when missing or stale, and by every run), ticks saved per OS by name, ticked apps removed as the first servicing step, checked by Verify; Server exempt. Test kit 446 checks.
 - 2026-09-27: step 10b built - Instructions tab renders `INSTRUCTIONS.md` (headings, nested and numbered lists, code, links) in the scheme's colours, with Reload; new `CodeBg` colour role. Test kit 422 checks.
 - 2026-09-27: step 10a - `INSTRUCTIONS.md` operator guide written.
 - 2026-09-27: step 12a built - optional CA 2023 media (`NEWWIM\Media_CA2023`) and `_CA2023` ISO alongside the standard ones, with the boot manager, UEFI boot image and boot fonts signed by Windows UEFI CA 2023 from the patched boot.wim (Microsoft's `Make2023BootableMedia.ps1` steps), embedded signature verified. Test kit 412 checks.

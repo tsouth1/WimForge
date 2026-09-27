@@ -54,7 +54,8 @@ if ($wpf) {
     foreach ($n in $script:SettingOptionNames) { Set-Variable -Name "Chk$n" -Scope Script -Value $win.FindName("Chk$n") }
     $script:RootText = $win.FindName('RootText'); $script:LanguageList = $win.FindName('LanguageList')
     Check 'the Save settings and Reset to defaults buttons are in the window' ($null -ne $win.FindName('SaveSettingsButton') -and $null -ne $win.FindName('ResetSettingsButton'))
-    foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings') {
+    foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
+    foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings', 'Get-TickedApps', 'Update-AppList') {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $script:SettingsDir = Join-Path $PWD 'tst_settings'; if (Test-Path $script:SettingsDir) { Remove-Item -Recurse -Force $script:SettingsDir }
@@ -79,6 +80,33 @@ if ($wpf) {
     Reset-CurrentOsSettings
     Check 'WPF: Reset to defaults deletes the OS''s settings file and restores the defaults' (-not (Test-Path $savedFile) -and (& $ticks) -eq $defaultTicks -and (& $picked) -eq 'de-de,en-gb,es-es,fr-fr,it-it,ja-jp,ko-kr,pt-br,zh-cn,zh-tw')
 
+    # Apps tab (TODO step 11): the list comes from <OS folder>\ProvisionedApps.json; ticks by name, saved per OS
+    $root11 = Join-Path $PWD 'tst_apps'; if (Test-Path $root11) { Remove-Item -Recurse -Force $root11 }
+    $kmsDef = $script:OsDefinitions['Windows 10 Enterprise LTSC 2021 (KMS)']
+    [void](Save-AppInventory -OsRoot (Join-Path $root11 $kmsDef.Folder) -Source 'os2021.iso' -Index 1 -ImageName 'Windows 10 Enterprise LTSC' -Version '10.0.19041.1288' `
+        -Apps @([pscustomobject]@{ DisplayName = 'Microsoft.SecHealthUI'; Version = '1000.1'; PackageName = 'Microsoft.SecHealthUI_1000.1_x64__8wekyb3d8bbwe' }, [pscustomobject]@{ DisplayName = 'Microsoft.WindowsStore'; Version = '22.1'; PackageName = 'Microsoft.WindowsStore_22.1_x64__8wekyb3d8bbwe' }))
+    $script:RootText.Text = $root11
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    $appTags = @($script:AppList.Items | ForEach-Object { [string]$_.Tag })
+    Check 'WPF Apps tab: the list comes from ProvisionedApps.json, with where it was read from' (($appTags -join ',') -eq 'Microsoft.SecHealthUI,Microsoft.WindowsStore' -and $script:AppsSource.Text -like '2 provisioned app(s) in os2021.iso, index 1*' -and $script:AppList.IsEnabled -and @(Get-TickedApps).Count -eq 0) "$($appTags -join ',') | $($script:AppsSource.Text)"
+    foreach ($item in $script:AppList.Items) { $item.IsSelected = ([string]$item.Tag -eq 'Microsoft.WindowsStore') }
+    $saved11 = Save-CurrentOsSettings
+    Update-AppList -Ticked @('Microsoft.WindowsStore', 'Contoso.Gone')
+    $gone = @($script:AppList.Items | Where-Object { [string]$_.Tag -eq 'Contoso.Gone' })
+    Check 'WPF Apps tab: a ticked app missing from the list stays, marked, and ticked' ($gone.Count -eq 1 -and $gone[0].IsSelected -and [string]$gone[0].Content -like '*not in the current app list*')
+    $script:OsCombo.SelectedItem = 'Windows 11 Enterprise 24H2'; Set-OsSettings
+    $w11Text = $script:AppsSource.Text
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    Check 'WPF Apps tab: Save settings keeps the ticks per OS; an OS without a list says how to get one' ((@(Get-TickedApps) -join ',') -eq 'Microsoft.WindowsStore' -and $w11Text -like 'No app list for this OS yet*')
+    $langsLine2 = [regex]::Match($src, 'RemoveApps = \$\(if \(\[bool\]\$script:ChkAppRemoval\.IsChecked\)[^\r\n]*').Value
+    $script:ChkAppRemoval.IsChecked = $true; $on = (Invoke-Expression ('@{ ' + $langsLine2 + ' }'))['RemoveApps']
+    $script:ChkAppRemoval.IsChecked = $false; $off = (Invoke-Expression ('@{ ' + $langsLine2 + ' }'))['RemoveApps']
+    Check 'WPF Apps tab: a run gets the ticked apps only while Remove the ticked apps is ticked' ((@($on) -join ',') -eq 'Microsoft.WindowsStore' -and @($off | Where-Object { $_ }).Count -eq 0) "on=$(@($on) -join ',') off=$(@($off) -join ',')"
+    $script:ChkAppRemoval.IsChecked = $true
+    $script:OsCombo.SelectedItem = 'Windows Server 2022'; Set-OsSettings
+    Check 'WPF Apps tab: Windows Server greys the list out and says why' (-not $script:AppList.IsEnabled -and -not $script:ReadAppsButton.IsEnabled -and $script:AppsSource.Text -like 'App removal is for client editions*')
+    Remove-Item $saved11 -Force -ErrorAction SilentlyContinue
+
     # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
     Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
@@ -99,7 +127,7 @@ if ($wpf) {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $tabNames = @(($win.FindName('LogBox').Parent.Parent.Items) | ForEach-Object { [string]$_.Header })
-    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
+    Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and targets,Updates and features,Languages,Apps,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
     $script:InstructionsViewer = $win.FindName('InstructionsViewer'); $script:InstructionsSource = $win.FindName('InstructionsSource')
     $script:InstructionsPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
     if (Test-Path $script:InstructionsPath) {

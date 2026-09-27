@@ -45,4 +45,5 @@ testkit/ptest/
 testkit/rt/
 testkit/tst/
 testkit/tst_settings/
+testkit/tst_apps/
 testkit/engine_only.ps1

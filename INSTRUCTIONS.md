@@ -36,6 +36,7 @@ WimForge creates the sub-folders of an OS folder the first time that OS is run:
   - `PATCHES\SETUPDU` - the Setup Dynamic Update, used for the refreshed media.
 - `NEWWIM` - the finished output (see "What a run produces").
 - `LOGS` - every log and change log for this OS (see "Where the logs are").
+- `ProvisionedApps.json` - the app list shown on the Apps tab, read from the ISO. Safe to delete; it is read again.
 - `OLDWIM`, `WORKING`, `TEMP`, `MOUNT`, `WINRE`, `WINPE` - WimForge's own working folders. Leave them alone; they are cleared at the start of every run.
 
 **The ISO folder.** Put one ISO of each kind in it; the file names do not matter, because WimForge recognises each ISO by what is inside it:
@@ -56,7 +57,7 @@ Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO.
 1. **Select the operating system** on the Source and targets tab.
 2. **Fill PATCHES:** press "Download patches...", check the list it shows, and confirm. Put the SSU into `PATCHES\SSU` by hand (LTSC 2019 and LTSC 2021 only).
 3. **Run a preflight:** tick "Preflight check only" and press "Start refresh". It takes about a minute and changes nothing. In the log, check the ISO roles, the patch counts, the language packs and the `Selected client image index` line.
-4. **Run the real build:** untick "Preflight check only", choose the outputs, updates and languages, and press "Start refresh". A run takes one to four hours depending on the OS and the number of languages.
+4. **Run the real build:** untick "Preflight check only", choose the outputs, updates, languages and the apps to remove (Apps tab), and press "Start refresh". A run takes one to four hours depending on the OS and the number of languages.
 5. **Check the result:** the completion message, the `VALIDATION GATE` line at the end of the log, and the change log (see below).
 6. **Import into SCCM** the `install.wim` from `NEWWIM` (or use the `Media` folder for an OS Upgrade Package).
 
@@ -100,6 +101,15 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 - Languages go into `install.wim` only. WinRE and `boot.wim` stay English-only.
 - Each language needs its language pack on the Language Pack ISO and its language features on the FOD ISO. The preflight names any that are missing.
 - Leave all unticked for English only. The ticks follow the selected OS (its saved settings, or the profile's defaults).
+
+### Apps tab
+
+- Lists the **provisioned apps** of the selected edition (the apps every new user gets, such as Clipchamp or Xbox apps on Windows 11). Tick the apps to remove; they are removed from `install.wim` as the very first servicing step, before WinRE, updates and languages.
+- **Remove the ticked apps** - untick to keep the ticks but skip removal for a run.
+- **Read apps from the ISO** - mounts the edition from the OS ISO read-only (about a minute) and fills the list. Changes nothing. A preflight also reads the list when there is none yet or the ISO has changed, and every run refreshes it. The line above the list says which ISO and edition it came from.
+- Press **Save settings** to keep the ticks for this OS. Ticks are kept by app name, so they carry over to newer ISOs. A ticked app that is not in the current list stays on it, marked, and is skipped (logged) if the image does not have it.
+- After the run, **Verify** checks that every ticked app is really gone; a leftover fails the validation gate. Each removal is a row in the change log.
+- Windows Server has no provisioned consumer apps, so the tab is greyed out for it.
 
 ### Log tab
 
