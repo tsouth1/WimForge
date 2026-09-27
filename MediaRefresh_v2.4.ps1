@@ -1193,7 +1193,8 @@ function Service-WinRe {
     try {
         Mount-WindowsImage -ImagePath $working -Index 1 -Path $WinReMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
         Add-Packages $WinReMount $Packages.SSU 'WinRE' -Label 'SSU' -IgnoreCombinedLcu7007e
-        Add-Packages $WinReMount $Packages.LCU 'WinRE' -Label 'LCU' -IgnoreCombinedLcu7007e
+        # Microsoft's WinRE step 1: add the combined LCU; only its servicing stack applies to WinRE, the LCU payload does not.
+        Add-Packages $WinReMount $Packages.LCU 'WinRE' -Label 'LCU (servicing stack only)' -IgnoreCombinedLcu7007e
         Add-Packages $WinReMount $Packages.SafeOS 'WinRE' -Label 'Safe OS DU'
         Invoke-DismExe -Arguments @("/Image:$WinReMount", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description 'Cleaning WinRE'
         Dismount-WindowsImage -Path $WinReMount -Save -CheckIntegrity @dl -ErrorAction Stop | Out-Null

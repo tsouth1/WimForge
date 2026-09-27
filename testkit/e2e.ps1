@@ -225,6 +225,8 @@ Set-Item function:Write-Log $wl
 $add12 = @($script:Calls -match '^AddPkg windows11\.0-kb')
 Check 'the checkpoint KB5043080 is never added directly (install.wim, WinRE or WinPE)' (@($add12 -match 'kb5043080').Count -eq 0) ($add12 -join ' | ')
 Check 'the target LCU KB5129195 is added to install.wim, WinRE and boot.wim' (@($add12 -match 'kb5129195').Count -ge 3) ($add12 -join ' | ')
+$lcuLines12 = @($logs12 -match '^\[INFO\] Adding LCU .*kb5129195')
+Check 'WinRE log line says the LCU gives WinRE its servicing stack only; install.wim and boot.wim lines do not' (@($lcuLines12 | Where-Object { $_ -match ' to WinRE$' }).Count -eq 1 -and @($lcuLines12 | Where-Object { $_ -match ' to WinRE$' -and $_ -notmatch 'Adding LCU \(servicing stack only\) ' }).Count -eq 0 -and @($lcuLines12 | Where-Object { $_ -notmatch ' to WinRE$' -and $_ -notmatch 'servicing stack only' }).Count -ge 2) ($logs12 -match '^\[INFO\] Adding LCU' -join ' | ')
 Check 'the log says only the target is installed and names the checkpoint left in the folder' ([bool]($logs12 -match 'LCU: only windows11\.0-kb5129195-x64\.msu is installed; windows11\.0-kb5043080-x64\.msu stay in the folder'))
 $ps12 = Get-PackageSet -PatchRoot (Join-Path $base 'Win11Enterprise_24H2\PATCHES') -Enabled @{ LCU=$true }
 Check 'Get-PackageSet: LCU = the target, LcuCheckpoints = the checkpoint' ((@($ps12.LCU).Name -join ',') -eq 'windows11.0-kb5129195-x64.msu' -and (@($ps12.LcuCheckpoints).Name -join ',') -eq 'windows11.0-kb5043080-x64.msu')
