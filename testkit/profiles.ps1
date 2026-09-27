@@ -307,14 +307,33 @@ $in13b = @(Split-MarkdownInline 'Paths like NEWWIM\Media_CA2023 and `MediaRefres
 Check 'underscores and a lone * are not markup; a * inside code stays in the code' ((($in13b | ForEach-Object { "$($_.Kind):$($_.Text)" }) -join '|') -eq 'Text:Paths like NEWWIM\Media_CA2023 and |Code:MediaRefresh_*|Text: and C:\*.iso stay as written')
 Write-Host "`n=== P14 provisioned apps: the saved list and the ticks (TODO step 11) ==="
 $os14 = Join-Path $tmp 'apps14\Win11_Enterprise_24H2'
-Check 'no app list yet reads as none' ($null -eq (Read-AppInventory -OsRoot $os14))
+$w11d14 = [pscustomobject]@{ Folder = 'Win11_Enterprise_24H2'; Name = 'Windows 11 Enterprise 24H2' }
+$list14 = Get-AppListPath -ProfilesDir (Join-Path $tmp 'apps14\Profiles') -Definition $w11d14
+Check 'the app list for an OS lives in Profiles\Apps\<profile folder>_Appx.json (11b)' ($list14 -eq (Join-Path $tmp 'apps14\Profiles\Apps\Win11_Enterprise_24H2_Appx.json'))
+Check 'no app list yet reads as none' ($null -eq (Read-AppInventory -File $list14))
 $apps14 = @([pscustomobject]@{ DisplayName = 'Microsoft.BingNews'; Version = '4.1.0.0'; PackageName = 'Microsoft.BingNews_4.1.0.0_neutral_~_8wekyb3d8bbwe' },
             [pscustomobject]@{ DisplayName = 'Microsoft.Copilot'; Version = '1.0.0.0'; PackageName = 'Microsoft.Copilot_1.0.0.0_neutral_~_8wekyb3d8bbwe' })
-$f14 = Save-AppInventory -OsRoot $os14 -Apps $apps14 -Source 'os11.iso' -Index 3 -ImageName 'Windows 11 Enterprise' -Version '10.0.26100.1'
-$r14 = Read-AppInventory -OsRoot $os14
-Check 'the app list is saved in <OS folder>\ProvisionedApps.json and read back with its source, index and apps' ((Split-Path $f14 -Leaf) -eq 'ProvisionedApps.json' -and $r14.Source -eq 'os11.iso' -and $r14.Index -eq 3 -and (@($r14.Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot' -and $r14.Apps[1].PackageName -like 'Microsoft.Copilot_*')
+$iso14 = Join-Path $tmp 'apps14\os11.iso'; New-Item -ItemType Directory -Force (Split-Path $iso14) | Out-Null; Set-Content $iso14 'iso-v1'; (Get-Item $iso14).LastWriteTimeUtc = [datetime]'2026-09-10T08:00:00Z'
+$id14 = Get-IsoIdentity $iso14
+$f14 = Save-AppInventory -File $list14 -Apps $apps14 -Source 'os11.iso' -Index 3 -ImageName 'Windows 11 Enterprise' -Version '10.0.26100.1' -IsoSize ([string]$id14.Size) -IsoTime $id14.Time
+$r14 = Read-AppInventory -File $list14
+Check 'the app list is saved (creating Profiles\Apps) and read back with its ISO (name, size, date), index and apps' ($f14 -eq $list14 -and $r14.Source -eq 'os11.iso' -and $r14.IsoSize -eq [string]$id14.Size -and $r14.IsoTime -eq [string]([datetime]::SpecifyKind([datetime]'2026-09-10T08:00:00', 'Utc')).Ticks -and $r14.Index -eq 3 -and (@($r14.Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot' -and $r14.Apps[1].PackageName -like 'Microsoft.Copilot_*')
+Check 'the list is current for the same ISO and index' (Test-AppInventoryCurrent -Inventory $r14 -Iso (Get-IsoIdentity $iso14) -Index 3)
+(Get-Item $iso14).LastWriteTimeUtc = [datetime]'2026-10-14T08:00:00Z'
+$newDate14 = -not (Test-AppInventoryCurrent -Inventory $r14 -Iso (Get-IsoIdentity $iso14) -Index 3)
+(Get-Item $iso14).LastWriteTimeUtc = [datetime]'2026-09-10T08:00:00Z'; Set-Content $iso14 'iso-v2-bigger'; (Get-Item $iso14).LastWriteTimeUtc = [datetime]'2026-09-10T08:00:00Z'
+Check 'a new ISO under the same name (other date, or other size), or another index, makes the list out of date' ($newDate14 -and -not (Test-AppInventoryCurrent -Inventory $r14 -Iso (Get-IsoIdentity $iso14) -Index 3) -and -not (Test-AppInventoryCurrent -Inventory $r14 -Iso $id14 -Index 2) -and -not (Test-AppInventoryCurrent -Inventory $null -Iso $id14 -Index 3))
 [System.IO.File]::WriteAllText($f14, '{ "apps": [ { "version": "1" } ] }'); $script:LogLines.Clear()
-Check 'an unusable app list reads as none, with a WARN' ($null -eq (Read-AppInventory -OsRoot $os14) -and [bool]($script:LogLines -match 'WARN.*App list .* could not be used'))
+Check 'an unusable app list reads as none, with a WARN' ($null -eq (Read-AppInventory -File $list14) -and [bool]($script:LogLines -match 'WARN.*App list .* could not be used'))
+Remove-Item $list14 -Force; New-Item -ItemType Directory -Force $os14 | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $os14 'ProvisionedApps.json'), '{ "source": "old.iso", "index": 3, "apps": [ { "displayName": "Microsoft.BingNews" } ] }')
+Move-OldAppInventory -OsRoot $os14 -File $list14
+Check 'a step-11 <OS folder>\ProvisionedApps.json is moved to Profiles\Apps once' (-not (Test-Path (Join-Path $os14 'ProvisionedApps.json')) -and (Read-AppInventory -File $list14).Source -eq 'old.iso')
+[System.IO.File]::WriteAllText((Join-Path $os14 'ProvisionedApps.json'), '{ "source": "older.iso", "apps": [] }')
+Move-OldAppInventory -OsRoot $os14 -File $list14
+Check 'an old file never overwrites a list already in Profiles\Apps' ((Read-AppInventory -File $list14).Source -eq 'old.iso')
+$pf14 = Join-Path $tmp 'apps14\Profiles'; $null = Import-OsProfiles -Directory $pf14
+Check 'the app lists in Profiles\Apps are not read as OS profiles' (@($script:ProfileMessages | Where-Object { $_.Level -eq 'WARN' }).Count -eq 0 -and (Test-Path $list14))
 $sf14 = Save-OsSettings -Directory (Join-Path $tmp 'apps14\Settings') -Definition $kms -Options @{ AppRemoval = $true } -Languages @() -RemoveApps @('Microsoft.BingNews', 'Microsoft.Copilot')
 $rs14 = Read-OsSettings -Directory (Join-Path $tmp 'apps14\Settings') -Definition $kms -LanguageList $builtLangs
 Check 'the ticked apps (by name) and the Remove the ticked apps option are saved per OS and read back' ((@($rs14.RemoveApps) -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot' -and $rs14.Options['AppRemoval'] -eq $true)

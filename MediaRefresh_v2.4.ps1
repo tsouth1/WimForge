@@ -1439,22 +1439,51 @@ function Service-WinRe {
         throw
     }
 }
-# ---------- provisioned apps (TODO step 11) ----------
-# The Apps tab lists the provisioned apps of the selected edition, from <OS folder>\ProvisionedApps.json. That file is
-# written by "Read apps from the ISO", by a preflight when it is missing or from another ISO / index, and by every run
-# from the image it has just mounted. Ticked apps are kept by DisplayName (versions change with every ISO).
-$script:AppInventoryFileName = 'ProvisionedApps.json'
+# ---------- provisioned apps (TODO steps 11 / 11b) ----------
+# The Apps tab lists the provisioned apps of the selected edition from Profiles\Apps\<profile folder>_Appx.json (11b,
+# Terry 2026-09-27): one scan per OS. The list is read from the image only by "Read apps from the ISO", or by a preflight
+# when there is no list yet or the OS ISO has changed (name, size or date - a new ISO may add or remove apps). A real run
+# never writes it. Ticked apps are kept by DisplayName (versions change with every ISO).
+$script:OldAppInventoryFileName = 'ProvisionedApps.json'   # step 11's place, <OS folder>\ProvisionedApps.json; moved once
+function Get-AppListPath {
+    param([Parameter(Mandatory)][string]$ProfilesDir, [Parameter(Mandatory)][pscustomobject]$Definition)
+    return [System.IO.Path]::Combine($ProfilesDir, 'Apps', "$($Definition.Folder)_Appx.json")
+}
+function Move-OldAppInventory {
+    # Moves a step-11 <OS folder>\ProvisionedApps.json to the Apps folder once (only when there is no list there yet).
+    param([string]$OsRoot, [Parameter(Mandatory)][string]$File)
+    if (-not $OsRoot) { return }
+    $old = [System.IO.Path]::Combine($OsRoot, $script:OldAppInventoryFileName)
+    if ((Test-Path -LiteralPath $old) -and -not (Test-Path -LiteralPath $File)) {
+        try { Ensure-Directory (Split-Path $File -Parent); Move-Item -LiteralPath $old -Destination $File -ErrorAction Stop; Write-Log "App list moved from $old to $File" }
+        catch { Write-Log "The old app list $old could not be moved: $($_.Exception.Message)" 'WARN' }
+    }
+}
+function Get-IsoIdentity {
+    # What tells one ISO from another for the app list: name, size and last-write time (a new month's ISO can keep its name).
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
+    $i = Get-Item -LiteralPath $Path
+    # Time as UTC ticks: an ISO-8601 date string would come back from ConvertFrom-Json as a DateTime in PowerShell 7.
+    return [pscustomobject]@{ Name = $i.Name; Size = [int64]$i.Length; Time = [string]$i.LastWriteTimeUtc.Ticks }
+}
+function Test-AppInventoryCurrent {
+    # True when the list was read from this very ISO (name, size, date) and this index.
+    param($Inventory, $Iso, [int]$Index)
+    if (-not $Inventory -or -not $Iso) { return $false }
+    return ($Inventory.Source -eq $Iso.Name -and [string]$Inventory.IsoSize -eq [string]$Iso.Size -and $Inventory.IsoTime -eq $Iso.Time -and $Inventory.Index -eq $Index)
+}
 function Get-ProvisionedApps {
     param([Parameter(Mandatory)][string]$Mount)
     return @(Get-AppxProvisionedPackage -Path $Mount -ErrorAction Stop | Sort-Object DisplayName | ForEach-Object {
         [pscustomobject]@{ DisplayName = [string]$_.DisplayName; Version = [string]$_.Version; PackageName = [string]$_.PackageName } })
 }
 function Save-AppInventory {
-    param([Parameter(Mandatory)][string]$OsRoot, [object[]]$Apps = @(), [string]$Source, [int]$Index, [string]$ImageName, [string]$Version)
-    Ensure-Directory $OsRoot
-    $file = [System.IO.Path]::Combine($OsRoot, $script:AppInventoryFileName)
+    param([Parameter(Mandatory)][string]$File, [object[]]$Apps = @(), [string]$Source, [int]$Index, [string]$ImageName, [string]$Version, [string]$IsoSize = '', [string]$IsoTime = '')
+    $file = $File
+    Ensure-Directory (Split-Path $file -Parent)
     $data = [ordered]@{
-        schemaVersion = 1; read = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); source = $Source; index = $Index; imageName = $ImageName; version = $Version
+        schemaVersion = 2; read = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); source = $Source; isoSize = $IsoSize; isoTime = $IsoTime; index = $Index; imageName = $ImageName; version = $Version
         apps = @(@($Apps) | ForEach-Object { [ordered]@{ displayName = $_.DisplayName; version = $_.Version; packageName = $_.PackageName } })
     }
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json -Depth 4) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
@@ -1462,10 +1491,10 @@ function Save-AppInventory {
     return $file
 }
 function Read-AppInventory {
-    # The saved app list for an OS folder, or $null when there is none or it is unusable (WARN).
-    param([string]$OsRoot)
-    if (-not $OsRoot) { return $null }
-    $file = [System.IO.Path]::Combine($OsRoot, $script:AppInventoryFileName)
+    # A saved app list, or $null when there is none or it is unusable (WARN).
+    param([string]$File)
+    if (-not $File) { return $null }
+    $file = $File
     if (-not (Test-Path -LiteralPath $file)) { return $null }
     try {
         $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
@@ -1474,6 +1503,7 @@ function Read-AppInventory {
             if (-not $n) { throw 'an app has no displayName.' }
             [pscustomobject]@{ DisplayName = $n; Version = [string](Get-ProfileValue $_ 'version' ''); PackageName = [string](Get-ProfileValue $_ 'packageName' '') } })
         return [pscustomobject]@{ File = $file; Read = [string](Get-ProfileValue $o 'read' ''); Source = [string](Get-ProfileValue $o 'source' ''); Index = [int](Get-ProfileValue $o 'index' 0)
+            IsoSize = [string](Get-ProfileValue $o 'isoSize' ''); IsoTime = [string](Get-ProfileValue $o 'isoTime' '')
             ImageName = [string](Get-ProfileValue $o 'imageName' ''); Version = [string](Get-ProfileValue $o 'version' ''); Apps = $apps }
     } catch { Write-Log "App list $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
 }
@@ -1503,7 +1533,9 @@ function Remove-ProvisionedApps {
 function Update-AppInventoryFromIso {
     # Reads the selected edition's provisioned apps straight from the OS ISO (read-only mount; an install.esd is first
     # exported to a temporary WIM, as ESD files cannot be mounted) and saves them for the Apps tab.
-    param([hashtable]$Paths, [string]$SourceWim, [object]$Selected, [string]$IsoFile)
+    param([hashtable]$Paths, [string]$SourceWim, [object]$Selected, [string]$IsoPath, [Parameter(Mandatory)][string]$File)
+    $iso = Get-IsoIdentity $IsoPath
+    $IsoFile = if ($iso) { $iso.Name } else { Split-Path $IsoPath -Leaf }
     $dl = if ($script:DismLogArgs) { $script:DismLogArgs } else { @{} }
     $wim = $SourceWim; $idx = [int]$Selected.ImageIndex; $tmp = $null
     # Each step is shown in the status line and the header, as a read takes a few minutes (mostly the mount and discard).
@@ -1525,13 +1557,14 @@ function Update-AppInventoryFromIso {
     } catch { Dismount-IfMounted $Paths.MainMount; throw }
     finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
     $version = [string](Get-WindowsImage -ImagePath $SourceWim -Index ([int]$Selected.ImageIndex)).Version
-    [void](Save-AppInventory -OsRoot $Paths.Root -Apps $apps -Source $IsoFile -Index ([int]$Selected.ImageIndex) -ImageName $Selected.ImageName -Version $version)
+    [void](Save-AppInventory -File $File -Apps $apps -Source $IsoFile -Index ([int]$Selected.ImageIndex) -ImageName $Selected.ImageName -Version $version `
+        -IsoSize $(if ($iso) { [string]$iso.Size } else { '' }) -IsoTime $(if ($iso) { $iso.Time } else { '' }))
     return $apps
 }
 function Service-InstallIndex {
     param([string]$ImagePath, [int]$Index, [hashtable]$Paths, [hashtable]$Packages, [string]$OsDrive,
           [hashtable]$LpFiles, [string[]]$FodSource = @(), [string[]]$Languages = @(), [bool]$DoWinRe, [bool]$DoNetFx3,
-          [string[]]$RemoveApps = @(), [hashtable]$AppInventory = $null)
+          [string[]]$RemoveApps = @())
     Assert-NotCancelled
     $dl = $script:DismLogArgs
     $target = "install.wim index $Index"
@@ -1541,12 +1574,9 @@ function Service-InstallIndex {
     try {
         Mount-WindowsImage -ImagePath $ImagePath -Index $Index -Path $Paths.MainMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
 
-        # 0. Provisioned apps (step 11): the Apps tab's list is refreshed from this mount, then the ticked apps are removed -
-        #    the first change to the image, so every later step only services the apps that stay (Terry, 2026-09-22).
-        if ($AppInventory) {
-            try { [void](Save-AppInventory -OsRoot $AppInventory.OsRoot -Apps @(Get-ProvisionedApps $Paths.MainMount) -Source $AppInventory.Source -Index $AppInventory.Index -ImageName $AppInventory.ImageName -Version $AppInventory.Version) }
-            catch { Write-Log "The app list for the Apps tab could not be refreshed: $($_.Exception.Message)" 'WARN' }
-        }
+        # 0. Provisioned apps (step 11): the ticked apps are removed - the first change to the image, so every later step only
+        #    services the apps that stay (Terry, 2026-09-22). They are matched against what this image really provisions, not
+        #    against the Apps tab's list, which a run never writes (11b).
         if (@($RemoveApps).Count -gt 0) {
             $nRemoved = Remove-ProvisionedApps -Mount $Paths.MainMount -Names $RemoveApps -Target $target
             Write-Log "App removal: $nRemoved provisioned app(s) removed from $target."
@@ -2321,6 +2351,11 @@ function Invoke-MediaRefresh {
     Write-Log "Repository: $($paths.Root)"
     Write-Log "DISM log: $($script:DismLogArgs['LogPath'])"
     $dl = $script:DismLogArgs
+    # The Apps tab's list for this OS (11b): Profiles\Apps\<folder>_Appx.json; without a Profiles folder (scripted use, the
+    # test kit) an Apps folder beside the OS folders. A step-11 <OS folder>\ProvisionedApps.json is moved there once.
+    $profDir = [string](Get-ProfileValue $Options 'ProfilesDir' '')
+    $appListFile = if ($profDir) { Get-AppListPath -ProfilesDir $profDir -Definition $definition } else { [System.IO.Path]::Combine((Split-Path $paths.Root -Parent), 'Apps', "$($definition.Folder)_Appx.json") }
+    Move-OldAppInventory -OsRoot $paths.Root -File $appListFile
 
     try {
         Set-Phase 'Clearing stale mounts'
@@ -2359,10 +2394,10 @@ function Invoke-MediaRefresh {
             # role detection below searches the Language Pack and FOD ISOs file by file, so here each ISO is mounted in turn
             # until the one with sources\install.wim (or .esd) is found; any other ISO is dismounted again at once.
             Set-Phase 'Finding the OS ISO'; Set-Progress 10 'Finding the OS ISO'
-            $osDrive = $null; $osIsoFile = $null
+            $osDrive = $null; $osIsoFile = $null; $osIsoPath = $null
             foreach ($f in $isoFiles) {
                 $drv = Mount-IsoFile $f.FullName
-                if ((Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.wim'))) -or (Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.esd')))) { $osDrive = $drv; $osIsoFile = $f.Name; break }
+                if ((Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.wim'))) -or (Test-Path -LiteralPath (Join-Chain $drv @('sources', 'install.esd')))) { $osDrive = $drv; $osIsoFile = $f.Name; $osIsoPath = $f.FullName; break }
                 try { Dismount-DiskImage -ImagePath $f.FullName -ErrorAction Stop | Out-Null } catch { }
                 [void]$script:MountedIsoPaths.Remove($f.FullName)
                 Write-Log "$($f.Name) is not the OS ISO; dismounted again."
@@ -2373,9 +2408,9 @@ function Invoke-MediaRefresh {
             $inventory = @(Get-WindowsImage -ImagePath $sourceWim)
             Write-Log ('Detected indexes: ' + (($inventory | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" }) -join '; '))
             $selected = Select-SourceImage -Inventory $inventory -Definition $definition -Name $name
-            $appsRead = @(Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile)
+            $appsRead = @(Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoPath $osIsoPath -File $appListFile)
             Set-Progress 100 'App list read'; Set-Phase 'Done'
-            $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = (Join-Path $paths.Root $script:AppInventoryFileName) }
+            $script:LastResult = [pscustomobject]@{ Mode = 'Apps'; Count = $appsRead.Count; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; File = $appListFile }
             return $script:LastResult
         }
         $mounted = @()
@@ -2417,15 +2452,20 @@ function Invoke-MediaRefresh {
         $osIsoFile = $driveToFile[$osDrive]
         Test-FreeSpace -Definition $definition -Paths $paths -SourceWim $sourceWim -OsIsoPath $osIsoPath -Options $Options
         if ($selected) {
-            # The Apps tab's list: read during a preflight when there is none yet, or it came from another ISO or index.
-            $appInv = Read-AppInventory -OsRoot $paths.Root
-            if ($Options.PreflightOnly -and (-not $appInv -or $appInv.Source -ne $osIsoFile -or $appInv.Index -ne [int]$selected.ImageIndex)) {
+            # The Apps tab's list (11b): one scan per OS. A preflight reads it when there is none yet, or when the OS ISO is not
+            # the one it was read from (name, size or date: a new ISO may add or remove apps) or the index differs. A real run
+            # never writes it - it only says when the list is out of date (removal matches the mounted image anyway).
+            $appInv = Read-AppInventory -File $appListFile
+            $isCurrent = Test-AppInventoryCurrent -Inventory $appInv -Iso (Get-IsoIdentity $osIsoPath) -Index ([int]$selected.ImageIndex)
+            if ($Options.PreflightOnly -and -not $isCurrent) {
                 Set-Phase 'Reading provisioned apps'
-                Write-Log $(if ($appInv) { "The app list is from $($appInv.Source) index $($appInv.Index); reading it again from $osIsoFile." } else { 'No app list yet for this OS; reading it for the Apps tab.' })
+                Write-Log $(if ($appInv) { "The app list was read from $($appInv.Source) (index $($appInv.Index)); the OS ISO is now $osIsoFile, which may add or remove apps, so index $($selected.ImageIndex) is read again." } else { 'No app list yet for this OS; reading it for the Apps tab.' })
                 # Not fatal: a preflight checks the run's inputs; the app list is a convenience for the Apps tab.
-                try { [void](Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoFile $osIsoFile) }
+                try { [void](Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoPath $osIsoPath -File $appListFile) }
                 catch { Write-Log "The app list could not be read ($($_.Exception.Message)); use Read apps from the ISO on the Apps tab." 'WARN' }
-                $appInv = Read-AppInventory -OsRoot $paths.Root
+                $appInv = Read-AppInventory -File $appListFile
+            } elseif (-not $Options.PreflightOnly -and -not $isCurrent -and $removeApps.Count -gt 0) {
+                Write-Log "The Apps tab's list is $(if ($appInv) { "from $($appInv.Source), not the current OS ISO $osIsoFile" } else { 'missing' }); this run removes the ticked apps it finds in the image. A preflight or Read apps from the ISO brings the list up to date." 'WARN'
             }
             if ($removeApps.Count -gt 0) {
                 Write-Log "App removal: $($removeApps.Count) app(s) ticked: $($removeApps -join ', ')"
@@ -2464,10 +2504,9 @@ function Invoke-MediaRefresh {
                 $indexLabel = if ($workImages.Count -gt 1) { "index $($img.ImageIndex) of $($workImages.Count)" } else { "index $($img.ImageIndex)" }
                 Set-Progress (15 + [int](45 * $n / $workImages.Count)) "Servicing install.wim $indexLabel"
                 Set-Phase "Servicing install.wim ($indexLabel)"
-                $appInvArgs = if ($selected) { @{ OsRoot = $paths.Root; Source = $osIsoFile; Index = [int]$selected.ImageIndex; ImageName = $selected.ImageName; Version = $script:BuildBefore } } else { $null }
                 Service-InstallIndex -ImagePath $workingInstall -Index $img.ImageIndex -Paths $paths -Packages $packages -OsDrive $osDrive `
                     -LpFiles $lpFiles -FodSource $fodSource -Languages $languages -DoWinRe ([bool]$Options.WinRE) -DoNetFx3 ([bool]$Options.NetFx3) `
-                    -RemoveApps $removeApps -AppInventory $appInvArgs
+                    -RemoveApps $removeApps
             }
             Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
             $finalInstall = Join-Path $paths.NewWim 'install.wim'
@@ -2917,8 +2956,8 @@ function Get-SelectedSettings {
 }
 function Get-TickedApps { return @(foreach ($item in $script:AppList.Items) { if ($item.IsSelected) { [string]$item.Tag } }) }
 function Update-AppList {
-    # Fills the Apps tab for the selected OS from <OS folder>\ProvisionedApps.json, ticking $Ticked (app names). A ticked
-    # app that is not in the current list stays on it, marked, so a tick never disappears silently.
+    # Fills the Apps tab for the selected OS from Profiles\Apps\<folder>_Appx.json (11b), ticking $Ticked (app names). A
+    # ticked app that is not in the current list stays on it, marked, so a tick never disappears silently.
     param([string[]]$Ticked = @())
     $script:AppList.Items.Clear()
     $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
@@ -2926,7 +2965,16 @@ function Update-AppList {
     $client = -not $def.ServiceAllIndexes
     $script:AppList.IsEnabled = $client; $script:ReadAppsButton.IsEnabled = $client; $script:ChkAppRemoval.IsEnabled = $client
     if (-not $client) { $script:AppsSource.Text = 'App removal is for client editions; Windows Server has no provisioned consumer apps.'; return }
-    $inv = Read-AppInventory -OsRoot (Get-OsRootPath -Root ([string]$script:RootText.Text).Trim() -Definition $def)
+    $osRoot = Get-OsRootPath -Root ([string]$script:RootText.Text).Trim() -Definition $def
+    $listFile = Get-AppListPath -ProfilesDir $script:ProfilesDir -Definition $def
+    Move-OldAppInventory -OsRoot $osRoot -File $listFile
+    $inv = Read-AppInventory -File $listFile
+    # Is the list still from the ISO in the OS's ISO folder? (A preflight reads it again when not.)
+    $changed = $false
+    if ($inv) {
+        $isoNow = @(Get-ChildItem -LiteralPath ([System.IO.Path]::Combine($osRoot, 'ISO')) -Filter '*.iso' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $inv.Source })
+        $changed = ($isoNow.Count -eq 0) -or -not (Test-AppInventoryCurrent -Inventory $inv -Iso (Get-IsoIdentity $isoNow[0].FullName) -Index $inv.Index)
+    }
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($a in @(if ($inv) { $inv.Apps })) {
         if ($names.Contains($a.DisplayName)) { continue }
@@ -2939,7 +2987,8 @@ function Update-AppList {
         [void]$script:AppList.Items.Add($li); $names.Add($t)
     }
     foreach ($item in $script:AppList.Items) { $item.IsSelected = (@($Ticked) -contains [string]$item.Tag) }
-    $script:AppsSource.Text = if ($inv) { "$(@($inv.Apps).Count) provisioned app(s) in $($inv.Source), index $($inv.Index) ($($inv.ImageName), $($inv.Version)); read $($inv.Read)." } else { 'No app list for this OS yet: run a preflight, or press Read apps from the ISO.' }
+    $script:AppsSource.Text = if ($inv) { "$(@($inv.Apps).Count) provisioned app(s) in $($inv.Source), index $($inv.Index) ($($inv.ImageName), $($inv.Version)); read $($inv.Read).$(if ($changed) { ' The OS ISO in the folder has changed since - the next preflight reads the list again, or press Read apps from the ISO.' })" } else { 'No app list for this OS yet: run a preflight, or press Read apps from the ISO.' }
+    $script:AppsSource.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, $(if ($changed) { 'WF.WarnText' } else { 'WF.SubtleText' }))
 }
 # ---- SCCM tab (step 7) ----
 $script:SccmLists = $null        # distribution points and groups from the last Connect

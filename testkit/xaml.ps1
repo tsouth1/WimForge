@@ -62,6 +62,7 @@ if ($wpf) {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $script:SettingsDir = Join-Path $PWD 'tst_settings'; if (Test-Path $script:SettingsDir) { Remove-Item -Recurse -Force $script:SettingsDir }
+    $script:ProfilesDir = Join-Path $PWD 'tst_settings_profiles'   # the Apps tab reads Profiles\Apps (11b)
     $script:DefaultChecks = @{}; foreach ($n in $script:SettingOptionNames) { $script:DefaultChecks[$n] = [bool](Get-Variable -Name "Chk$n" -Scope Script -ValueOnly).IsChecked }
     $script:OsDefinitions = Import-OsProfiles
     Update-LanguageItems
@@ -86,12 +87,17 @@ if ($wpf) {
     # Apps tab (TODO step 11): the list comes from <OS folder>\ProvisionedApps.json; ticks by name, saved per OS
     $root11 = Join-Path $PWD 'tst_apps'; if (Test-Path $root11) { Remove-Item -Recurse -Force $root11 }
     $kmsDef = $script:OsDefinitions['Windows 10 Enterprise LTSC 2021 (KMS)']
-    [void](Save-AppInventory -OsRoot (Join-Path $root11 $kmsDef.Folder) -Source 'os2021.iso' -Index 1 -ImageName 'Windows 10 Enterprise LTSC' -Version '10.0.19041.1288' `
+    $script:ProfilesDir = Join-Path $root11 'Profiles'
+    $iso11 = Join-Path $root11 "$($kmsDef.Folder)\ISO\os2021.iso"; New-Item -ItemType Directory -Force (Split-Path $iso11) | Out-Null; Set-Content $iso11 'iso'
+    $id11 = Get-IsoIdentity $iso11
+    [void](Save-AppInventory -File (Get-AppListPath -ProfilesDir $script:ProfilesDir -Definition $kmsDef) -Source 'os2021.iso' -Index 1 -ImageName 'Windows 10 Enterprise LTSC' -Version '10.0.19041.1288' -IsoSize ([string]$id11.Size) -IsoTime $id11.Time `
         -Apps @([pscustomobject]@{ DisplayName = 'Microsoft.SecHealthUI'; Version = '1000.1'; PackageName = 'Microsoft.SecHealthUI_1000.1_x64__8wekyb3d8bbwe' }, [pscustomobject]@{ DisplayName = 'Microsoft.WindowsStore'; Version = '22.1'; PackageName = 'Microsoft.WindowsStore_22.1_x64__8wekyb3d8bbwe' }))
     $script:RootText.Text = $root11
     $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
     $appTags = @($script:AppList.Items | ForEach-Object { [string]$_.Tag })
-    Check 'WPF Apps tab: the list comes from ProvisionedApps.json, with where it was read from' (($appTags -join ',') -eq 'Microsoft.SecHealthUI,Microsoft.WindowsStore' -and $script:AppsSource.Text -like '2 provisioned app(s) in os2021.iso, index 1*' -and $script:AppList.IsEnabled -and @(Get-TickedApps).Count -eq 0) "$($appTags -join ',') | $($script:AppsSource.Text)"
+    Check 'WPF Apps tab: the list comes from Profiles\Apps\<folder>_Appx.json, with where it was read from' (($appTags -join ',') -eq 'Microsoft.SecHealthUI,Microsoft.WindowsStore' -and $script:AppsSource.Text -like '2 provisioned app(s) in os2021.iso, index 1*' -and $script:AppsSource.Text -notlike '*has changed since*' -and $script:AppList.IsEnabled -and @(Get-TickedApps).Count -eq 0) "$($appTags -join ',') | $($script:AppsSource.Text)"
+    (Get-Item $iso11).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(3); Update-AppList
+    Check 'WPF Apps tab: a new ISO in the folder (same name, new date) is pointed out; the list stays until it is read again' ($script:AppsSource.Text -like '*The OS ISO in the folder has changed since*' -and @($script:AppList.Items).Count -eq 2)
     foreach ($item in $script:AppList.Items) { $item.IsSelected = ([string]$item.Tag -eq 'Microsoft.WindowsStore') }
     $saved11 = Save-CurrentOsSettings
     Update-AppList -Ticked @('Microsoft.WindowsStore', 'Contoso.Gone')

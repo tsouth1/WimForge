@@ -46,4 +46,5 @@ testkit/rt/
 testkit/tst/
 testkit/tst_settings/
 testkit/tst_apps/
+testkit/tst_settings_profiles/
 testkit/engine_only.ps1

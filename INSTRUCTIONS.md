@@ -36,7 +36,6 @@ WimForge creates the sub-folders of an OS folder the first time that OS is run:
   - `PATCHES\SETUPDU` - the Setup Dynamic Update, used for the refreshed media.
 - `NEWWIM` - the finished output (see "What a run produces").
 - `LOGS` - every log and change log for this OS (see "Where the logs are").
-- `ProvisionedApps.json` - the app list shown on the Apps tab, read from the ISO. Safe to delete; it is read again.
 - `OLDWIM`, `WORKING`, `TEMP`, `MOUNT`, `WINRE`, `WINPE` - WimForge's own working folders. Leave them alone; they are cleared at the start of every run.
 
 **The ISO folder.** Put one ISO of each kind in it; the file names do not matter, because WimForge recognises each ISO by what is inside it:
@@ -51,6 +50,7 @@ Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO.
 
 - `Profiles` - one JSON file per operating system (edition, language pack pattern, catalog search rules, end-of-support date, ...) and `Languages.json` (the list on the Languages tab). They are written from the built-in defaults the first time. Edit a file and press "Reload profiles" to use the change; a broken file is reported in the log and skipped. Existing files are never changed by WimForge. To go back to the built-in version of one OS, delete its file and press "Reload profiles": a fresh copy is written (the other files are not touched). To take an OS off the list, rename its file to `<name>.json.disabled`.
 - `Settings` - the choices saved with "Save settings" (one file per OS) and `General.json` (the repository root and the colour scheme).
+- `Profiles\Apps` - the Apps tab's app list per OS (`<OS>_Appx.json`), read once from the ISO. Kept when the profile files are regenerated; delete one to have it read again.
 
 ## Recommended order of work
 
@@ -105,7 +105,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 - Lists the **provisioned apps** of the selected edition (the apps every new user gets, such as Clipchamp or Xbox apps on Windows 11). Tick the apps to remove; they are removed from `install.wim` as the very first servicing step, before WinRE, updates and languages.
 - **Remove the ticked apps** - untick to keep the ticks but skip removal for a run.
-- **Read apps from the ISO** - mounts only the OS ISO, then the edition read-only, and fills the list; usually a few minutes (mostly mounting and discarding the image), with each step shown in the status line. Changes nothing. The LTSC editions have no provisioned apps, so their list is empty. A preflight also reads the list when there is none yet or the ISO has changed, and every run refreshes it. The line above the list says which ISO and edition it came from.
+- **Read apps from the ISO** - mounts only the OS ISO, then the edition read-only, and fills the list; usually a few minutes (mostly mounting and discarding the image), with each step shown in the status line. Changes nothing. The LTSC editions have no provisioned apps, so their list is empty. One scan per OS: the list is kept in `Profiles\Apps\<OS>_Appx.json` and fills the tab whenever that OS is selected. A preflight reads it again only when there is none yet or the OS ISO has changed (a new ISO - even under the same file name - may add or remove apps); a real run never changes it. The line above the list says which ISO and edition it came from, and points it out when the ISO in the folder has changed since.
 - Press **Save settings** to keep the ticks for this OS. Ticks are kept by app name, so they carry over to newer ISOs. A ticked app that is not in the current list stays on it, marked, and is skipped (logged) if the image does not have it.
 - After the run, **Verify** checks that every ticked app is really gone; a leftover fails the validation gate. Each removal is a row in the change log.
 - Windows Server has no provisioned consumer apps, so the tab is greyed out for it.

@@ -482,7 +482,7 @@ function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]
     if (-not $Mounted -and $ImagePath -like '*boot*' -and -not $Index) { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }) }
     & $gwi18 @PSBoundParameters }
 $script:FailRemove18 = $false
-$os18 = Join-Path $base 'Win11Enterprise_24H2'; $appsFile18 = Join-Path $os18 'ProvisionedApps.json'
+$os18 = Join-Path $base 'Win11Enterprise_24H2'; $appsFile18 = Join-Path $base 'Apps\Win11_Enterprise_24H2_Appx.json'   # no ProfilesDir in these runs: Apps beside the OS folders
 $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise')
 # Read apps from the ISO: works with empty PATCHES folders (it needs no patches), only mounts read-only, saves the list
 Reset-Test; Reset-Prov18; Remove-Item $appsFile18 -Force -ErrorAction SilentlyContinue
@@ -494,7 +494,7 @@ function Write-Log { param($Message, $Level = 'INFO') $logs18a.Add("[$Level] $Me
 function Set-Phase { param([string]$Phase, [string]$OsName = $null) $phases18a.Add($Phase) }
 $a18 = Invoke-MediaRefresh ([pscustomobject]@{ OsName = 'Windows 11 Enterprise 24H2'; Root = $base; Mode = 'Apps'; PreflightOnly = $false; Install = $true; Boot = $false; WinRE = $true; Verify = $true; BuildMedia = $false; BuildIso = $false; SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; Languages = @('de-de') })
 Set-Item function:Write-Log $wl18a; Set-Item function:Set-Phase $sp18a
-$inv18 = Read-AppInventory -OsRoot $os18
+$inv18 = Read-AppInventory -File $appsFile18
 Check 'Read apps: only the OS ISO stays mounted; the Language Pack ISO found first is dismounted again at once' ((@($script:Calls -match '^(IsoDismount|Mount )') -join '|') -eq 'IsoDismount aaa_lp11.iso|Mount install.wim idx3 -> MainOS|IsoDismount os11.iso' -and [bool]($logs18a -match 'aaa_lp11\.iso is not the OS ISO; dismounted again') -and -not [bool]($logs18a -match 'ISO roles -')) ($script:Calls -join '; ')
 Check 'Read apps: the status shows each step' ((@($phases18a) -join ' > ') -eq 'Reading provisioned apps > Clearing stale mounts > Mounting ISOs > Finding the OS ISO > Mounting the edition read-only > Reading the provisioned apps > Discarding the read-only mount > Done') (@($phases18a) -join ' > ')
 Remove-Item (Join-Path $os18 'ISO\aaa_lp11.iso') -Force
@@ -505,6 +505,7 @@ Check 'Read apps on Windows Server: refused with a clear message' ($threw -and $
 # A real run with two ticked apps (one not in the image): removed first - before WinRE and the SSU / LCU
 Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
 Reset-Test; Reset-Prov18; $script:ChangeEvents = $null
+$listTime18 = (Get-Item $appsFile18).LastWriteTimeUtc
 $logs18 = [System.Collections.Generic.List[string]]::new()
 $wl18 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
 $o18 = Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; SetupDU = $false }
@@ -517,7 +518,7 @@ Check 'the ticked app is removed right after the mount, before WinRE and any pac
 Check 'a ticked app the image does not have is logged and skipped' ([bool]($logs18 -match 'App removal: Contoso\.NotThere is not provisioned in install\.wim index 1'))
 Check 'the change log records the removed app (category AppRemoved)' (@($script:ChangeEvents | Where-Object { $_.Category -eq 'AppRemoved' -and $_.Item -eq 'Microsoft.BingNews' }).Count -eq 1)
 Check 'Verify confirms the ticked apps are gone and the gate passes' ([bool]($logs18 -match 'VERIFY   none of the 2 app\(s\) ticked for removal is provisioned') -and $script:LastResult.Gate -eq 'PASSED')
-Check 'the run refreshes the Apps tab list from the mounted image (before removal: the edition''s own apps)' ((@((Read-AppInventory -OsRoot $os18).Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot,Microsoft.WindowsCalculator')
+Check 'a real run does not touch the Apps tab list (11b)' ((Get-Item $appsFile18).LastWriteTimeUtc -eq $listTime18 -and (@((Read-AppInventory -File $appsFile18).Apps).DisplayName -join ',') -eq 'Microsoft.BingNews,Microsoft.Copilot,Microsoft.WindowsCalculator')
 # A removal that fails: WARN, the run goes on, Verify catches that the app is still there
 Reset-Test; Reset-Prov18; $script:FailRemove18 = $true
 Invoke-MediaRefresh $o18
@@ -533,7 +534,20 @@ $j18 = Get-Content -Raw $appsFile18 | ConvertFrom-Json; $j18.index = 2; ($j18 | 
 Reset-Test; $logs18.Clear()
 Invoke-MediaRefresh $p18
 Set-Item function:Write-Log $wl18
-Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list is from os11\.iso index 2; reading it again') -and (Read-AppInventory -OsRoot $os18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
+Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list was read from os11\.iso \(index 2\); .* so index 3 is read again') -and (Read-AppInventory -File $appsFile18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
+# A new month's ISO under the same file name (Terry, 2026-09-27: it may add or remove apps): a preflight reads the list again
+$isoFile18 = Join-Path $os18 'ISO\os11.iso'; (Get-Item $isoFile18).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(1)
+$script:Prov18.Add((New-App18 'Microsoft.NewInOctober'))
+Reset-Test; $logs18.Clear()
+function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
+Invoke-MediaRefresh $p18
+Check 'a new ISO under the same name (new date): the preflight reads the list again and picks up the new app' (@($script:Calls -match '^Mount install\.wim').Count -eq 1 -and [bool]((Read-AppInventory -File $appsFile18).Apps.DisplayName -contains 'Microsoft.NewInOctober'))
+# A real run with an out-of-date list: WARN, the list stays as it is, removal still works on the image itself
+(Get-Item $isoFile18).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(2)
+Reset-Test; Reset-Prov18; $logs18.Clear(); $listTime18b = (Get-Item $appsFile18).LastWriteTimeUtc
+Invoke-MediaRefresh $o18
+Set-Item function:Write-Log $wl18
+Check 'a real run with an out-of-date list: a WARN, the list is not touched, the ticked app is still removed' ([bool]($logs18 -match "^\[WARN\] The Apps tab's list is from os11\.iso, not the current OS ISO") -and (Get-Item $appsFile18).LastWriteTimeUtc -eq $listTime18b -and @($script:Calls -match '^RemoveAppx Microsoft\.BingNews').Count -eq 1)
 # Windows Server: ticked apps are ignored with a WARN
 Reset-Test; $logs18.Clear(); $script:ImageCount = 4
 function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
