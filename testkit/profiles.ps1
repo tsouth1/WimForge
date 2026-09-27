@@ -226,4 +226,46 @@ $null = Import-OsProfiles -Directory $regenProf; $null = Save-OsSettings -Direct
 Remove-Item -Recurse -Force $regenProf; $null = Import-OsProfiles -Directory $regenProf
 Check 'regenerating the Profiles folder leaves the saved settings in place' ((@((Read-OsSettings -Directory $regenSet -Definition $kms -LanguageList $builtLangs).Languages) -join ',') -eq 'fr-fr')
 
+Write-Host "`n=== P12 colour schemes (General Settings tab, Terry 2026-09-27) ==="
+$cs = Get-ColorSchemes
+Check 'five schemes, Default first, in the order given' ((@($cs.Keys) -join '|') -eq 'Default|Industrial Forge|Modern Sysadmin|Arcane Tech (Runic Teal)|Minimalist Forge')
+$roles0 = @($cs['Default'].Colors.Keys) -join ','
+Check 'every scheme sets the same colour roles, each a #RRGGBB value' (@($cs.Keys | Where-Object { (@($cs[$_].Colors.Keys) -join ',') -ne $roles0 -or @($cs[$_].Colors.Values | Where-Object { $_ -notmatch '^#[0-9A-F]{6}$' }).Count -gt 0 }).Count -eq 0)
+$d0 = $cs['Default'].Colors
+Check 'Default keeps the original colours (window, muted text, Start button, log)' ($d0.WindowBg -eq '#F4F6F8' -and $d0.SubtleText -eq '#555555' -and $d0.Accent -eq '#0078D4' -and $d0.AccentText -eq '#FFFFFF' -and $d0.LogBg -eq '#111827' -and $d0.LogText -eq '#E5E7EB' -and -not $cs['Default'].Dark)
+$given = [ordered]@{
+    'Industrial Forge'         = '#2B2B2B #3A5F7D #1A1A1A #FF6A00 #FFC14A'
+    'Modern Sysadmin'          = '#0078D4 #3C3C3C #5A5A5A #D0D0D0 #A4E400'
+    'Arcane Tech (Runic Teal)' = '#00A6A6 #0F0F0F #2F3B45 #4B2E83 #C6A667'
+    'Minimalist Forge'         = '#121212 #B8B8B8 #2E2E2E #D7263D #F2F2F2' }
+foreach ($n in $given.Keys) { Check "$n palette is exactly the five colours given" ((@($cs[$n].Palette | ForEach-Object { ($_ -split ' ')[-1] }) -join ' ') -eq $given[$n]) }
+Check 'log text colours as given: Industrial Amber Glow, Arcane Electrum Gold' ($cs['Industrial Forge'].Colors.LogText -eq '#FFC14A' -and $cs['Arcane Tech (Runic Teal)'].Colors.LogText -eq '#C6A667')
+Check 'Modern Sysadmin log: Cloud Gray general, Lime Signal success' ($cs['Modern Sysadmin'].Colors.LogText -eq '#D0D0D0' -and $cs['Modern Sysadmin'].Colors.LogSuccess -eq '#A4E400')
+Check 'Minimalist Forge log: Soft Gray general, Forge Red errors' ($cs['Minimalist Forge'].Colors.LogText -eq '#B8B8B8' -and $cs['Minimalist Forge'].Colors.LogError -eq '#D7263D')
+function Get-Contrast([string]$A, [string]$B) {
+    $lum = { param($h) $c = @(1, 3, 5 | ForEach-Object { $v = [Convert]::ToInt32($h.Substring($_, 2), 16) / 255.0; if ($v -le 0.03928) { $v / 12.92 } else { [Math]::Pow(($v + 0.055) / 1.055, 2.4) } }); 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] }
+    $x = & $lum $A; $y = & $lum $B; ([Math]::Max($x, $y) + 0.05) / ([Math]::Min($x, $y) + 0.05)
+}
+# Colours chosen for readability (not the log colours Terry specified) must reach 4.3:1 against what they sit on
+$pairs = 'Text/WindowBg', 'Text/PanelBg', 'Text/ControlBg', 'SubtleText/PanelBg', 'SubtleText/WindowBg', 'ButtonText/ButtonBg', 'AccentText/Accent', 'SelectionText/SelectionBg', 'TabSelectedText/PanelBg', 'Text/Hover', 'WarnText/PanelBg', 'InfoText/PanelBg', 'LogText/LogBg', 'LogWarn/LogBg'
+$low = foreach ($n in $cs.Keys) { foreach ($p in $pairs) { $f, $b = $p -split '/'; $r = Get-Contrast $cs[$n].Colors[$f] $cs[$n].Colors[$b]; if ($r -lt 4.3) { "$n $p {0:N1}" -f $r } } }
+Check 'every scheme keeps text readable (contrast 4.3:1 or better)' (@($low).Count -eq 0) ($low -join '; ')
+Check 'log lines are classed by level: ERROR, WARN / CANCELLED, success, normal' (
+    (Get-LogLineKind '10:32:05 [ERROR] Add-WindowsPackage failed') -eq 'Error' -and (Get-LogLineKind '[ERROR] run failed') -eq 'Error' -and
+    (Get-LogLineKind '10:31:12 [WARN] Skipped .NET CU') -eq 'Warn' -and (Get-LogLineKind '[CANCELLED] stopped') -eq 'Warn' -and
+    (Get-LogLineKind '10:58:40 [INFO] VALIDATION GATE: PASSED') -eq 'Success' -and (Get-LogLineKind '09:44:01 [INFO] PREFLIGHT OK: ISO roles ...') -eq 'Success' -and
+    (Get-LogLineKind '11:04:10 [INFO] Media refresh completed successfully.') -eq 'Success' -and
+    (Get-LogLineKind '10:15:02 [INFO] Adding LCU x.msu to install.wim index 1') -eq 'Normal' -and (Get-LogLineKind '10:15:02 [INFO] mentions [ERROR] later') -eq 'Normal')
+$gs = Join-Path $tmp 'Settings_scheme'
+Check 'no saved colour scheme reads as empty' ((Read-ColorSchemeSetting -Directory $gs) -eq '')
+Save-GeneralSettings -Directory $gs -Root 'G:\mediaRefresh'
+Save-GeneralSettings -Directory $gs -ColorScheme 'Modern Sysadmin'
+Check 'saving the colour scheme keeps the saved repository root' ((Read-ColorSchemeSetting -Directory $gs) -eq 'Modern Sysadmin' -and (Read-GeneralSettings -Directory $gs) -eq 'G:\mediaRefresh')
+Save-GeneralSettings -Directory $gs -Root 'H:\mr'
+Check 'saving the repository root (Save settings button) keeps the colour scheme' ((Read-ColorSchemeSetting -Directory $gs) -eq 'Modern Sysadmin' -and (Read-GeneralSettings -Directory $gs) -eq 'H:\mr')
+[System.IO.File]::WriteAllText((Join-Path $gs 'General.json'), 'not json'); $script:LogLines.Clear()
+Check 'an unusable General.json reads as no scheme, with a WARN' ((Read-ColorSchemeSetting -Directory $gs) -eq '' -and [bool]($script:LogLines -match 'WARN.*could not be used'))
+Save-GeneralSettings -Directory $gs -ColorScheme 'Minimalist Forge'
+Check 'saving over an unusable General.json writes a good file' ((Read-ColorSchemeSetting -Directory $gs) -eq 'Minimalist Forge' -and (Read-GeneralSettings -Directory $gs) -eq '')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

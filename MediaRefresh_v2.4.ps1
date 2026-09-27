@@ -463,10 +463,74 @@ function Remove-OsSettings {
     return $true
 }
 function Save-GeneralSettings {
-    param([Parameter(Mandatory)][string]$Directory, [string]$Root)
+    # Settings\General.json holds what is shared by every OS. Only the values passed are changed; the others are kept.
+    param([Parameter(Mandatory)][string]$Directory, [string]$Root, [string]$ColorScheme)
     Ensure-Directory $Directory
-    $data = [ordered]@{ schemaVersion = 1; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); root = [string]$Root }
-    [System.IO.File]::WriteAllText((Join-Path $Directory 'General.json'), (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    $file = Join-Path $Directory 'General.json'
+    $old = $null
+    if (Test-Path -LiteralPath $file) { try { $old = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop } catch { $old = $null } }
+    $data = [ordered]@{
+        schemaVersion = 1; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        root        = $(if ($PSBoundParameters.ContainsKey('Root')) { [string]$Root } else { [string](Get-ProfileValue $old 'root' '') })
+        colorScheme = $(if ($PSBoundParameters.ContainsKey('ColorScheme')) { [string]$ColorScheme } else { [string](Get-ProfileValue $old 'colorScheme' '') })
+    }
+    [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+}
+function Read-ColorSchemeSetting {
+    # The saved colour scheme name, or '' when there is none or the file is unusable (WARN).
+    param([string]$Directory)
+    if (-not $Directory) { return '' }
+    $file = Join-Path $Directory 'General.json'
+    if (-not (Test-Path -LiteralPath $file)) { return '' }
+    try { return ([string](Get-ProfileValue ([System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop) 'colorScheme' '')).Trim() }
+    catch { Write-Log "Saved settings $file could not be used ($($_.Exception.Message))." 'WARN'; return '' }
+}
+function Get-ColorSchemes {
+    # The colour schemes on the General Settings tab (Terry, 2026-09-27). 'Default' is the original look: the window keeps
+    # the standard Windows controls and only these colours are applied. The other schemes restyle every control.
+    # Palette = the colours as Terry gave them (shown as swatches); Colors = the colour used for each part of the window.
+    # Colours not in a palette (light text on dark backgrounds, warning / error log colours where none was given) are
+    # chosen to stay readable against that scheme's backgrounds.
+    $s = [ordered]@{}
+    $s['Default'] = [ordered]@{ Dark = $false
+        Palette = @('Window #F4F6F8', 'Accent #0078D4', 'Muted text #555555', 'Log background #111827', 'Log text #E5E7EB')
+        Colors  = [ordered]@{ WindowBg = '#F4F6F8'; PanelBg = '#FFFFFF'; ControlBg = '#FFFFFF'; Border = '#ACACAC'; Text = '#000000'; SubtleText = '#555555'; Title = '#000000'
+            Accent = '#0078D4'; AccentText = '#FFFFFF'; ButtonBg = '#DDDDDD'; ButtonText = '#000000'; TabBg = '#F0F0F0'; TabSelectedText = '#000000'
+            Hover = '#E5F3FB'; SelectionBg = '#CCE8FF'; SelectionText = '#000000'; InfoText = '#696969'; WarnText = '#B22222'
+            LogBg = '#111827'; LogText = '#E5E7EB'; LogSuccess = '#E5E7EB'; LogWarn = '#E5E7EB'; LogError = '#E5E7EB' } }
+    $s['Industrial Forge'] = [ordered]@{ Dark = $true
+        Palette = @('Iron Gray #2B2B2B', 'Steel Blue #3A5F7D', 'Charcoal #1A1A1A', 'Molten Orange #FF6A00', 'Amber Glow #FFC14A')
+        Colors  = [ordered]@{ WindowBg = '#2B2B2B'; PanelBg = '#1A1A1A'; ControlBg = '#2B2B2B'; Border = '#3A5F7D'; Text = '#EDEDED'; SubtleText = '#B0B0B0'; Title = '#FF6A00'
+            Accent = '#FF6A00'; AccentText = '#1A1A1A'; ButtonBg = '#3A5F7D'; ButtonText = '#FFFFFF'; TabBg = '#2B2B2B'; TabSelectedText = '#FFC14A'
+            Hover = '#2F4A60'; SelectionBg = '#3A5F7D'; SelectionText = '#FFFFFF'; InfoText = '#B0B0B0'; WarnText = '#FFC14A'
+            LogBg = '#1A1A1A'; LogText = '#FFC14A'; LogSuccess = '#FFC14A'; LogWarn = '#FF6A00'; LogError = '#FF4D4D' } }
+    $s['Modern Sysadmin'] = [ordered]@{ Dark = $true
+        Palette = @('Azure Blue #0078D4', 'Graphite #3C3C3C', 'Slate #5A5A5A', 'Cloud Gray #D0D0D0', 'Lime Signal #A4E400')
+        Colors  = [ordered]@{ WindowBg = '#3C3C3C'; PanelBg = '#333333'; ControlBg = '#2A2A2A'; Border = '#5A5A5A'; Text = '#D0D0D0'; SubtleText = '#A8A8A8'; Title = '#FFFFFF'
+            Accent = '#0078D4'; AccentText = '#FFFFFF'; ButtonBg = '#5A5A5A'; ButtonText = '#FFFFFF'; TabBg = '#3C3C3C'; TabSelectedText = '#FFFFFF'
+            Hover = '#474747'; SelectionBg = '#0078D4'; SelectionText = '#FFFFFF'; InfoText = '#A8A8A8'; WarnText = '#FFC83D'
+            LogBg = '#1E1E1E'; LogText = '#D0D0D0'; LogSuccess = '#A4E400'; LogWarn = '#FFC83D'; LogError = '#FF6B6B' } }
+    $s['Arcane Tech (Runic Teal)'] = [ordered]@{ Dark = $true
+        Palette = @('Runic Teal #00A6A6', 'Obsidian #0F0F0F', 'Gunmetal #2F3B45', 'Deep Violet #4B2E83', 'Electrum Gold #C6A667')
+        Colors  = [ordered]@{ WindowBg = '#0F0F0F'; PanelBg = '#2F3B45'; ControlBg = '#1A2229'; Border = '#4B5A67'; Text = '#E8E8E8'; SubtleText = '#A9B4BE'; Title = '#C6A667'
+            Accent = '#00A6A6'; AccentText = '#0F0F0F'; ButtonBg = '#4B2E83'; ButtonText = '#FFFFFF'; TabBg = '#1A2229'; TabSelectedText = '#C6A667'
+            Hover = '#3A4854'; SelectionBg = '#00A6A6'; SelectionText = '#0F0F0F'; InfoText = '#A9B4BE'; WarnText = '#C6A667'
+            LogBg = '#0F0F0F'; LogText = '#C6A667'; LogSuccess = '#00A6A6'; LogWarn = '#FFB454'; LogError = '#FF6B6B' } }
+    $s['Minimalist Forge'] = [ordered]@{ Dark = $true
+        Palette = @('Blackened Steel #121212', 'Soft Gray #B8B8B8', 'Neutral Dark #2E2E2E', 'Forge Red #D7263D', 'White Heat #F2F2F2')
+        Colors  = [ordered]@{ WindowBg = '#121212'; PanelBg = '#2E2E2E'; ControlBg = '#1C1C1C'; Border = '#4A4A4A'; Text = '#F2F2F2'; SubtleText = '#B8B8B8'; Title = '#F2F2F2'
+            Accent = '#D7263D'; AccentText = '#F2F2F2'; ButtonBg = '#3A3A3A'; ButtonText = '#F2F2F2'; TabBg = '#1C1C1C'; TabSelectedText = '#F2F2F2'
+            Hover = '#3A3A3A'; SelectionBg = '#D7263D'; SelectionText = '#F2F2F2'; InfoText = '#B8B8B8'; WarnText = '#FF6B7A'
+            LogBg = '#121212'; LogText = '#B8B8B8'; LogSuccess = '#B8B8B8'; LogWarn = '#F2F2F2'; LogError = '#D7263D' } }
+    return $s
+}
+function Get-LogLineKind {
+    # How the Log tab colours a line: Error, Warn, Success or Normal, from the [LEVEL] tag every log line carries.
+    param([string]$Line)
+    if ($Line -match '^(\d{2}:\d{2}:\d{2} )?\[ERROR\]') { return 'Error' }
+    if ($Line -match '^(\d{2}:\d{2}:\d{2} )?\[(WARN|CANCELLED)\]') { return 'Warn' }
+    if ($Line -match '(?i)VALIDATION GATE: PASSED|PREFLIGHT OK|completed successfully|All \d+ language packs located|\bsaved to\b') { return 'Success' }
+    return 'Normal'
 }
 function Read-GeneralSettings {
     # The saved repository root, or '' when there is none or the file is unusable (WARN).
@@ -509,8 +573,7 @@ function Write-Log {
     if ($script:LogFile) { Add-Content -LiteralPath $script:LogFile -Value $line -Encoding UTF8 }
     if ($script:UiQueue) { $script:UiQueue.Enqueue("L`t$line") }   # background run: the GUI thread drains this queue
     elseif ($script:LogBox) {
-        $script:LogBox.AppendText($line + [Environment]::NewLine)
-        $script:LogBox.ScrollToEnd()
+        Add-LogText $line
         [System.Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke([Action]{}, 'Background')
     } else { Write-Host $line }   # GUI runs log to the window and file only; console writes can block (Quick Edit)
 }
@@ -1770,39 +1833,186 @@ function Invoke-MediaRefresh {
 
 #region GUI
 [xml]$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="WimForge v2.4" Height="780" Width="1040" WindowStartupLocation="CenterScreen" Background="#F4F6F8">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="WimForge v2.4" Height="780" Width="1040" WindowStartupLocation="CenterScreen" Background="{DynamicResource WF.WindowBg}" Foreground="{DynamicResource WF.Text}">
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-   <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Create cleaned, optimized, verified install.wim files (and optional boot.wim, refreshed media folder and ISO)." Foreground="#555" Margin="0,4,0,0"/></StackPanel>
-   <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="#555" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
+   <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files (and optional boot.wim, refreshed media folder and ISO)." Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
+   <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
   </Grid>
   <TabControl Grid.Row="1">
    <TabItem Header="Source and targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="F:\mediaRefresh" Height="30" Padding="6"/>
-    <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="#555" TextWrapping="Wrap"/></StackPanel>
+    <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
     <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBoot" Content="Create updated boot.wim (usually only needed per major CM update)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder for an OS Upgrade Package (NEWWIM\Media)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" Margin="0,3"/></StackPanel></GroupBox>
-    <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="#555" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
+    <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
    <TabItem Header="Updates and features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <GroupBox Grid.Column="0" Header="Patch selection" Margin="0,0,10,0"><StackPanel Margin="12"><CheckBox x:Name="ChkSSU" Content="Servicing Stack Update (PATCHES\SSU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkLCU" Content="Latest Cumulative Update (PATCHES\LCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSafeOS" Content="Safe OS Dynamic Update (PATCHES\SAFEOSDU, used for WinRE)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkNetCU" Content=".NET Cumulative Update (PATCHES\NETCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSetupDU" Content="Setup Dynamic Update (PATCHES\SETUPDU, used for refreshed media)" IsChecked="True" Margin="0,5"/></StackPanel></GroupBox>
-    <GroupBox Grid.Column="1" Header="Optional content" Margin="10,0,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkNetFx3" Content="Enable .NET Framework 3.5 from OS ISO sources\sxs" IsChecked="False" Margin="0,5"/><TextBlock Text="Ticked patch types with an empty folder are logged and skipped, except LCU (and the SSU on legacy OSes), which stop the run so you never get an unpatched image by accident." TextWrapping="Wrap" Foreground="#555" Margin="0,16,0,0"/></StackPanel></GroupBox>
+    <GroupBox Grid.Column="1" Header="Optional content" Margin="10,0,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkNetFx3" Content="Enable .NET Framework 3.5 from OS ISO sources\sxs" IsChecked="False" Margin="0,5"/><TextBlock Text="Ticked patch types with an empty folder are logged and skipped, except LCU (and the SSU on legacy OSes), which stop the run so you never get an unpatched image by accident." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,16,0,0"/></StackPanel></GroupBox>
    </Grid></TabItem>
    <TabItem Header="Languages"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Language packs, language features and fonts to add to install.wim (WinRE and boot.wim stay English-only). Requires a Language Pack ISO and a Features on Demand ISO. Leave empty for English only. Defaults follow the selected operating system. The list comes from Profiles\Languages.json." TextWrapping="Wrap"/><ListBox x:Name="LanguageList" Grid.Row="1" SelectionMode="Multiple" Margin="0,12,0,0"/></Grid></TabItem>
-   <TabItem Header="Log"><TextBox x:Name="LogBox" Margin="12" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="#111827" Foreground="#E5E7EB"/></TabItem>
+   <TabItem Header="Log"><RichTextBox x:Name="LogBox" Margin="12" IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="{DynamicResource WF.LogBg}" Foreground="{DynamicResource WF.LogText}"><FlowDocument PagePadding="4"><Paragraph Margin="0"/></FlowDocument></RichTextBox></TabItem>
+   <TabItem Header="General Settings"><StackPanel Margin="18"><GroupBox Header="Color scheme"><StackPanel Margin="12">
+    <DockPanel><TextBlock Text="Scheme" Width="120" VerticalAlignment="Center"/><ComboBox x:Name="ColorSchemeCombo" Height="30" Width="300" HorizontalAlignment="Left"/></DockPanel>
+    <TextBlock Text="Applies straight away and is remembered for the next start (Settings\General.json)." Foreground="{DynamicResource WF.SubtleText}" Margin="120,6,0,0" TextWrapping="Wrap"/>
+    <TextBlock Text="Palette" Margin="0,14,0,4"/><WrapPanel x:Name="SchemeSwatches"/>
+    <TextBlock Text="Log preview" Margin="0,14,0,4"/>
+    <Border Background="{DynamicResource WF.LogBg}" Padding="8" HorizontalAlignment="Left" MinWidth="460"><StackPanel>
+     <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource WF.LogText}" Text="10:15:02 [INFO] Adding LCU windows10.0-kb5129236-x64.msu to install.wim index 1"/>
+     <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource WF.LogSuccess}" Text="10:58:40 [INFO] VALIDATION GATE: PASSED"/>
+     <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource WF.LogWarn}" Text="10:31:12 [WARN] Skipped .NET CU part: not applicable to this image"/>
+     <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource WF.LogError}" Text="10:32:05 [ERROR] Add-WindowsPackage failed (0x800f0922)"/>
+    </StackPanel></Border>
+   </StackPanel></GroupBox></StackPanel></TabItem>
   </TabControl>
-  <Grid Grid.Row="2" Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="Status" Text="Ready"/><ProgressBar x:Name="Progress" Height="18" Minimum="0" Maximum="100" Margin="0,5,14,0"/></StackPanel><Button x:Name="SaveSettingsButton" Grid.Column="1" Content="Save settings" Width="110" Height="38" Margin="0,0,8,0" ToolTip="Save the ticked options and languages for the selected operating system (Settings folder beside Profiles). They are loaded whenever this OS is selected."/><Button x:Name="ResetSettingsButton" Grid.Column="2" Content="Reset to defaults" Width="120" Height="38" Margin="0,0,14,0" ToolTip="Delete the saved settings for the selected operating system and go back to the defaults."/><Button x:Name="RunButton" Grid.Column="3" Content="Start refresh" Width="130" Height="38" Margin="0,0,8,0" Background="#0078D4" Foreground="White" FontWeight="SemiBold"/><Button x:Name="CancelButton" Grid.Column="4" Content="Cancel" Width="90" Height="38" IsEnabled="False"/></Grid>
+  <Grid Grid.Row="2" Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="Status" Text="Ready"/><ProgressBar x:Name="Progress" Height="18" Minimum="0" Maximum="100" Margin="0,5,14,0"/></StackPanel><Button x:Name="SaveSettingsButton" Grid.Column="1" Content="Save settings" Width="110" Height="38" Margin="0,0,8,0" ToolTip="Save the ticked options and languages for the selected operating system (Settings folder beside Profiles). They are loaded whenever this OS is selected."/><Button x:Name="ResetSettingsButton" Grid.Column="2" Content="Reset to defaults" Width="120" Height="38" Margin="0,0,14,0" ToolTip="Delete the saved settings for the selected operating system and go back to the defaults."/><Button x:Name="RunButton" Grid.Column="3" Content="Start refresh" Width="130" Height="38" Margin="0,0,8,0" Background="{DynamicResource WF.Accent}" Foreground="{DynamicResource WF.AccentText}" FontWeight="SemiBold"/><Button x:Name="CancelButton" Grid.Column="4" Content="Cancel" Width="90" Height="38" IsEnabled="False"/></Grid>
  </Grid>
 </Window>
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
 $script:ProfilesDir = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'Profiles' } else { Join-Path $env:LOCALAPPDATA 'MediaRefreshStudio\Profiles' }
 # Saved GUI choices (step 10c): Settings\<OS folder>.json per OS and Settings\General.json, beside Profiles.
 $script:SettingsDir = Join-Path (Split-Path $script:ProfilesDir -Parent) 'Settings'
+
+# ---- Colour schemes (General Settings tab) ----
+# Every colour in the window comes from a WF.<role> brush (DynamicResource), so a scheme is applied by swapping the
+# window's merged resource dictionaries. The Default scheme sets only the brushes and keeps the standard Windows
+# controls; the dark schemes also add the styles below, because the standard ComboBox, TabItem, Button and ListBoxItem
+# templates ignore most colour settings.
+$script:ThemedStyleXaml = @'
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Style TargetType="TextBox"><Setter Property="Background" Value="{DynamicResource WF.ControlBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="CaretBrush" Value="{DynamicResource WF.Text}"/><Setter Property="SelectionBrush" Value="{DynamicResource WF.Accent}"/></Style>
+ <Style TargetType="RichTextBox"><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="SelectionBrush" Value="{DynamicResource WF.Accent}"/></Style>
+ <Style TargetType="GroupBox"><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="GroupBox"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Border Grid.RowSpan="2" Margin="0,9,0,0" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3"/>
+   <Border Margin="8,0,0,0" Padding="4,0" HorizontalAlignment="Left" Background="{DynamicResource WF.PanelBg}"><ContentPresenter ContentSource="Header" TextElement.Foreground="{DynamicResource WF.Title}"/></Border>
+   <ContentPresenter Grid.Row="1" Margin="{TemplateBinding Padding}"/></Grid></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="CheckBox"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="CheckBox"><StackPanel Orientation="Horizontal" Background="Transparent">
+    <Border x:Name="Box" Width="16" Height="16" VerticalAlignment="Center" Background="{DynamicResource WF.ControlBg}" BorderBrush="{DynamicResource WF.SubtleText}" BorderThickness="1" CornerRadius="2"><Path x:Name="Mark" Data="M3,8 L6.5,11.5 L13,4.5" Stroke="{DynamicResource WF.AccentText}" StrokeThickness="2" Visibility="Collapsed"/></Border>
+    <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"/></StackPanel>
+   <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource WF.Accent}"/></Trigger>
+    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Box" Property="Background" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Mark" Property="Visibility" Value="Visible"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="ProgressBar"><Setter Property="Background" Value="{DynamicResource WF.ControlBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.Accent}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/></Style>
+ <Style TargetType="ListBox"><Setter Property="Background" Value="{DynamicResource WF.ControlBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/></Style>
+ <Style TargetType="ListBoxItem"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Padding" Value="6,3"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="ListBoxItem"><Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+   <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource WF.Hover}"/></Trigger>
+    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource WF.SelectionBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.SelectionText}"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Padding" Value="8,4"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="ComboBoxItem"><Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+   <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource WF.SelectionBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.SelectionText}"/></Trigger>
+    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource WF.Hover}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="ComboBox"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="ComboBox"><Grid>
+   <ToggleButton Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"><ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+    <Border x:Name="Bd" Background="{DynamicResource WF.ControlBg}" BorderBrush="{DynamicResource WF.Border}" BorderThickness="1" CornerRadius="2"><Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" Data="M0,0 L4,4 L8,0 Z" Fill="{DynamicResource WF.Text}"/></Border>
+    <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource WF.Accent}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template></ToggleButton>
+   <ContentPresenter IsHitTestVisible="False" Margin="8,0,28,0" VerticalAlignment="Center" HorizontalAlignment="Left" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+   <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
+    <Border Background="{DynamicResource WF.ControlBg}" BorderBrush="{DynamicResource WF.Border}" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}"><ScrollViewer><ItemsPresenter/></ScrollViewer></Border></Popup>
+  </Grid></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="Button"><Setter Property="Background" Value="{DynamicResource WF.ButtonBg}"/><Setter Property="Foreground" Value="{DynamicResource WF.ButtonText}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="Button"><Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+   <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource WF.Text}"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.8"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+ <Style TargetType="TabControl"><Setter Property="Background" Value="{DynamicResource WF.PanelBg}"/><Setter Property="BorderBrush" Value="{DynamicResource WF.Border}"/><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/></Style>
+ <!-- The header colour is set on the header presenter only: the tab's page content inherits the TabItem's Foreground. -->
+ <Style TargetType="TabItem"><Setter Property="Foreground" Value="{DynamicResource WF.Text}"/><Setter Property="Template"><Setter.Value>
+  <ControlTemplate TargetType="TabItem"><Border x:Name="Bd" Background="{DynamicResource WF.TabBg}" BorderBrush="{DynamicResource WF.Border}" BorderThickness="1,1,1,0" Margin="0,0,2,0" Padding="12,6">
+    <Grid><Border x:Name="Bar" Height="2" VerticalAlignment="Top" Margin="-12,-6,-12,0" Background="Transparent"/><ContentPresenter x:Name="Hdr" ContentSource="Header" HorizontalAlignment="Center" TextElement.Foreground="{DynamicResource WF.SubtleText}"/></Grid></Border>
+   <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hdr" Property="TextElement.Foreground" Value="{DynamicResource WF.Text}"/></Trigger>
+    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource WF.PanelBg}"/><Setter TargetName="Bar" Property="Background" Value="{DynamicResource WF.Accent}"/><Setter TargetName="Hdr" Property="TextElement.Foreground" Value="{DynamicResource WF.TabSelectedText}"/><Setter Property="Panel.ZIndex" Value="1"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+ </Setter.Value></Setter></Style>
+</ResourceDictionary>
+'@
+$script:ColorSchemes = Get-ColorSchemes
+$script:ColorSchemeName = ''
+$script:ThemedStyles = $null   # parsed from ThemedStyleXaml on first use
+function New-SchemeBrush([string]$Hex) {
+    $b = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($Hex)); $b.Freeze(); return $b
+}
+function Set-TitleBarDark {
+    # Dark or light window title bar to match the scheme (Windows 10 20H1+ / 11); silently does nothing elsewhere.
+    param([bool]$Dark)
+    try {
+        if (-not ('WimForge.NativeDwm' -as [type])) { Add-Type -Namespace WimForge -Name NativeDwm -MemberDefinition '[System.Runtime.InteropServices.DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(System.IntPtr hwnd, int attr, ref int value, int size);' }
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
+        if ($hwnd -eq [IntPtr]::Zero) { return }
+        $v = [int]$Dark
+        if ([WimForge.NativeDwm]::DwmSetWindowAttribute($hwnd, 20, [ref]$v, 4) -ne 0) { [void][WimForge.NativeDwm]::DwmSetWindowAttribute($hwnd, 19, [ref]$v, 4) }
+    } catch { }
+}
+function Set-ColorScheme {
+    # Applies a scheme from Get-ColorSchemes to the window (unknown names fall back to Default) and shows its palette.
+    param([string]$Name)
+    if (-not $script:ColorSchemes.Contains($Name)) { $Name = 'Default' }
+    $scheme = $script:ColorSchemes[$Name]
+    $brushes = New-Object System.Windows.ResourceDictionary
+    # The cast unwraps PowerShell's PSObject wrapper; WPF rejects a wrapped brush as a resource value.
+    foreach ($role in $scheme.Colors.Keys) { $brushes["WF.$role"] = [System.Windows.Media.SolidColorBrush](New-SchemeBrush $scheme.Colors[$role]) }
+    $window.Resources.MergedDictionaries.Clear()
+    $window.Resources.MergedDictionaries.Add($brushes)
+    if ($scheme.Dark) {
+        if (-not $script:ThemedStyles) { $script:ThemedStyles = [Windows.Markup.XamlReader]::Parse($script:ThemedStyleXaml) }
+        $window.Resources.MergedDictionaries.Add($script:ThemedStyles)
+    }
+    if ($script:SchemeSwatches) {
+        $script:SchemeSwatches.Children.Clear()
+        foreach ($entry in $scheme.Palette) {
+            $hex = ($entry -split ' ')[-1]
+            $sp = New-Object System.Windows.Controls.StackPanel; $sp.Margin = '0,0,14,6'; $sp.Width = 110
+            $sw = New-Object System.Windows.Controls.Border; $sw.Height = 26; $sw.BorderThickness = 1; $sw.Background = New-SchemeBrush $hex
+            $sw.SetResourceReference([System.Windows.Controls.Border]::BorderBrushProperty, 'WF.SubtleText')
+            $tb = New-Object System.Windows.Controls.TextBlock; $tb.Text = $entry.Substring(0, $entry.Length - $hex.Length).Trim() + "`n" + $hex; $tb.FontSize = 11; $tb.Margin = '0,3,0,0'
+            [void]$sp.Children.Add($sw); [void]$sp.Children.Add($tb); [void]$script:SchemeSwatches.Children.Add($sp)
+        }
+    }
+    Set-TitleBarDark ([bool]$scheme.Dark)
+    $script:ColorSchemeName = $Name
+    return $Name
+}
+function Add-LogText {
+    # Appends text to the Log tab, one line per log line, coloured by Get-LogLineKind with the scheme's log colours.
+    param([string]$Text)
+    $para = $script:LogBox.Document.Blocks.FirstBlock
+    foreach ($ln in ($Text -split '\r?\n')) {
+        if ($ln -eq '') { continue }
+        $run = New-Object System.Windows.Documents.Run $ln
+        $key = switch (Get-LogLineKind $ln) { 'Error' { 'WF.LogError' } 'Warn' { 'WF.LogWarn' } 'Success' { 'WF.LogSuccess' } default { $null } }
+        if ($key) { $run.SetResourceReference([System.Windows.Documents.TextElement]::ForegroundProperty, $key) }
+        $para.Inlines.Add($run); $para.Inlines.Add((New-Object System.Windows.Documents.LineBreak))
+    }
+    $script:LogBox.ScrollToEnd()
+}
+$savedScheme = Read-ColorSchemeSetting -Directory $script:SettingsDir
+[void](Set-ColorScheme $savedScheme)
+foreach ($n in $script:ColorSchemes.Keys) { [void]$script:ColorSchemeCombo.Items.Add($n) }
+$script:ColorSchemeCombo.SelectedItem = $script:ColorSchemeName
+if ($savedScheme -and $savedScheme -ne $script:ColorSchemeName) { Write-Log "Saved color scheme '$savedScheme' is not known; using Default." 'WARN' }
+$script:ColorSchemeCombo.Add_SelectionChanged({
+    $name = [string]$script:ColorSchemeCombo.SelectedItem
+    if (-not $name -or $name -eq $script:ColorSchemeName) { return }
+    [void](Set-ColorScheme $name)
+    try { Save-GeneralSettings -Directory $script:SettingsDir -ColorScheme $name; Write-Log "Color scheme: $name (saved to Settings\General.json)." }
+    catch { Write-Log "Color scheme $name applied, but it could not be saved: $($_.Exception.Message)" 'WARN' }
+})
+$window.Add_SourceInitialized({ Set-TitleBarDark ([bool]$script:ColorSchemes[$script:ColorSchemeName].Dark) })
+
 # The window's own checkbox defaults, restored when an OS without saved settings is selected.
 $script:DefaultChecks = @{}
 foreach ($n in $script:SettingOptionNames) { $script:DefaultChecks[$n] = [bool](Get-Variable -Name "Chk$n" -Scope Script -ValueOnly).IsChecked }
@@ -1865,7 +2075,7 @@ function Update-ProfileInfo {
     if (-not $def) { $script:ProfileInfo.Text = ''; return }
     $st = Get-SupportStatus -Definition $def
     $script:ProfileInfo.Text = "Profile file: $($def.SourceFile)   |   $($st.Text)"
-    $script:ProfileInfo.Foreground = if ($st.Level -in @('Past', 'Soon')) { [System.Windows.Media.Brushes]::Firebrick } else { [System.Windows.Media.Brushes]::DimGray }
+    $script:ProfileInfo.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, $(if ($st.Level -in @('Past', 'Soon')) { 'WF.WarnText' } else { 'WF.InfoText' }))
 }
 function Update-HeaderIdle {
     # Shows the selected OS in the header while nothing is running. During a run, Update-RunUi overwrites this from the queue.
@@ -1989,7 +2199,7 @@ function Update-RunUi {
             if ($script:HeaderPhase) { $script:HeaderPhase.Text = $parts[2] }
         }
     }
-    if ($sb.Length -gt 0) { $script:LogBox.AppendText($sb.ToString()); $script:LogBox.ScrollToEnd() }
+    if ($sb.Length -gt 0) { Add-LogText $sb.ToString() }
     if ($script:RunStarted) {
         $el = [DateTime]::Now - $script:RunStarted
         $script:Status.Text = ('{0}   (elapsed {1:00}:{2:00}:{3:00})' -f $script:RunStatus, [int][Math]::Floor($el.TotalHours), $el.Minutes, $el.Seconds)
@@ -2069,7 +2279,7 @@ function Complete-BackgroundRun {
         $script:Progress.Value = 0
         if ($script:HeaderPhase) { $script:HeaderPhase.Text = if ($wasCancelled) { 'Cancelled' } else { 'Failed' } }
         $m = if ($wasCancelled -and -not ($shared.ContainsKey('Message') -and $shared['Message'])) { 'The run was cancelled.' } elseif ($shared.ContainsKey('Message') -and $shared['Message']) { [string]$shared['Message'] } elseif ($engineErrors.Count -gt 0) { [string]$engineErrors[0] } else { 'The run ended unexpectedly. See the Log tab.' }
-        $script:LogBox.AppendText("[$(if ($wasCancelled) { 'CANCELLED' } else { 'ERROR' })] $m" + [Environment]::NewLine)
+        Add-LogText "[$(if ($wasCancelled) { 'CANCELLED' } else { 'ERROR' })] $m"
         [System.Windows.MessageBox]::Show($m, 'WimForge', 'OK', $(if ($wasCancelled) { 'Warning' } else { 'Error' })) | Out-Null
     }
 }

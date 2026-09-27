@@ -78,6 +78,32 @@ if ($wpf) {
     Check 'WPF: switching back loads the saved ticks and languages for that OS' ((& $ticks) -eq $changedTicks -and (& $picked) -eq 'de-de,ja-jp') "$(& $ticks) | $(& $picked)"
     Reset-CurrentOsSettings
     Check 'WPF: Reset to defaults deletes the OS''s settings file and restores the defaults' (-not (Test-Path $savedFile) -and (& $ticks) -eq $defaultTicks -and (& $picked) -eq 'de-de,en-gb,es-es,fr-fr,it-it,ja-jp,ko-kr,pt-br,zh-cn,zh-tw')
+
+    # Colour schemes (General Settings tab) on the real window
+    $script:ThemedStyleXaml = [regex]::Match($src, "(?s)\`$script:ThemedStyleXaml = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+    foreach ($fn in 'New-SchemeBrush', 'Set-TitleBarDark', 'Set-ColorScheme', 'Add-LogText') {
+        $fm = [regex]::Match($src, "(?s)function $fn\b.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
+    }
+    $window = $win; $script:ThemedStyles = $null; $script:ColorSchemes = Get-ColorSchemes
+    $script:SchemeSwatches = $win.FindName('SchemeSwatches'); $script:LogBox = $win.FindName('LogBox')
+    Check 'the General Settings tab has the scheme picker, swatches and a rich-text Log' ($null -ne $win.FindName('ColorSchemeCombo') -and $null -ne $script:SchemeSwatches -and $script:LogBox -is [System.Windows.Controls.RichTextBox])
+    $threw = $null; try { $parsed = [Windows.Markup.XamlReader]::Parse($script:ThemedStyleXaml) } catch { $threw = $_.Exception.Message }
+    Check 'the dark-scheme control styles load in WPF' ($null -eq $threw -and $parsed.Count -ge 10) $threw
+    $col = { param($k) $win.FindResource($k).Color.ToString().Substring(3) }   # '#AARRGGBB' -> 'RRGGBB'
+    [void](Set-ColorScheme 'Industrial Forge')
+    Check 'WPF: a dark scheme sets its brushes and adds the control styles' ((& $col 'WF.WindowBg') -eq '2B2B2B' -and (& $col 'WF.Accent') -eq 'FF6A00' -and $win.Resources.MergedDictionaries.Count -eq 2 -and $script:SchemeSwatches.Children.Count -eq 5)
+    $script:LogBox.Document.Blocks.FirstBlock.Inlines.Clear()
+    Add-LogText ("10:00:00 [INFO] Adding LCU x.msu`r`n10:00:01 [WARN] careful`r`n10:00:02 [ERROR] broken`r`n10:00:03 [INFO] VALIDATION GATE: PASSED`r`n")
+    $runs = @($script:LogBox.Document.Blocks.FirstBlock.Inlines | Where-Object { $_ -is [System.Windows.Documents.Run] })
+    $fg = { param($r) $r.Foreground.Color.ToString().Substring(3) }
+    Check 'WPF: log lines are added one per line, coloured by level (Industrial Forge)' ($runs.Count -eq 4 -and (& $fg $runs[0]) -eq 'FFC14A' -and (& $fg $runs[1]) -eq 'FF6A00' -and (& $fg $runs[2]) -eq 'FF4D4D' -and (& $fg $runs[3]) -eq 'FFC14A') (($runs | ForEach-Object { & $fg $_ }) -join ',')
+    [void](Set-ColorScheme 'Minimalist Forge')
+    Check 'WPF: switching scheme recolours lines already in the log (Minimalist Forge errors in Forge Red)' ((& $fg $runs[0]) -eq 'B8B8B8' -and (& $fg $runs[2]) -eq 'D7263D')
+    [void](Set-ColorScheme 'Modern Sysadmin')
+    Check 'WPF: Modern Sysadmin success lines in Lime Signal' ((& $fg $runs[3]) -eq 'A4E400' -and (& $fg $runs[0]) -eq 'D0D0D0')
+    $back = Set-ColorScheme 'Default'
+    Check 'WPF: Default drops the control styles and restores the original colours' ($back -eq 'Default' -and $win.Resources.MergedDictionaries.Count -eq 1 -and (& $col 'WF.WindowBg') -eq 'F4F6F8' -and (& $col 'WF.LogBg') -eq '111827' -and (& $fg $runs[2]) -eq 'E5E7EB')
+    Check 'WPF: an unknown scheme name falls back to Default' ((Set-ColorScheme 'No Such Scheme') -eq 'Default')
     $win.Close()
 }
 Write-Host "`nRESULT: $pass passed, $fail failed"
