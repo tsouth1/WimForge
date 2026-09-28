@@ -146,6 +146,20 @@ if ($wpf) {
     Check 'WPF SCCM tab: the latest run line says what would be imported, and that a FAILED run will not be' ($none12 -like 'No finished run yet*' -and $script:SccmLastRun.Text -like 'Latest run: build 10.0.19044.6456, validation gate FAILED*will not be imported.')
     Remove-Item $saved12 -Force -ErrorAction SilentlyContinue
 
+    # Run config files (Terry, 2026-09-28): the engine's defaults must equal the window's, and the window saves what it shows
+    $diff13 = @($script:SettingOptionNames | Where-Object { [bool]$script:OptionDefaults[$_] -ne [bool]$script:DefaultChecks[$_] })
+    Check 'a config''s default for every option equals the window''s own default tick' ($diff13.Count -eq 0 -and @($script:OptionDefaults.Keys).Count -eq @($script:SettingOptionNames).Count) ($diff13 -join ',')
+    $menu13 = $win.FindName('SaveRunConfigItem')
+    Check 'Tools menu: Save run config...' ($null -ne $menu13 -and @($win.FindName('ToolsButton').ContextMenu.Items) -contains $menu13)
+    $fm = [regex]::Match($src, "(?s)function Save-CurrentRunConfig \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    $script:ChkNetFx3.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $true
+    foreach ($item in $script:LanguageList.Items) { $item.IsSelected = @('fr-fr') -contains [string]$item.Tag }
+    $script:SccmSiteServer.Text = 'cm02.contoso.com'
+    $rcFile13 = Save-CurrentRunConfig -File (Join-Path $PWD 'tst_settings\run13.json')
+    $rc13 = Read-RunConfig -File $rcFile13 -Definitions $script:OsDefinitions -LanguageList $script:LanguageOptions
+    Check 'WPF: Save run config writes exactly what the window shows, and it reads back cleanly' ($rc13.OsName -eq 'Windows 10 Enterprise LTSC 2021 (KMS)' -and $rc13.Root -eq $root11 -and $rc13.Options['NetFx3'] -and $rc13.Options['BuildMedia'] -and (@($rc13.Languages) -join ',') -eq 'fr-fr' -and $rc13.Sccm['siteServer'] -eq 'cm02.contoso.com')
+
     # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
     Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)

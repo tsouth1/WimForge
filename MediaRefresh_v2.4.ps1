@@ -114,7 +114,21 @@
       * Not yet done: MSCatalogLTS downloads, SCCM import, a hard cancel that aborts a running DISM call.
     Run on a supported Windows/ADK servicing workstation as Administrator.
     Keep one OS ISO, and (when languages are needed) one Language Pack ISO and one FOD ISO, in each ISO folder.
+.PARAMETER Config
+    Runs without the window, from a run config file (JSON) saved with Tools > Save run config... in the window. The run
+    logs to the console and the usual LOGS files and ends with an exit code: 0 = success, 1 = failed, 2 = finished but
+    the validation gate FAILED, 3 = the run succeeded but the SCCM import asked for in the config failed.
+.PARAMETER Preflight
+    With -Config: a preflight only (checks everything, changes nothing), whatever the config says.
+.EXAMPLE
+    .\MediaRefresh_v2.4.ps1 -Config .\Configs\Win10_IoT_Enterprise_LTSC_2021_run.json
+.EXAMPLE
+    .\MediaRefresh_v2.4.ps1 -Config .\Configs\Win10_IoT_Enterprise_LTSC_2021_run.json -Preflight
 #>
+param(
+    [string]$Config,
+    [switch]$Preflight
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -2703,7 +2717,128 @@ function Invoke-MediaRefresh {
         }
     } finally { Dismount-AllIso }
 }
+
+# ---------- run config files and the command line (Terry, 2026-09-28) ----------
+# Tools > Save run config... writes everything the window would pass to a run into one JSON file; the script then runs
+# the same session without a window:  MediaRefresh_v2.4.ps1 -Config <file> [-Preflight]. The option names are the saved-
+# settings names ($script:SettingOptionNames); a missing option takes the window's default (below - a test keeps the two
+# in step), missing languages take the profile's default languages; an unknown OS, language, key or a non-true/false
+# option is an error, so a misspelling never quietly changes a run. Foundation for the scheduled run (TODO step 8).
+$script:OptionDefaults = [ordered]@{
+    Preflight = $false; Install = $true; Boot = $true; WinRE = $true; Verify = $true; BuildMedia = $false; BuildIso = $false; Media2023 = $false
+    SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; AppRemoval = $true; SccmAutoImport = $false; AutoDownload = $false
+}
+$script:RunConfigSccmKeys = @('siteServer', 'targetType', 'target', 'contentSource', 'sourceServer', 'packageType', 'imageName')
+function Save-RunConfig {
+    param([Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][string]$OsName, [string]$Root, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @(), [hashtable]$Sccm = @{})
+    $opts = [ordered]@{}
+    foreach ($k in $script:SettingOptionNames) { $opts[$k] = $(if ($Options.ContainsKey($k)) { [bool]$Options[$k] } else { [bool]$script:OptionDefaults[$k] }) }
+    $sc = [ordered]@{}; foreach ($k in $script:RunConfigSccmKeys) { $sc[$k] = [string]$Sccm[$k] }
+    $data = [ordered]@{
+        schemaVersion = 1; tool = 'WimForge'; toolVersion = $script:ToolVersion; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        os = $OsName; root = $Root; options = $opts
+        languages = @($Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        removeApps = @($RemoveApps | Where-Object { $_ } | ForEach-Object { [string]$_ }); sccm = $sc
+    }
+    Ensure-Directory (Split-Path $File -Parent)
+    [System.IO.File]::WriteAllText($File, (($data | ConvertTo-Json -Depth 5) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    return $File
+}
+function Read-RunConfig {
+    # Reads and checks a run config; throws one message listing every problem found.
+    param([Parameter(Mandatory)][string]$File, [Parameter(Mandatory)]$Definitions, [object[]]$LanguageList = @())
+    if (-not (Test-Path -LiteralPath $File)) { throw "The run config $File does not exist." }
+    try { $o = [System.IO.File]::ReadAllText($File) | ConvertFrom-Json -ErrorAction Stop } catch { throw "The run config $File is not valid JSON: $($_.Exception.Message)" }
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $known = @('schemaVersion', 'tool', 'toolVersion', 'saved', 'os', 'root', 'options', 'languages', 'removeApps', 'sccm', 'note')
+    foreach ($p in @($o.PSObject.Properties.Name)) { if ($known -notcontains $p) { $problems.Add("unknown setting '$p'") } }
+    $schema = [int](Get-ProfileValue $o 'schemaVersion' 1); if ($schema -gt 1) { $problems.Add("schemaVersion $schema is newer than this version of WimForge understands (1)") }
+    $os = [string](Get-ProfileValue $o 'os' '')
+    if (-not $os) { $problems.Add("'os' is missing") } elseif (-not $Definitions.Contains($os)) { $problems.Add("'os' is '$os', which is not one of the profiles: $(@($Definitions.Keys) -join ', ')") }
+    $root = [string](Get-ProfileValue $o 'root' ''); if (-not $root) { $problems.Add("'root' (the repository root) is missing") }
+    $opts = @{}
+    foreach ($k in $script:SettingOptionNames) { $opts[$k] = [bool]$script:OptionDefaults[$k] }
+    $oo = Get-ProfileValue $o 'options' $null
+    if ($null -ne $oo) {
+        foreach ($p in @($oo.PSObject.Properties)) {
+            $name = @($script:SettingOptionNames | Where-Object { $_ -ieq $p.Name }) | Select-Object -First 1
+            if (-not $name) { $problems.Add("unknown option '$($p.Name)' (known: $($script:SettingOptionNames -join ', '))"); continue }
+            if ($p.Value -isnot [bool]) { $problems.Add("option '$($p.Name)' must be true or false"); continue }
+            $opts[$name] = $p.Value
+        }
+    }
+    $langsGiven = $null -ne $o.PSObject.Properties['languages']
+    $langs = @(@(Get-ProfileValue $o 'languages' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    if ($LanguageList.Count -gt 0) {
+        $codes = @($LanguageList | ForEach-Object { $_.Code })
+        foreach ($l in $langs) { if ($codes -notcontains $l) { $problems.Add("language '$l' is not in Languages.json") } }
+    }
+    $sccm = @{}
+    $so = Get-ProfileValue $o 'sccm' $null
+    if ($null -ne $so) { foreach ($p in @($so.PSObject.Properties)) { if ($script:RunConfigSccmKeys -notcontains $p.Name) { $problems.Add("unknown sccm setting '$($p.Name)'") } else { $sccm[$p.Name] = [string]$p.Value } } }
+    if ($problems.Count -gt 0) { throw "The run config $File has $($problems.Count) problem(s): $($problems -join '; ')." }
+    return [pscustomobject]@{ File = $File; OsName = $os; Root = $root; Options = $opts; LanguagesGiven = $langsGiven; Languages = $langs
+        RemoveApps = @(@(Get-ProfileValue $o 'removeApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ }); Sccm = $sccm }
+}
+function ConvertTo-RunOptions {
+    # A read run config -> the options object a run takes (the same shape the window builds in Get-UiOptions).
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Definition, [string]$ProfilesDir, [switch]$PreflightOnly)
+    $o = $Config.Options
+    $langs = if ($Config.LanguagesGiven) { @($Config.Languages) } else { @($Definition.DefaultLanguages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() }) }
+    $s = $Config.Sccm
+    return [pscustomobject]@{
+        OsName = $Config.OsName; Root = $Config.Root; PreflightOnly = ([bool]$PreflightOnly -or [bool]$o.Preflight)
+        Install = [bool]$o.Install; Boot = [bool]$o.Boot; WinRE = [bool]$o.WinRE; Verify = [bool]$o.Verify
+        BuildMedia = [bool]$o.BuildMedia; BuildIso = ([bool]$o.BuildIso -and [bool]$o.BuildMedia); Media2023 = [bool]$o.Media2023
+        SSU = [bool]$o.SSU; LCU = [bool]$o.LCU; SafeOS = [bool]$o.SafeOS; NetCU = [bool]$o.NetCU; SetupDU = [bool]$o.SetupDU; NetFx3 = [bool]$o.NetFx3; AutoDownload = [bool]$o.AutoDownload
+        Languages = $langs; RemoveApps = $(if ([bool]$o.AppRemoval) { @($Config.RemoveApps) } else { @() })
+        SccmSiteServer = [string]$s['siteServer']; SccmTargetType = $(if ([string]$s['targetType']) { [string]$s['targetType'] } else { 'DP' }); SccmTarget = [string]$s['target']
+        SccmContentSource = [string]$s['contentSource']; SccmSourceServer = $(if ([string]$s['sourceServer']) { [string]$s['sourceServer'] } else { $env:COMPUTERNAME })
+        SccmPackageType = $(if ([string]$s['packageType']) { [string]$s['packageType'] } else { 'Image' }); SccmImageName = $(if ([string]$s['imageName']) { [string]$s['imageName'] } else { Get-SccmImageName -OsName $Config.OsName })
+        ProfilesDir = $ProfilesDir
+    }
+}
+function Invoke-CommandLineRun {
+    # MediaRefresh_v2.4.ps1 -Config <file> [-Preflight]: the run without a window. Returns the exit code: 0 success,
+    # 1 failed (including a bad config), 2 finished but the validation gate FAILED, 3 run fine but the SCCM import failed.
+    param([Parameter(Mandatory)][string]$ConfigFile, [Parameter(Mandatory)][string]$ProfilesDir, [switch]$PreflightOnly)
+    try {
+        $script:OsDefinitions = Import-OsProfiles -Directory $ProfilesDir
+        Write-ProfileMessages
+        $cfg = Read-RunConfig -File $ConfigFile -Definitions $script:OsDefinitions -LanguageList @(Import-LanguageList -Directory $ProfilesDir)
+        $opts = ConvertTo-RunOptions -Config $cfg -Definition $script:OsDefinitions[$cfg.OsName] -ProfilesDir $ProfilesDir -PreflightOnly:$PreflightOnly
+        Write-Log "Command line run from $ConfigFile$(if ($opts.PreflightOnly) { ' (preflight only)' })"
+        Invoke-MediaRefresh -Options $opts | Out-Null
+        $res = $script:LastResult
+    } catch {
+        Write-Log $_.Exception.Message 'ERROR'
+        Dismount-AllIso
+        return 1
+    }
+    if ([bool](Get-ProfileValue $res 'Preflight' $false)) { return 0 }
+    $gate = [string](Get-ProfileValue $res 'Gate' '')
+    if ($gate -eq 'FAILED') {
+        if ([bool]$cfg.Options.SccmAutoImport) { Write-Log 'The validation gate FAILED, so the image is not imported into SCCM.' 'WARN' }
+        return 2
+    }
+    if ([bool]$cfg.Options.SccmAutoImport -and (Get-ProfileValue $res 'Install' $null)) {
+        Write-Log 'Importing into SCCM (the config asks for it; no confirmation in a command line run).'
+        $imp = $opts.PSObject.Copy()
+        $imp | Add-Member -NotePropertyName Mode -NotePropertyValue 'SccmImport' -Force
+        $imp | Add-Member -NotePropertyName DryRun -NotePropertyValue $false -Force
+        try { Invoke-MediaRefresh -Options $imp | Out-Null } catch { Write-Log "SCCM import failed: $($_.Exception.Message)" 'ERROR'; return 3 }
+    }
+    return 0
+}
 #endregion ENGINE
+# Command line (-Config): run without the window and exit with the run's exit code.
+if ($Config) {
+    $cliProfiles = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'Profiles' } else { Join-Path $env:LOCALAPPDATA 'MediaRefreshStudio\Profiles' }
+    $cliConfig = if ([System.IO.Path]::IsPathRooted($Config)) { $Config } else { Join-Path (Get-Location).Path $Config }
+    $cliCode = @(Invoke-CommandLineRun -ConfigFile $cliConfig -ProfilesDir $cliProfiles -PreflightOnly:$Preflight)
+    Write-Host "WimForge exit code: $($cliCode[-1])"
+    exit ([int]$cliCode[-1])
+}
 
 #region GUI
 [xml]$xaml = @'
@@ -2711,7 +2846,7 @@ function Invoke-MediaRefresh {
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
-    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/></ContextMenu></Button.ContextMenu>
+    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/></ContextMenu></Button.ContextMenu>
    </Button>
    <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files, with optional refreshed media and ISO." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
@@ -2778,7 +2913,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -3635,6 +3770,28 @@ $script:ReadAppsButton.Add_Click({
         $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         [System.Windows.MessageBox]::Show("Could not start reading the apps: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
     }
+})
+function Save-CurrentRunConfig {
+    # Tools > Save run config...: the selected OS's current choices as a run config for MediaRefresh_v2.4.ps1 -Config.
+    param([Parameter(Mandatory)][string]$File)
+    $sel = Get-SelectedSettings
+    $sc = @{ siteServer = ([string]$script:SccmSiteServer.Text).Trim(); targetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); target = ([string]$script:SccmTarget.Text).Trim()
+             contentSource = ([string]$script:SccmContentSource.Text).Trim(); sourceServer = $script:SccmSourceServer; packageType = (Get-SccmPackageTypeTag); imageName = (Get-SccmSelected).ImageName }
+    return (Save-RunConfig -File $File -OsName ([string]$script:OsCombo.SelectedItem) -Root ([string]$script:RootText.Text).Trim() -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps -Sccm $sc)
+}
+$script:SaveRunConfigItem.Add_Click({
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
+    if (-not $def) { return }
+    $dir = Join-Path (Split-Path $script:ProfilesDir -Parent) 'Configs'; Ensure-Directory $dir
+    $dlg = New-Object Microsoft.Win32.SaveFileDialog
+    $dlg.InitialDirectory = $dir; $dlg.FileName = "$($def.Folder)_run.json"; $dlg.Filter = 'WimForge run config (*.json)|*.json'; $dlg.DefaultExt = '.json'
+    if (-not $dlg.ShowDialog($window)) { return }
+    try {
+        $f = Save-CurrentRunConfig -File $dlg.FileName
+        Write-Log "Run config for $($def.Name) saved to $f"
+        $note = if ([bool]$script:ChkPreflight.IsChecked) { "`n`nNote: 'Preflight check only' is ticked, so this config only runs a preflight." } else { '' }
+        [System.Windows.MessageBox]::Show("Run config saved to:`n$f`n`nRun it without the window (elevated Windows PowerShell 5.1):`n.\$(Split-Path $PSCommandPath -Leaf) -Config `"$f`"`n`nAdd -Preflight for a check only. Exit codes: 0 success, 1 failed, 2 validation gate FAILED, 3 SCCM import failed.$note", 'WimForge - run config', 'OK', 'Information') | Out-Null
+    } catch { [System.Windows.MessageBox]::Show("Could not save the run config: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null }
 })
 $script:CleanupMountsItem.Add_Click({
     # Tools > Cleanup Mountpoints: a check-only background pass first; Complete-BackgroundRun lists what it found and

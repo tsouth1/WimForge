@@ -154,6 +154,20 @@ Imports the latest finished run of the selected OS into Configuration Manager. N
 
 Every run also does a smaller version of this for its own OS folder at the start: stray mounts are discarded and ISOs of that OS still mounted are dismounted, with a WARN in the log.
 
+## Running without the window (command line)
+
+Every choice in the window can be saved as a **run config** (a JSON file) and run later without the window - for example from Task Scheduler after Patch Tuesday.
+
+1. In the window, select the OS and set everything up (outputs, updates, languages, apps, SCCM).
+2. **Tools > Save run config...** saves it, by default to `Configs\<OS>_run.json` beside the script.
+3. Run it from an **elevated** Windows PowerShell 5.1:
+   - `.\MediaRefresh_v2.4.ps1 -Config .\Configs\Win10_IoT_Enterprise_LTSC_2021_run.json`
+   - add `-Preflight` for a check only (nothing is changed), whatever the config says.
+
+- The run writes the usual `LOGS` files and prints its log to the console.
+- **Exit codes:** `0` success; `1` failed (including a bad config); `2` finished, but the validation gate FAILED; `3` the run succeeded but the SCCM import the config asks for failed.
+- **SCCM:** when "Import after the run finishes" was ticked on the SCCM tab, the config imports straight after a successful run - without a confirmation - and never when the validation gate FAILED.
+- **Editing a config by hand:** option names are the same as in the window's saved settings (`Install`, `WinRE`, `NetFx3`, `AutoDownload`, ...). A missing option takes the window's default; a missing `languages` list takes the OS profile's default languages (an empty list means English only). A misspelled option, an unknown OS or language, or a value that is not `true` / `false` stops the run with a message naming every problem - a typo never quietly changes a run.
 ## What a run produces
 
 Everything goes to `<repository root>\<OS folder>\NEWWIM`:

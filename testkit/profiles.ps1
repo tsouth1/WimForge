@@ -370,6 +370,34 @@ Check 'SCCM site server and target are saved in General.json without losing the 
 $os15 = Read-OsSettings -Directory $gs15 -Definition $kms -LanguageList $builtLangs
 Check 'per OS: content source, package type, a hand-typed image name and Import after the run are saved' ($os15.Sccm.ContentSource -eq 'F:\Sources\OSD' -and $os15.Sccm.PackageType -eq 'Upgrade' -and $os15.Sccm.ImageName -eq 'KMS custom' -and $os15.Options['SccmAutoImport'] -eq $true)
 
+Write-Host "`n=== P16 run config files for the command line (Terry, 2026-09-28) ==="
+$defs16 = Import-OsProfiles
+$cf16 = Join-Path $tmp 'cfg16\Configs\kms_run.json'
+[void](Save-RunConfig -File $cf16 -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Root 'F:\mediaRefresh' -Options @{ Verify = $true; BuildMedia = $true; BuildIso = $true; AutoDownload = $true; SccmAutoImport = $true } -Languages @('DE-DE', 'ja-jp') -RemoveApps @('Microsoft.BingNews') -Sccm @{ siteServer = 'cm01.contoso.com'; target = 'dp01.contoso.com'; contentSource = 'F:\Sources\OSD' })
+$rc16 = Read-RunConfig -File $cf16 -Definitions $defs16 -LanguageList $builtLangs
+Check 'a saved run config reads back: OS, root, every option, languages (lower case), apps, SCCM values' ($rc16.OsName -eq 'Windows 10 Enterprise LTSC 2021 (KMS)' -and $rc16.Root -eq 'F:\mediaRefresh' -and $rc16.Options['AutoDownload'] -and $rc16.Options['BuildIso'] -and -not $rc16.Options['NetFx3'] -and (@($rc16.Languages) -join ',') -eq 'de-de,ja-jp' -and (@($rc16.RemoveApps) -join ',') -eq 'Microsoft.BingNews' -and $rc16.Sccm['siteServer'] -eq 'cm01.contoso.com' -and @($script:SettingOptionNames | Where-Object { -not $rc16.Options.ContainsKey($_) }).Count -eq 0)
+$min16 = Join-Path $tmp 'cfg16\min.json'; [System.IO.File]::WriteAllText($min16, '{ "os": "Windows 11 Enterprise 24H2", "root": "F:\\mediaRefresh" }')
+$rm16 = Read-RunConfig -File $min16 -Definitions $defs16 -LanguageList $builtLangs
+$ro16 = ConvertTo-RunOptions -Config $rm16 -Definition $defs16['Windows 11 Enterprise 24H2'] -ProfilesDir 'P'
+Check 'a minimal config (OS and root only) takes the window defaults and the profile''s languages' ($ro16.Install -and $ro16.WinRE -and $ro16.Verify -and $ro16.LCU -and -not $ro16.BuildMedia -and -not $ro16.NetFx3 -and -not $ro16.AutoDownload -and -not $ro16.PreflightOnly -and @($ro16.Languages).Count -eq 0 -and $ro16.ProfilesDir -eq 'P' -and $ro16.SccmImageName -like 'Windows 11 Enterprise 24H2 ??????')
+$kmsMin16 = Join-Path $tmp 'cfg16\kmsmin.json'; [System.IO.File]::WriteAllText($kmsMin16, '{ "os": "Windows 10 Enterprise LTSC 2021 (KMS)", "root": "F:\\m" }')
+$kmsNone16 = Join-Path $tmp 'cfg16\kmsnone.json'; [System.IO.File]::WriteAllText($kmsNone16, '{ "os": "Windows 10 Enterprise LTSC 2021 (KMS)", "root": "F:\\m", "languages": [] }')
+$l1 = @((ConvertTo-RunOptions -Config (Read-RunConfig -File $kmsMin16 -Definitions $defs16) -Definition $defs16['Windows 10 Enterprise LTSC 2021 (KMS)']).Languages).Count
+$l2 = @((ConvertTo-RunOptions -Config (Read-RunConfig -File $kmsNone16 -Definitions $defs16) -Definition $defs16['Windows 10 Enterprise LTSC 2021 (KMS)']).Languages).Count
+Check 'no "languages" key = the profile''s default languages; an empty list = English only' ($l1 -eq 10 -and $l2 -eq 0)
+$ro16b = ConvertTo-RunOptions -Config $rc16 -Definition $defs16['Windows 10 Enterprise LTSC 2021 (KMS)'] -PreflightOnly
+Check '-Preflight forces a check-only run; the ISO needs the media folder; ticked apps only with AppRemoval' ($ro16b.PreflightOnly -and $ro16b.BuildIso -and (@($ro16b.RemoveApps) -join ',') -eq 'Microsoft.BingNews')
+$rc16.Options['BuildMedia'] = $false; $rc16.Options['AppRemoval'] = $false
+$ro16c = ConvertTo-RunOptions -Config $rc16 -Definition $defs16['Windows 10 Enterprise LTSC 2021 (KMS)']
+Check '... without the media folder there is no ISO; with AppRemoval off no app is removed' (-not $ro16c.BuildIso -and @($ro16c.RemoveApps).Count -eq 0 -and $ro16c.SccmTargetType -eq 'DP' -and $ro16c.SccmPackageType -eq 'Image')
+$bad16 = Join-Path $tmp 'cfg16\bad.json'
+[System.IO.File]::WriteAllText($bad16, '{ "os": "Windows 12", "options": { "Verfy": true, "LCU": "yes" }, "languages": ["xx-yy"], "sccm": { "site": "x" }, "extra": 1 }')
+$threw = $false; try { Read-RunConfig -File $bad16 -Definitions $defs16 -LanguageList $builtLangs } catch { $threw = $true; $m16 = $_.Exception.Message }
+Check 'a bad config lists every problem: unknown OS, missing root, misspelled option, non-true/false, unknown language, unknown keys' ($threw -and $m16 -like "*'os' is 'Windows 12', which is not one of the profiles*" -and $m16 -like "*'root'*missing*" -and $m16 -like "*unknown option 'Verfy'*" -and $m16 -like "*option 'LCU' must be true or false*" -and $m16 -like "*language 'xx-yy'*" -and $m16 -like "*unknown sccm setting 'site'*" -and $m16 -like "*unknown setting 'extra'*") $m16
+$threw = $false; try { Read-RunConfig -File (Join-Path $tmp 'cfg16\nope.json') -Definitions $defs16 } catch { $threw = $true; $m16b = $_.Exception.Message }
+[System.IO.File]::WriteAllText($bad16, '{ nope'); $threw2 = $false; try { Read-RunConfig -File $bad16 -Definitions $defs16 } catch { $threw2 = $true; $m16c = $_.Exception.Message }
+Check 'a missing file or broken JSON is a clear error' ($threw -and $m16b -like '*does not exist*' -and $threw2 -and $m16c -like '*not valid JSON*')
+
 $guide13 = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
 if (Test-Path $guide13) {
     $gb13 = @(ConvertFrom-MarkdownBlocks ([System.IO.File]::ReadAllText($guide13)))

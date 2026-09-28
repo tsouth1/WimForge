@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 515 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 533 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -26,6 +26,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Built: Apps tab, list read from the image, ticked apps removed first; 11b one scan per OS in Profiles\Apps (confirm on a real run) |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
+| [15](#s15) | Run configs and the command line: `-Config <file> [-Preflight]` runs without the window | Claude | Built (mock-tested + command line smoke-tested); confirm with a real elevated run |
 | [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Built (mock-tested); confirm with a real Download patches and a real run |
 
 Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
@@ -417,6 +418,13 @@ Add these three OSes to the set the tool services, alongside the existing five (
 
 ---
 
+<a id="s15"></a>
+## 15. Run configs and the command line (Terry, 2026-09-28) - built; confirm with a real elevated run
+
+**Asked:** save all the configuration settings as a config file and run an update session from the command line with it.
+**Built:** JSON (like the profiles and saved settings). **Tools > Save run config...** writes the selected OS's choices - repository root, OS, every option (the saved-settings names, incl. `AutoDownload`, `AppRemoval`, `SccmAutoImport`), languages, apps to remove and the SCCM values - by default to `Configs\<folder>_run.json` beside the script (`Save-RunConfig`). `MediaRefresh_v2.4.ps1 -Config <file> [-Preflight]` runs the same engine without the window, synchronously (`Invoke-CommandLineRun`): profiles and `Languages.json` from the Profiles folder beside the script, the config checked (`Read-RunConfig`: unknown OS / language / key / option, non-true/false values, missing os or root - all listed in one message), turned into the run's options (`ConvertTo-RunOptions`: missing options take the window's defaults - `$script:OptionDefaults`, kept equal to the window's by a test -, missing `languages` the profile's defaults, the ISO only with the media folder, apps only with AppRemoval), logged to the console and LOGS. Exit codes: 0 success, 1 failed / bad config, 2 validation gate FAILED, 3 SCCM import (asked for by the config) failed; the import never runs after a FAILED gate or a preflight. The branch sits between the engine and the window regions, so nothing of the window is built.
+- **Tests:** 7 in `profiles.ps1` (P16), 8 in `e2e.ps1` (E22: a real preflight from a config; bad config; each exit code with the engine replaced; the branch position), 3 in `xaml.ps1` (defaults equal the window's; the menu item; saving from the window reads back). Smoke-tested as a separate process (unelevated copy): missing file and misspelled option exit 1 at once with the reason, a valid config reaches the engine (which then needs elevation), no window opens; the window still starts normally without `-Config`.
+- **Next (step 8):** a scheduled run = Task Scheduler + `-Config`; a batch queue = a config (or list of configs) with several OSes.
 <a id="built"></a>
 ## Built into v2.4 (reference)
 
@@ -485,6 +493,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-28: step 15 built - run configs (Tools > Save run config...) and the command line: MediaRefresh_v2.4.ps1 -Config <file> [-Preflight], exit codes 0 / 1 / 2 / 3. Test kit 533 checks.
 - 2026-09-28: Terry's IoT LTSC 2021 logs of 2026-09-27 (catalog dry run, download, Read apps; no servicing run yet): all four 21H2 picks correct (LCU KB5129236 out-of-band, .NET KB5126145 = 2 files, Safe OS KB5122887, Setup DU KB5126029); IoT index 2 picked by name, no warning; 0 provisioned apps. Read apps took 3 min 31 s - ISO role detection only 3 s; the read-only mount (~1 min 41 s) and its discard (~1 min 46 s) are the time. The DISM log says the build host has only 2 processors: more vCPUs (and the antivirus exclusion on MOUNT) should speed up every run. Fixed: every downloaded file is now named in the log with its size (single-file entries left no trace). Test kit 515 checks.
 - 2026-09-27: step 14 built - Download patches only downloads what is missing (a _downloads.json record per PATCHES folder; 'PATCHES is up to date'); new option 'Download the latest patches before the run' (off = use the folders as they are). Test kit 514 checks.
 - 2026-09-27: step 11b built - app list in Profiles\Apps\<folder>_Appx.json, one scan per OS: read again only when missing or the OS ISO (name, size, date) / index changed; a real run never writes it; the Apps tab points out a changed ISO; an old ProvisionedApps.json is moved once. Test kit 498 checks.

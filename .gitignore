@@ -19,6 +19,7 @@ WORKING/
 # Generated at runtime, per machine -- not source
 Profiles/
 Settings/
+Configs/
 INSTRUCTIONS.md.bak
 
 # Microsoft's Make2023BootableMedia.ps1 -- local reference copy for step 12a, not ours to commit

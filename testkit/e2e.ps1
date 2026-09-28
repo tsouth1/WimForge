@@ -675,4 +675,35 @@ Check 'unticked: the catalog is not contacted, the folders are used as they are 
 Set-Item function:Write-Log $wl21; Set-Item function:Invoke-PatchAcquisition $ipa21; $script:Acq21Plan = @()
 Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
 
+Write-Host "`n=== E22 the command line: MediaRefresh_v2.4.ps1 -Config <file> [-Preflight] (Terry, 2026-09-28) ==="
+$pd22 = Join-Path $base '_profiles22'; $cfg22 = Join-Path $base '_cfg22\w11.json'
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1
+[void](Save-RunConfig -File $cfg22 -OsName 'Windows 11 Enterprise 24H2' -Root $base -Options @{ NetFx3 = $false; SetupDU = $false; Verify = $false } -Languages @())
+Reset-Test
+$code22 = Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22 -PreflightOnly
+Check 'a real preflight from a config file: exit code 0, nothing changed, profiles read from the given folder' ($code22 -eq 0 -and $script:LastResult.Preflight -and @($script:Calls -match 'save$|^AddPkg').Count -eq 0 -and (Test-Path (Join-Path $pd22 'Win11_Enterprise_24H2.json')))
+[System.IO.File]::WriteAllText((Join-Path $base '_cfg22\bad.json'), '{ "os": "Windows 12", "root": "x" }')
+Check 'a bad config: exit code 1, nothing run' ((Invoke-CommandLineRun -ConfigFile (Join-Path $base '_cfg22\bad.json') -ProfilesDir $pd22) -eq 1)
+# The outcomes after the run, with the engine replaced
+$savedImr22 = ${function:Invoke-MediaRefresh}; $script:Imr22 = [System.Collections.Generic.List[string]]::new(); $script:Imr22Result = $null; $script:Imr22Throw = ''; $script:Imr22ImportThrow = $false
+function Invoke-MediaRefresh { param($Options)
+    $mode = [string](Get-ProfileValue $Options 'Mode' 'Service'); $script:Imr22.Add("$mode|DryRun=$(Get-ProfileValue $Options 'DryRun' '')|Preflight=$($Options.PreflightOnly)|AutoDownload=$($Options.AutoDownload)|Iso=$($Options.BuildIso)")
+    if ($mode -eq 'SccmImport') { if ($script:Imr22ImportThrow) { throw 'Refused: nope' }; $script:LastResult = [pscustomobject]@{ Mode = 'SccmImport'; PackageId = 'PS1001' }; return }
+    if ($script:Imr22Throw) { throw $script:Imr22Throw }
+    $script:LastResult = $script:Imr22Result }
+[void](Save-RunConfig -File $cfg22 -OsName 'Windows 11 Enterprise 24H2' -Root $base -Options @{ AutoDownload = $true; BuildMedia = $true; BuildIso = $true; SccmAutoImport = $true } -Sccm @{ siteServer = 'cm01'; target = 'dp01'; contentSource = 'F:\S' })
+$script:Imr22Result = [pscustomobject]@{ Preflight = $false; Gate = 'PASSED'; Install = 'x\install.wim' }
+Check 'a run that passes: exit code 0, then the SCCM import the config asks for (no dry run)' ((Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22) -eq 0 -and ($script:Imr22 -join ' / ') -eq 'Service|DryRun=|Preflight=False|AutoDownload=True|Iso=True / SccmImport|DryRun=False|Preflight=False|AutoDownload=True|Iso=True') ($script:Imr22 -join ' / ')
+$script:Imr22.Clear(); $script:Imr22Result = [pscustomobject]@{ Preflight = $false; Gate = 'FAILED'; Install = 'x\install.wim' }
+Check 'the validation gate FAILED: exit code 2, and nothing is imported' ((Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22) -eq 2 -and $script:Imr22.Count -eq 1)
+$script:Imr22.Clear(); $script:Imr22Result = [pscustomobject]@{ Preflight = $false; Gate = 'PASSED'; Install = 'x\install.wim' }; $script:Imr22ImportThrow = $true
+Check 'the run passes but the SCCM import fails: exit code 3' ((Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22) -eq 3)
+$script:Imr22ImportThrow = $false; $script:Imr22.Clear(); $script:Imr22Throw = 'PATCHES\LCU is empty'
+Check 'the run itself fails: exit code 1, no import' ((Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22) -eq 1 -and $script:Imr22.Count -eq 1)
+$script:Imr22Throw = ''; $script:Imr22.Clear(); $script:Imr22Result = [pscustomobject]@{ Preflight = $true; Gate = 'Skipped' }
+Check '-Preflight: a check only, exit code 0, no import even when the config asks for one' ((Invoke-CommandLineRun -ConfigFile $cfg22 -ProfilesDir $pd22 -PreflightOnly) -eq 0 -and $script:Imr22.Count -eq 1 -and $script:Imr22[0] -like '*Preflight=True*')
+Set-Item function:Invoke-MediaRefresh $savedImr22
+$cl22 = [regex]::Match($src, '(?s)\r?\n# Command line \(-Config\).*?\r?\n\}\r?\n').Value
+Check 'the command line branch sits after the engine and before the window, and exits with the run''s code' ($src.IndexOf('#endregion ENGINE') -lt $src.IndexOf('# Command line (-Config)') -and $src.IndexOf('# Command line (-Config)') -lt $src.IndexOf('#region GUI') -and $cl22 -match 'exit \(\[int\]\$cliCode\[-1\]\)')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"
