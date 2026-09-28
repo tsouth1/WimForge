@@ -1843,18 +1843,46 @@ function Service-BootWim {
         $parts = Expand-CombinedMsu -MsuPath $lcuPkg.FullName -Destination (Join-Path $Paths.Temp ('lcu_split_' + [System.IO.Path]::GetFileNameWithoutExtension($leaf)))
         if ($parts) {
             Write-Log "boot.wim gets $leaf in two steps: its servicing stack $($parts.Ssu.Name), then $(@($parts.Updates | ForEach-Object Name) -join ', ')."
-            @{ Label = "servicing stack from $leaf"; Files = @($parts.Ssu) }
-            @{ Label = "LCU from $leaf"; Files = @($parts.Updates) }
-        } else { @{ Label = 'LCU'; Files = @($lcuPkg) } }
+            @{ Label = "servicing stack from $leaf"; Files = @($parts.Ssu); Kind = 'Ssu'; Leaf = $leaf }
+            @{ Label = "LCU from $leaf"; Files = @($parts.Updates); Kind = 'Lcu'; Leaf = $leaf }
+        } else { @{ Label = 'LCU'; Files = @($lcuPkg); Kind = 'Lcu'; Leaf = $leaf } }
     }
+    # The 1809 boot.wim cannot take the LCU at all - neither from the .msu nor as its own cab: its component store lacks the
+    # qps-ploc BootEnvironment-PXE files the RollupFix needs (0x8007371b, "One or more required members of the transaction are
+    # not present"; LTSC 2019 IoT run 3, 2026-09-28). Then the image is mounted again without the LCU and gets the servicing
+    # stack only, as WinRE does; the later images skip the LCU straight away. Any other error still stops the run.
+    $bootTakesLcu = $true
     foreach ($image in @(Get-WindowsImage -ImagePath $working)) {
         $target = "boot.wim index $($image.ImageIndex)"
-        Remove-DirectoryContents $Paths.WinPeMount
-        Write-Log "Mounting $target"
+        $attempt = 0
+        while ($true) {
+            $attempt++
+            $withLcu = $bootTakesLcu
+            Remove-DirectoryContents $Paths.WinPeMount
+            Write-Log "Mounting $target"
+            try {
+                Mount-WindowsImage -ImagePath $working -Index $image.ImageIndex -Path $Paths.WinPeMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
+                Add-Packages $Paths.WinPeMount $Packages.SSU $target -Label 'SSU' -IgnoreCombinedLcu7007e
+                foreach ($step in @($lcuSteps)) {
+                    if ($step.Kind -eq 'Lcu' -and -not $withLcu) {
+                        Write-Log "Skipped $($step.Leaf) on ${target}: this boot.wim cannot take the LCU (0x8007371b); it gets the servicing stack only." 'WARN'
+                        Add-ChangeEvent -Category 'LCU' -Item $step.Leaf -Target $target -Kb (Get-KbFromName $step.Leaf) -Detail 'LCU - not applied: this boot.wim cannot take it (0x8007371b); servicing stack only'
+                        continue
+                    }
+                    Add-Packages $Paths.WinPeMount $step.Files $target -Label $step.Label -IgnoreCombinedLcu7007e
+                }
+                break
+            } catch {
+                $closure = ($_.Exception.HResult -eq -2147010789) -or ($_.Exception.Message -match '(?i)0x8007371b|required members of the transaction are not present')
+                Dismount-IfMounted $Paths.WinPeMount
+                # The discarded attempt changed nothing: its change-log rows go (run 3's log listed boot.wim SSUs that were thrown away)
+                $keep = @($script:ChangeEvents | Where-Object { $_.Target -ne $target }); $script:ChangeEvents.Clear(); foreach ($k in $keep) { $script:ChangeEvents.Add($k) }
+                if (-not ($closure -and $withLcu -and $attempt -eq 1) -or $_.Exception.Message -eq 'Operation cancelled by user.') { throw }
+                $bootTakesLcu = $false
+                Write-Log "$target cannot take the LCU: $($_.Exception.Message) (0x8007371b - the 1809 WinPE images lack files the update needs). Mounting it again for the servicing stack only; the other boot.wim images skip the LCU." 'WARN'
+            }
+        }
         try {
-            Mount-WindowsImage -ImagePath $working -Index $image.ImageIndex -Path $Paths.WinPeMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
-            Add-Packages $Paths.WinPeMount $Packages.SSU $target -Label 'SSU' -IgnoreCombinedLcu7007e
-            foreach ($step in @($lcuSteps)) { Add-Packages $Paths.WinPeMount $step.Files $target -Label $step.Label -IgnoreCombinedLcu7007e }
             Invoke-DismExe -Arguments @("/Image:$($Paths.WinPeMount)", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description "Cleaning $target"
             # The Setup image is the one with sources\setup.exe (index 2 on Microsoft media).
             if (Test-Path -LiteralPath (Join-Chain $Paths.WinPeMount @('sources', 'setup.exe'))) { Save-BootMediaFiles -Mount $Paths.WinPeMount -Destination $saved -Target $target }

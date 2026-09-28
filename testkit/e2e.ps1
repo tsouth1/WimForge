@@ -771,6 +771,33 @@ $rrObj24 = if (Test-Path $rr24) { Get-Content -Raw $rr24 | ConvertFrom-Json } el
 Check 'a boot.wim failure still ends the run in an error that says install.wim is complete' ($msg24 -like 'The media was not built: *0x8007371B*install.wim is complete: *install.wim)') $msg24
 Check 'the run record (RunResult.json) is written for the finished install.wim, with no media' ($null -ne $rrObj24 -and [string]$rrObj24.Install -like '*NEWWIM\install.wim' -and -not [string](Get-ProfileValue $rrObj24 'Media' '')) "$($rrObj24 | ConvertTo-Json -Compress)"
 Check 'the log says what failed and that install.wim is kept, and the change log is still written' ([bool]($logs24 -match '^\[ERROR\] boot\.wim / media step failed: ') -and [bool]($logs24 -match '^\[WARN\] install\.wim is complete and kept ') -and [bool]($logs24 -match '(?i)change log')) ($logs24 -match 'ERROR|WARN|change log' -join ' | ')
+
+Write-Host "`n=== E25 the 1809 boot.wim cannot take the LCU at all: servicing stack only, the media is still built (LTSC 2019 IoT run 3, 2026-09-28) ==="
+# Run 3: the SSU cab went in, then the update cab on its own failed the same way (RollupFix 17763.9247, 0x8007371b)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+  if ((Split-Path $Path -Leaf) -eq 'WinPE' -and (Split-Path $PackagePath -Leaf) -eq $script:Cab25) { throw 'One or more required members of the transaction are not present.' }
+  Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
+$script:Cab25 = $cab24
+$e24retries = @($logs24 -match 'cannot take the LCU').Count; $e24mounts = @($script:Calls -match '^Mount boot\.working\.wim idx1').Count
+Reset-Test; $logs24.Clear(); $script:ChangeEvents.Clear(); $msg25 = ''
+$wl = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs24.Add("[$Level] $Message") }
+try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true }) } catch { $msg25 = $_.Exception.Message }
+Set-Item function:Write-Log $wl; Set-Item function:Add-WindowsPackage $savedAdd24
+$pe25 = @($script:Calls -match '^(Mount boot|Dismount WinPE|AddPkg .* @ WinPE$)')
+Check 'the run completes: the media is built with a boot.wim that has the servicing stack only' ($msg25 -eq '' -and -not [bool]($logs24 -match '^\[ERROR\]')) "$msg25 | $($logs24 -match 'ERROR' -join ' | ')"
+Check 'boot.wim index 1 is mounted again after the failure and gets the SSUs again, then is saved' (@($script:Calls -match '^Mount boot\.working\.wim idx1').Count -eq 2 -and @($pe25 -match '^AddPkg SSU-17763\.9242-x64\.cab @ WinPE$').Count -eq 2 -and ($script:Calls -contains 'Dismount WinPE save')) ($pe25 -join ' | ')
+$ev25 = @($script:ChangeEvents | Where-Object { $_.Target -eq 'boot.wim index 1' })
+Check 'the change log lists boot.wim''s packages once: the discarded attempt left no rows' (@($ev25 | Where-Object { $_.Item -eq 'SSU-17763.9242-x64.cab' }).Count -eq 1) (($ev25 | ForEach-Object { "$($_.Item)=$($_.Detail)" }) -join ' | ')
+Check 'the log explains the fallback, and the change log records the LCU as not applied to boot.wim' ([bool]($logs24 -match '^\[WARN\] boot\.wim index 1 cannot take the LCU: .*Mounting it again for the servicing stack only') -and [bool]($logs24 -match "^\[WARN\] Skipped $([regex]::Escape($lcu23)) on boot\.wim index 1: ") -and @($script:ChangeEvents | Where-Object { $_.Target -eq 'boot.wim index 1' -and $_.Detail -like 'LCU - not applied*' }).Count -eq 1) ($logs24 -match 'WARN' -join ' | ')
+# any other boot.wim error still stops the media, and a second 0x8007371b (without the LCU) is not retried again
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+  if ((Split-Path $Path -Leaf) -eq 'WinPE') { throw 'The system cannot find the file specified. (0x80070002)' }
+  Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
+Reset-Test; $msg25b = ''
+try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true }) } catch { $msg25b = $_.Exception.Message }
+Set-Item function:Write-Log $wl; Set-Item function:Add-WindowsPackage $savedAdd24
+Check 'another boot.wim error is not retried: one mount, and the media is not built' (@($script:Calls -match '^Mount boot\.working\.wim idx1').Count -eq 1 -and $msg25b -like 'The media was not built: *0x80070002*') $msg25b
+Check 'E24''s case (every boot.wim package fails) is retried once without the LCU, then stops' ($e24retries -eq 1 -and $e24mounts -eq 2) "retries $e24retries, mounts $e24mounts"
 $script:MsuSsu = @{}
 
 Write-Host "`nRESULT: $pass passed, $fail failed"
