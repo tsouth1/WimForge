@@ -46,6 +46,13 @@ $script:MsuSsu = @{}
 function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination)
   $n = $script:MsuSsu[(Split-Path $MsuPath -Leaf)]; if (-not $n) { return $null }
   New-Item -ItemType Directory -Force $Destination | Out-Null; $f = Join-Path $Destination $n; Set-Content $f 'ssu'; return (Get-Item $f) }
+$script:RealExpandCombinedMsu = ${function:Expand-CombinedMsu}
+function Expand-CombinedMsu { param([string]$MsuPath, [string]$Destination)
+  $leaf = Split-Path $MsuPath -Leaf; $n = $script:MsuSsu[$leaf]; if (-not $n) { return $null }
+  New-Item -ItemType Directory -Force $Destination | Out-Null
+  $s = Join-Path $Destination $n; Set-Content $s 'ssu'
+  $u = Join-Path $Destination ([System.IO.Path]::GetFileNameWithoutExtension($leaf) + '.cab'); Set-Content $u 'lcu'
+  return @{ Ssu = (Get-Item $s); Updates = @(Get-Item $u) } }
 
 $pass = 0; $fail = 0
 function Check($name, [bool]$ok, $detail='') { if ($ok) { $script:pass++; Write-Host "PASS  $name" -ForegroundColor Green } else { $script:fail++; Write-Host "FAIL  $name  $detail" -ForegroundColor Red } }

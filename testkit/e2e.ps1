@@ -739,6 +739,38 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and (Test-Path 
     $gotA = & $script:RealGetMsuServicingStack -MsuPath $msuA -Destination (Join-Path $base 'x23a')
     Check 'Get-MsuServicingStack extracts SSU-*.cab from a combined .msu and returns it' ($gotA -and $gotA.Name -eq 'SSU-17763.9242-x64.cab' -and (Get-Content -Raw $gotA.FullName).Trim() -eq 'servicing stack' -and @(Get-ChildItem (Join-Path $base 'x23a')).Count -eq 1) "$gotA"
     Check 'Get-MsuServicingStack returns nothing for an .msu without an SSU cab, or for a .cab' ($null -eq (& $script:RealGetMsuServicingStack -MsuPath $msuB -Destination (Join-Path $base 'x23b')) -and $null -eq (& $script:RealGetMsuServicingStack -MsuPath (Join-Path $d23 'SSU-17763.9242-x64.cab') -Destination (Join-Path $base 'x23c')))
+    $split23 = & $script:RealExpandCombinedMsu -MsuPath $msuA -Destination (Join-Path $base 'x23d')
+    Check 'Expand-CombinedMsu splits a combined .msu into its SSU cab and its update cab' ($split23 -and $split23.Ssu.Name -eq 'SSU-17763.9242-x64.cab' -and (@($split23.Updates).Name -join ',') -eq 'Windows10.0-KB5129238-x64.cab' -and (Get-Content -Raw @($split23.Updates)[0].FullName).Trim() -eq 'rollup') "$($split23 | Out-String)"
+    Check 'Expand-CombinedMsu returns nothing for an .msu without an SSU cab' ($null -eq (& $script:RealExpandCombinedMsu -MsuPath $msuB -Destination (Join-Path $base 'x23e')))
 } else { Write-Host 'SKIP  Get-MsuServicingStack on a real cabinet (needs Windows makecab.exe/expand.exe)' }
+
+Write-Host "`n=== E24 boot.wim gets a combined LCU .msu in two steps; a boot.wim failure keeps the finished install.wim (LTSC 2019 IoT run 2, 2026-09-28) ==="
+Reset-Test; $script:MsuSsu = @{ $lcu23 = 'SSU-17763.9242-x64.cab' }
+$cab24 = [System.IO.Path]::GetFileNameWithoutExtension($lcu23) + '.cab'
+$logs24 = [System.Collections.Generic.List[string]]::new()
+$wl = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs24.Add("[$Level] $Message") }
+Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true })
+Set-Item function:Write-Log $wl
+$pe24 = @($script:Calls -match '^AddPkg .* @ WinPE$')
+$ssuAt = [array]::IndexOf($pe24, 'AddPkg SSU-17763.9242-x64.cab @ WinPE'); $lcuAt = [array]::IndexOf($pe24, "AddPkg $cab24 @ WinPE")
+Check 'boot.wim: the SSU cab from the .msu, then its update cab, never the .msu itself' ($ssuAt -ge 0 -and $lcuAt -gt $ssuAt -and @($pe24 -match "^AddPkg $([regex]::Escape($lcu23)) @ WinPE$").Count -eq 0) ($pe24 -join ' | ')
+Check 'install.wim still gets the whole .msu' (@($script:Calls -match "^AddPkg $([regex]::Escape($lcu23)) @ MainOS$").Count -ge 1) (@($script:Calls -match '^AddPkg ') -join ' | ')
+Check 'the log explains the two steps' ([bool]($logs24 -match "boot\.wim gets $([regex]::Escape($lcu23)) in two steps: its servicing stack SSU-17763\.9242-x64\.cab, then $([regex]::Escape($cab24))\.")) ($logs24 -match 'two steps' -join ' | ')
+Check 'the change log files the SSU cab under SSU and the update cab under LCU' ((Get-EventCategory "servicing stack from $lcu23") -eq 'SSU' -and (Get-EventCategory "LCU from $lcu23") -eq 'LCU')
+# boot.wim fails: install.wim, the change log and RunResult.json are kept, and the run still ends in the error
+$rr24 = Join-Path $base 'Win10_Enterprise_LTSC_2019\NEWWIM\RunResult.json'; Remove-Item $rr24 -Force -ErrorAction SilentlyContinue
+$savedAdd24 = ${function:Add-WindowsPackage}
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+  if ((Split-Path $Path -Leaf) -eq 'WinPE') { throw 'An error occurred applying the Unattend.xml file from the .msu package. (0x8007371B)' }
+  Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
+Reset-Test; $logs24.Clear(); $msg24 = ''
+$wl = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs24.Add("[$Level] $Message") }
+try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true; BuildIso=$true }) } catch { $msg24 = $_.Exception.Message }
+Set-Item function:Write-Log $wl; Set-Item function:Add-WindowsPackage $savedAdd24
+$rrObj24 = if (Test-Path $rr24) { Get-Content -Raw $rr24 | ConvertFrom-Json } else { $null }
+Check 'a boot.wim failure still ends the run in an error that says install.wim is complete' ($msg24 -like 'The media was not built: *0x8007371B*install.wim is complete: *install.wim)') $msg24
+Check 'the run record (RunResult.json) is written for the finished install.wim, with no media' ($null -ne $rrObj24 -and [string]$rrObj24.Install -like '*NEWWIM\install.wim' -and -not [string](Get-ProfileValue $rrObj24 'Media' '')) "$($rrObj24 | ConvertTo-Json -Compress)"
+Check 'the log says what failed and that install.wim is kept, and the change log is still written' ([bool]($logs24 -match '^\[ERROR\] boot\.wim / media step failed: ') -and [bool]($logs24 -match '^\[WARN\] install\.wim is complete and kept ') -and [bool]($logs24 -match '(?i)change log')) ($logs24 -match 'ERROR|WARN|change log' -join ' | ')
+$script:MsuSsu = @{}
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

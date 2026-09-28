@@ -914,6 +914,7 @@ function Get-EventCategory {
     param([string]$Label)
     switch -Regex ($Label) {
         '^SSU$'              { return 'SSU' }
+        '^servicing stack from ' { return 'SSU' }   # the SSU cab taken out of a combined LCU .msu
         '^LCU'                { return 'LCU' }
         '^Safe OS DU$'        { return 'SafeOS' }
         '^Setup DU$'          { return 'SetupDU' }
@@ -1550,6 +1551,20 @@ function Get-MsuServicingStack {
     if ($LASTEXITCODE -ne 0) { Write-Log "Could not look for a servicing stack inside $(Split-Path $MsuPath -Leaf) (expand exit code $LASTEXITCODE)." 'WARN'; return $null }
     return (Get-ChildItem -LiteralPath $Destination -Filter 'SSU-*.cab' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
+function Expand-CombinedMsu {
+    # Splits a combined LCU .msu into its servicing stack cab and its update cab(s), for images that cannot take both
+    # in one transaction (the 1809 boot.wim: 0x8007371b). Returns @{ Ssu; Updates } or $null when there is no SSU cab.
+    param([Parameter(Mandatory)][string]$MsuPath, [Parameter(Mandatory)][string]$Destination)
+    if ($MsuPath -notmatch '(?i)\.msu$') { return $null }
+    Remove-DirectoryContents $Destination
+    & "$env:SystemRoot\System32\expand.exe" $MsuPath '-F:*.cab' $Destination | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Log "Could not open $(Split-Path $MsuPath -Leaf) (expand exit code $LASTEXITCODE)." 'WARN'; return $null }
+    $cabs = @(Get-ChildItem -LiteralPath $Destination -Filter '*.cab' -File -ErrorAction SilentlyContinue)
+    $ssu = $cabs | Where-Object { $_.Name -like 'SSU-*.cab' } | Select-Object -First 1
+    $updates = @($cabs | Where-Object { $_.Name -notlike 'SSU-*.cab' -and $_.Name -ine 'WSUSSCAN.cab' } | Sort-Object Name)
+    if (-not $ssu -or $updates.Count -eq 0) { return $null }
+    return @{ Ssu = $ssu; Updates = $updates }
+}
 function Service-WinRe {
     # Extracts winre.wim from the currently mounted OS image, services it, and exports the result to $OutputPath.
     # No languages: they go into install.wim only; WinRE and boot.wim stay English-only (2026-09-26).
@@ -1820,6 +1835,18 @@ function Service-BootWim {
     Remove-DirectoryContents $saved
     Copy-Item -LiteralPath $SourceBoot -Destination $working -Force
     Set-ItemProperty -LiteralPath $working -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+    # A combined LCU .msu goes in as two steps - its servicing stack cab, then its update cab - as 1809 was serviced before
+    # the SSU was bundled: the 1809 boot.wim fails with 0x8007371b when DISM installs both from the .msu in one transaction
+    # (LTSC 2019 IoT run, 2026-09-28). Split once, used for every boot.wim image; an .msu without an SSU cab is added whole.
+    $lcuSteps = foreach ($lcuPkg in @($Packages.LCU | Where-Object { $_ })) {
+        $leaf = Split-Path $lcuPkg.FullName -Leaf
+        $parts = Expand-CombinedMsu -MsuPath $lcuPkg.FullName -Destination (Join-Path $Paths.Temp ('lcu_split_' + [System.IO.Path]::GetFileNameWithoutExtension($leaf)))
+        if ($parts) {
+            Write-Log "boot.wim gets $leaf in two steps: its servicing stack $($parts.Ssu.Name), then $(@($parts.Updates | ForEach-Object Name) -join ', ')."
+            @{ Label = "servicing stack from $leaf"; Files = @($parts.Ssu) }
+            @{ Label = "LCU from $leaf"; Files = @($parts.Updates) }
+        } else { @{ Label = 'LCU'; Files = @($lcuPkg) } }
+    }
     foreach ($image in @(Get-WindowsImage -ImagePath $working)) {
         $target = "boot.wim index $($image.ImageIndex)"
         Remove-DirectoryContents $Paths.WinPeMount
@@ -1827,7 +1854,7 @@ function Service-BootWim {
         try {
             Mount-WindowsImage -ImagePath $working -Index $image.ImageIndex -Path $Paths.WinPeMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
             Add-Packages $Paths.WinPeMount $Packages.SSU $target -Label 'SSU' -IgnoreCombinedLcu7007e
-            Add-Packages $Paths.WinPeMount $Packages.LCU $target -Label 'LCU' -IgnoreCombinedLcu7007e
+            foreach ($step in @($lcuSteps)) { Add-Packages $Paths.WinPeMount $step.Files $target -Label $step.Label -IgnoreCombinedLcu7007e }
             Invoke-DismExe -Arguments @("/Image:$($Paths.WinPeMount)", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description "Cleaning $target"
             # The Setup image is the one with sources\setup.exe (index 2 on Microsoft media).
             if (Test-Path -LiteralPath (Join-Chain $Paths.WinPeMount @('sources', 'setup.exe'))) { Save-BootMediaFiles -Mount $Paths.WinPeMount -Destination $saved -Target $target }
@@ -2701,8 +2728,11 @@ function Invoke-MediaRefresh {
             }
         }
 
-        $bootFiles = $null
+        $bootFiles = $null; $mediaError = $null
         if ($doMedia -and -not $finalInstall) { throw 'Refreshed media requires Create updated install.wim.' }
+        # A boot.wim or media failure no longer throws away a finished install.wim: the change log and RunResult.json are
+        # still written (so it can be imported), then the run ends in the error (LTSC 2019 IoT run, 2026-09-28).
+        try {
         if ($doBoot) {
             # boot.wim is patched only for the refreshed media / ISO (2026-09-27): SCCM task sequences and upgrade
             # packages never use the OS media's boot.wim, so there is no separate NEWWIM\boot.wim any more.
@@ -2732,6 +2762,13 @@ function Invoke-MediaRefresh {
                 if ($media2023) { Set-Phase 'Building CA 2023 ISO'; $iso2023 = Build-IsoFromMedia -MediaFolder $media2023 -Paths $paths -EfiBootFile 'efisys_ex.bin' -NamePrefix 'UpdatedMedia_CA2023' }
             }
         }
+        } catch {
+            if (-not $finalInstall -or $_.Exception.Message -eq 'Operation cancelled by user.') { throw }
+            $mediaError = $_.Exception.Message
+            $mediaFolder = $null; $iso = $null; $media2023 = $null; $iso2023 = $null
+            Write-Log "boot.wim / media step failed: $mediaError" 'ERROR'
+            Write-Log "install.wim is complete and kept ($finalInstall, validation gate $gate); the change log and run record are still written. No media or ISO was built." 'WARN'
+        }
         $changeLogPaths = $null
         if ($Options.Install) {
             Set-Phase 'Writing change log'
@@ -2745,6 +2782,7 @@ function Invoke-MediaRefresh {
             $runBuild = if ($script:VerifyBuildAfter) { $script:VerifyBuildAfter } else { $script:BuildBefore }
             [void](Save-RunResult -Paths $paths -OsName $name -Build $runBuild -Gate $gate -Install $finalInstall -Media $mediaFolder -ChangeLog $(if ($changeLogPaths) { $changeLogPaths.Html } else { '' }))
         }
+        if ($mediaError) { throw "The media was not built: $mediaError (install.wim is complete: $finalInstall)" }
         Set-Progress 100 'Completed successfully'
         Set-Phase 'Done'
         if ($null -ne $verifyIssues -and $verifyIssues -gt 0) { Write-Log "Media refresh finished, but verification reported $verifyIssues issue(s). Review the VERIFY lines above." 'WARN' }
