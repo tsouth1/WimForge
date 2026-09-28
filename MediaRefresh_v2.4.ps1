@@ -1256,7 +1256,10 @@ function Invoke-PatchAcquisition {
                 Add-ChangeEvent -Category $class -Item $leaf -Target $folder -Kb $(if ($fileKb) { $fileKb } else { $kb }) -Detail $detail
                 $downloaded.Add([pscustomobject]@{ Class = $class; File = $saved; Kb = $(if ($fileKb) { $fileKb } else { $kb }); EntryKb = $kb })
                 $classFilesKept.Add($saved)
-                $entryFiles.Add([pscustomobject]@{ Name = $leaf; Size = [string](Get-Item -LiteralPath $saved).Length })
+                $savedSize = (Get-Item -LiteralPath $saved).Length
+                $entryFiles.Add([pscustomobject]@{ Name = $leaf; Size = [string]$savedSize })
+                # Every file is named in the log (Terry, 2026-09-28: single-file entries used to leave no trace of their file).
+                Write-Log ("{0}: downloaded {1} ({2:N1} MB) to PATCHES\{3}" -f $class, $leaf, ($savedSize / 1MB), $folders[$class])
             }
             # Remember what this entry produced, so the next Download patches can skip it (step 14).
             if ($entryFiles.Count -gt 0) {

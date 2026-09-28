@@ -403,8 +403,9 @@ Check 'a same-KB older copy is removed when this run saved that KB' ((@(Get-Chil
 Write-Host "`n=== A12 download only what is missing (TODO step 14, Terry 2026-09-27) ==="
 # The Win11 LCU entry downloads two files (the LCU and its checkpoint), named after other KBs than nothing the title
 # tells beforehand - real results have an empty FileNames - so the record written at download time is what knows.
-Get-ChildItem $lcu4 -File -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test
+Get-ChildItem $lcu4 -File -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test; $script:LogLines.Clear()
 $first14 = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+Check 'every downloaded file is named in the log, with its size and folder' ([bool]($script:LogLines -match 'LCU: downloaded windows11\.0-kb5129195-x64\.msu \(\d+[.,]\d MB\) to PATCHES\\LCU') -and [bool]($script:LogLines -match 'LCU: downloaded windows11\.0-kb5043080-x64\.msu \('))
 $rec14 = Read-DownloadRecord -Folder $lcu4
 $key14 = Get-CatalogEntryKey $script:CatalogResults['search-w11-lcu'][0]
 Check 'first download: both files fetched and recorded in PATCHES\LCU\_downloads.json under the catalog entry' (@($script:Calls -match '^CatalogSave').Count -eq 1 -and $rec14.ContainsKey($key14) -and (@($rec14[$key14].Files).Name -join ',') -eq 'windows11.0-kb5043080-x64.msu,windows11.0-kb5129195-x64.msu' -and $rec14[$key14].Kb -eq 'KB5129195')
