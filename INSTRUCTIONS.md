@@ -17,7 +17,7 @@ This guide covers the folders WimForge expects, every part of the window, the re
 
 ## Folder layout
 
-Everything lives under one **repository root** (the default is `F:\mediaRefresh`; change it on the Source and Targets tab). Inside it there is one folder per operating system:
+Everything lives under one **repository root** (until you save one, the default is the folder the script is in, on whatever drive that is; change it on the Source and Targets tab and press Save settings to keep it). Inside it there is one folder per operating system:
 
 - `Win10_Enterprise_LTSC_2019` - Windows 10 Enterprise LTSC 2019 (IoT)
 - `Win10_IoT_Enterprise_LTSC_2021` - Windows 10 IoT Enterprise LTSC 2021
@@ -133,8 +133,8 @@ Imports the latest finished run of the selected OS into Configuration Manager. N
 
 ### Instructions tab
 
-- This guide, formatted. The line at the top shows which `INSTRUCTIONS.md` was read (the one beside the script).
-- **Reload** - reads the file again, for example after editing it; no restart needed.
+- This guide, formatted. `INSTRUCTIONS.md` is read from the script's folder, or else from the repository root. The line at the top shows which file was read, or where it was looked for.
+- **Reload** - reads the file again, for example after editing it; no restart needed, and it works during a run. Opening the tab also re-reads the file when it has appeared or changed. (Reload profiles, next to the OS list, does not touch this guide.)
 
 ### General Settings tab
 

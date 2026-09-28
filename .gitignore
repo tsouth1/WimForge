@@ -2,6 +2,8 @@
 *.log
 *.zip
 *.7z
+MediaRefresh_2*.txt
+DISM_2*.txt
 
 # The tool's own working folders, if this repo root is ever pointed at a
 # real MediaRefresh working directory instead of just holding the scripts
@@ -49,4 +51,6 @@ testkit/tst/
 testkit/tst_settings/
 testkit/tst_apps/
 testkit/tst_settings_profiles/
+testkit/tst_instr/
+testkit/tst_root/
 testkit/engine_only.ps1

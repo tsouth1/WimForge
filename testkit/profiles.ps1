@@ -34,7 +34,7 @@ Check 'no BOM in the files' ([System.IO.File]::ReadAllBytes((Join-Path $dir 'Win
 Write-Host "`n=== P3 a new OS by file only; a deleted built-in comes back on Reload; .disabled switches one off; edits apply ==="
 $s25 = [ordered]@{ schemaVersion=1; name='Windows Server 2025'; sortOrder=60; folder='Windows_Server_2025'; serviceAllIndexes=$true; lpPattern='Microsoft-Windows-Server-Language-Pack_x64_{0}.cab'; endOfSupport='2034-11-14' }
 [System.IO.File]::WriteAllText((Join-Path $dir 'Windows_Server_2025.json'), ($s25 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
-# Hand edits in the 2019 file, then the file is deleted: Reload writes a fresh built-in copy (Terry, 2026-09-27)
+# Hand edits in the 2019 file, then the file is deleted: Reload writes a fresh built-in copy (2026-09-27)
 $e19 = Get-Content (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json') -Raw | ConvertFrom-Json; $e19.preferredIndex = 7
 [System.IO.File]::WriteAllText((Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'), ($e19 | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
 Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
@@ -248,7 +248,7 @@ $null = Import-OsProfiles -Directory $regenProf; $null = Save-OsSettings -Direct
 Remove-Item -Recurse -Force $regenProf; $null = Import-OsProfiles -Directory $regenProf
 Check 'regenerating the Profiles folder leaves the saved settings in place' ((@((Read-OsSettings -Directory $regenSet -Definition $kms -LanguageList $builtLangs).Languages) -join ',') -eq 'fr-fr')
 
-Write-Host "`n=== P12 colour schemes (General Settings tab, Terry 2026-09-27) ==="
+Write-Host "`n=== P12 colour schemes (General Settings tab, 2026-09-27) ==="
 $cs = Get-ColorSchemes
 Check 'five schemes, Default first, in the order given' ((@($cs.Keys) -join '|') -eq 'Default|Industrial Forge|Modern Sysadmin|Arcane Tech (Runic Teal)|Minimalist Forge')
 $roles0 = @($cs['Default'].Colors.Keys) -join ','
@@ -268,7 +268,7 @@ function Get-Contrast([string]$A, [string]$B) {
     $lum = { param($h) $c = @(1, 3, 5 | ForEach-Object { $v = [Convert]::ToInt32($h.Substring($_, 2), 16) / 255.0; if ($v -le 0.03928) { $v / 12.92 } else { [Math]::Pow(($v + 0.055) / 1.055, 2.4) } }); 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] }
     $x = & $lum $A; $y = & $lum $B; ([Math]::Max($x, $y) + 0.05) / ([Math]::Min($x, $y) + 0.05)
 }
-# Colours chosen for readability (not the log colours Terry specified) must reach 4.3:1 against what they sit on
+# Colours chosen for readability (not the log colours the operator specified) must reach 4.3:1 against what they sit on
 $pairs = 'Text/WindowBg', 'Text/PanelBg', 'Text/ControlBg', 'Text/CodeBg', 'SubtleText/PanelBg', 'SubtleText/WindowBg', 'ButtonText/ButtonBg', 'AccentText/Accent', 'SelectionText/SelectionBg', 'TabSelectedText/PanelBg', 'Text/Hover', 'WarnText/PanelBg', 'InfoText/PanelBg', 'LogText/LogBg', 'LogWarn/LogBg'
 $low = foreach ($n in $cs.Keys) { foreach ($p in $pairs) { $f, $b = $p -split '/'; $r = Get-Contrast $cs[$n].Colors[$f] $cs[$n].Colors[$b]; if ($r -lt 4.3) { "$n $p {0:N1}" -f $r } } }
 Check 'every scheme keeps text readable (contrast 4.3:1 or better)' (@($low).Count -eq 0) ($low -join '; ')
@@ -370,7 +370,7 @@ Check 'SCCM site server and target are saved in General.json without losing the 
 $os15 = Read-OsSettings -Directory $gs15 -Definition $kms -LanguageList $builtLangs
 Check 'per OS: content source, package type, a hand-typed image name and Import after the run are saved' ($os15.Sccm.ContentSource -eq 'F:\Sources\OSD' -and $os15.Sccm.PackageType -eq 'Upgrade' -and $os15.Sccm.ImageName -eq 'KMS custom' -and $os15.Options['SccmAutoImport'] -eq $true)
 
-Write-Host "`n=== P16 run config files for the command line (Terry, 2026-09-28) ==="
+Write-Host "`n=== P16 run config files for the command line (2026-09-28) ==="
 $defs16 = Import-OsProfiles
 $cf16 = Join-Path $tmp 'cfg16\Configs\kms_run.json'
 [void](Save-RunConfig -File $cf16 -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Root 'F:\mediaRefresh' -Options @{ Verify = $true; BuildMedia = $true; BuildIso = $true; AutoDownload = $true; SccmAutoImport = $true } -Languages @('DE-DE', 'ja-jp') -RemoveApps @('Microsoft.BingNews') -Sccm @{ siteServer = 'cm01.contoso.com'; target = 'dp01.contoso.com'; contentSource = 'F:\Sources\OSD' })
@@ -404,5 +404,20 @@ if (Test-Path $guide13) {
     $left13 = @($gb13 | Where-Object { $_.Type -ne 'Code' } | ForEach-Object { Split-MarkdownInline $_.Text } | Where-Object { $_.Kind -eq 'Text' -and ($_.Text -match '\*\*|`') } | ForEach-Object { $_.Text })
     Check 'the real INSTRUCTIONS.md parses with no stray ** or ` left in the text' ($gb13.Count -gt 50 -and @($gb13 | Where-Object { $_.Type -eq 'Heading' -and $_.Text -eq 'Where the logs are' }).Count -eq 1 -and $left13.Count -eq 0) ($left13 -join ' || ')
 } else { Write-Host 'SKIP  INSTRUCTIONS.md not found next to the script' }
+
+Write-Host "`n=== P17 portable: no fixed drive or folder, no personal or site names in the shipped files (2026-09-28) ==="
+$rootDir17 = Split-Path $PSScriptRoot -Parent
+Check 'the default repository root is the script''s own folder (a drive root keeps its backslash)' ((Get-DefaultRoot -ScriptDir 'E:\Tools\WimForge\') -eq 'E:\Tools\WimForge' -and (Get-DefaultRoot -ScriptDir 'E:\') -eq 'E:\' -and (Get-DefaultRoot -ScriptDir '') -eq (Get-Location -PSProvider FileSystem).Path)
+$main17 = [System.IO.File]::ReadAllText((Join-Path $rootDir17 'MediaRefresh_v2.4.ps1'))
+Check 'the window has no hard-coded repository root; it is filled from the saved settings or the script folder' ($main17 -match 'x:Name="RootText" Grid\.Row="0" Grid\.Column="1" Text=""' -and $main17 -match 'Get-DefaultRoot -ScriptDir \$PSScriptRoot')
+$shipped17 = @('MediaRefresh_v2.4.ps1', 'INSTRUCTIONS.md', 'README.md', 'TODO.md', 'Languages.json') | ForEach-Object { Join-Path $rootDir17 $_ } | Where-Object { Test-Path $_ }
+$drive17 = @($shipped17 | ForEach-Object { Select-String -LiteralPath $_ -Pattern '(?i)\b[a-z]:\\mediarefresh' } | ForEach-Object { "$($_.Filename):$($_.LineNumber)" })
+Check 'no file names a fixed X:\mediaRefresh folder' ($drive17.Count -eq 0) ($drive17 -join ', ')
+$d17 = Join-Path $PWD 'tst_root'; if (Test-Path $d17) { Remove-Item $d17 -Recurse -Force }
+New-Item -ItemType Directory -Force (Join-Path $d17 'a'), (Join-Path $d17 'b') | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $d17 'b\Instructions.MD'), '# b')
+Check 'Find-InstructionsFile: first folder that has it, any letter case; $null when none has it' ((Find-InstructionsFile -Folders @((Join-Path $d17 'a'), '', (Join-Path $d17 'b'))) -eq (Join-Path $d17 'b\Instructions.MD') -and $null -eq (Find-InstructionsFile -Folders @((Join-Path $d17 'a'), (Join-Path $d17 'nope'))))
+$st17a = Get-FileStamp (Join-Path $d17 'b\Instructions.MD'); [System.IO.File]::WriteAllText((Join-Path $d17 'b\Instructions.MD'), '# b changed')
+Check 'Get-FileStamp changes when the file changes, and is "missing" for no file' ($st17a -ne (Get-FileStamp (Join-Path $d17 'b\Instructions.MD')) -and (Get-FileStamp '') -eq 'missing' -and (Get-FileStamp (Join-Path $d17 'nope.md')) -eq 'missing')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

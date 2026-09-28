@@ -146,7 +146,7 @@ if ($wpf) {
     Check 'WPF SCCM tab: the latest run line says what would be imported, and that a FAILED run will not be' ($none12 -like 'No finished run yet*' -and $script:SccmLastRun.Text -like 'Latest run: build 10.0.19044.6456, validation gate FAILED*will not be imported.')
     Remove-Item $saved12 -Force -ErrorAction SilentlyContinue
 
-    # Run config files (Terry, 2026-09-28): the engine's defaults must equal the window's, and the window saves what it shows
+    # Run config files (2026-09-28): the engine's defaults must equal the window's, and the window saves what it shows
     $diff13 = @($script:SettingOptionNames | Where-Object { [bool]$script:OptionDefaults[$_] -ne [bool]$script:DefaultChecks[$_] })
     Check 'a config''s default for every option equals the window''s own default tick' ($diff13.Count -eq 0 -and @($script:OptionDefaults.Keys).Count -eq @($script:SettingOptionNames).Count) ($diff13 -join ',')
     $menu13 = $win.FindName('SaveRunConfigItem')
@@ -160,7 +160,7 @@ if ($wpf) {
     $rc13 = Read-RunConfig -File $rcFile13 -Definitions $script:OsDefinitions -LanguageList $script:LanguageOptions
     Check 'WPF: Save run config writes exactly what the window shows, and it reads back cleanly' ($rc13.OsName -eq 'Windows 10 Enterprise LTSC 2021 (KMS)' -and $rc13.Root -eq $root11 -and $rc13.Options['NetFx3'] -and $rc13.Options['BuildMedia'] -and (@($rc13.Languages) -join ',') -eq 'fr-fr' -and $rc13.Sccm['siteServer'] -eq 'cm02.contoso.com')
 
-    # Patch boot.wim is tied to the media (Terry, 2026-09-27): the real window's checkbox, the real handler wiring
+    # Patch boot.wim is tied to the media (2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
     Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
     $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $false; Update-BootOption
@@ -184,8 +184,9 @@ if ($wpf) {
     $tabNames = @(($win.FindName('LogBox').Parent.Parent.Items) | ForEach-Object { [string]$_.Header })
     Check 'the Instructions tab sits between Log and General Settings, with Reload and the file path' (($tabNames -join ',') -eq 'Source and Targets,Updates and Features,Languages,Apps,SCCM,Log,Instructions,General Settings' -and $null -ne $win.FindName('ReloadInstructionsButton') -and $win.FindName('InstructionsViewer') -is [System.Windows.Controls.FlowDocumentScrollViewer]) ($tabNames -join ',')
     $script:InstructionsViewer = $win.FindName('InstructionsViewer'); $script:InstructionsSource = $win.FindName('InstructionsSource')
-    $script:InstructionsPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md'
-    if (Test-Path $script:InstructionsPath) {
+    $savedProfilesDir = $script:ProfilesDir; $savedRootText = $script:RootText.Text
+    $script:ProfilesDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'Profiles'; $script:RootText.Text = ''
+    if (Test-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'INSTRUCTIONS.md')) {
         Update-InstructionsTab
         $doc = $script:InstructionsViewer.Document
         $heads = @($doc.Blocks | Where-Object { $_ -is [System.Windows.Documents.Paragraph] -and $_.FontWeight -eq [System.Windows.FontWeights]::SemiBold } | ForEach-Object { (New-Object System.Windows.Documents.TextRange($_.ContentStart, $_.ContentEnd)).Text })
@@ -196,10 +197,24 @@ if ($wpf) {
         Check 'WPF: the real guide renders: headings, bullet lists, nested lists and the numbered order of work' ($heads -contains 'WimForge - operator guide' -and $heads -contains 'Where the logs are' -and $lists.Count -gt 10 -and $nested.Count -ge 2 -and $deeper.Count -ge 1 -and $numbered.Count -ge 1 -and @($numbered[0].ListItems).Count -eq 6) "headings $($heads.Count), lists $($lists.Count), nested $($nested.Count), numbered $($numbered.Count)"
         Check 'WPF: the path line shows which file was read' ($script:InstructionsSource.Text -like "*INSTRUCTIONS.md   (read at *")
     } else { Write-Host 'SKIP  real INSTRUCTIONS.md rendering (file not found)' }
-    $script:InstructionsPath = Join-Path $PWD 'no_such_INSTRUCTIONS.md'
+    $noScript = Join-Path $PWD 'tst_instr\app'; $instrRoot = Join-Path $PWD 'tst_instr\root'
+    if (Test-Path (Join-Path $PWD 'tst_instr')) { Remove-Item (Join-Path $PWD 'tst_instr') -Recurse -Force }
+    New-Item -ItemType Directory -Force $noScript, $instrRoot | Out-Null
+    $script:ProfilesDir = Join-Path $noScript 'Profiles'; $script:RootText.Text = $instrRoot
     Update-InstructionsTab
     $missingText = (New-Object System.Windows.Documents.TextRange($script:InstructionsViewer.Document.ContentStart, $script:InstructionsViewer.Document.ContentEnd)).Text
-    Check 'WPF: a missing INSTRUCTIONS.md is shown as a message, not an error' ($missingText -match 'INSTRUCTIONS\.md was not found next to the script' -and $script:InstructionsSource.Text -like '*(not found)')
+    Check 'WPF: a missing INSTRUCTIONS.md is shown as a message naming both folders searched, not an error' ($missingText -match 'INSTRUCTIONS\.md was not found in ' -and $missingText -match [regex]::Escape($noScript) -and $missingText -match [regex]::Escape($instrRoot) -and $script:InstructionsSource.Text -like 'INSTRUCTIONS.md not found in *')
+    # the file appears while the window is open (in the root folder, lower-case extension): opening the tab picks it up
+    [System.IO.File]::WriteAllText((Join-Path $instrRoot 'instructions.MD'), "# Copied in later`n`nText.")
+    Update-InstructionsTab -IfChanged
+    $laterText = (New-Object System.Windows.Documents.TextRange($script:InstructionsViewer.Document.ContentStart, $script:InstructionsViewer.Document.ContentEnd)).Text
+    Check 'WPF: a file copied in later is picked up when the tab is opened (root folder, any letter case)' ($laterText -match 'Copied in later' -and $script:InstructionsSource.Text -like "*instructions.MD   (read at *")
+    $script:InstructionsViewer.Document = New-InstructionsDocument '# placeholder'
+    Update-InstructionsTab -IfChanged
+    $sameText = (New-Object System.Windows.Documents.TextRange($script:InstructionsViewer.Document.ContentStart, $script:InstructionsViewer.Document.ContentEnd)).Text
+    Check 'WPF: opening the tab again with the file unchanged does not re-read it' ($sameText -match 'placeholder')
+    Check 'the Instructions tab is named, so opening it can re-read the file' ($null -ne $win.FindName('InstructionsTab') -and $src -match 'InstructionsTab\.AddHandler\(\[System\.Windows\.Controls\.Primitives\.Selector\]::SelectedEvent')
+    $script:ProfilesDir = $savedProfilesDir; $script:RootText.Text = $savedRootText
 
     # Colour schemes (General Settings tab) on the real window
     $script:ThemedStyleXaml = [regex]::Match($src, "(?s)\`$script:ThemedStyleXaml = @'\r?\n(.*?)\r?\n'@").Groups[1].Value

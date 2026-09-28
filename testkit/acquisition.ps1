@@ -17,7 +17,7 @@ $script:CatalogResults = @{}
 # The engine sends the search with a leading space (see Invoke-CatalogUpdateSearch); the catalog trims it, so the mock does too.
 function Get-MSCatalogUpdate { [CmdletBinding()] param([string]$Search) $Search = $Search.Trim(); Note "CatalogSearch $Search"; return @($script:CatalogResults[$Search]) }
 $script:CatalogFileNames = @{}
-# -DownloadAll is a real parameter of the installed MSCatalogLTS (confirmed on Terry's machine, 2026-09-23). A title
+# -DownloadAll is a real parameter of the installed MSCatalogLTS (confirmed on the build machine, 2026-09-23). A title
 # mapped to an array of names mimics a multi-file catalog entry (the combined .NET CU downloads two .msu files).
 # Like the real 2.1.0.1 (read from its source, 2026-09-24), an existing file is skipped unless -Force is passed.
 function Save-MSCatalogUpdate { [CmdletBinding()] param($Update, [string]$Destination, [switch]$Confirm, [switch]$DownloadAll, [switch]$Force)
@@ -83,7 +83,7 @@ $null = Invoke-CatalogUpdateSearch -Search 'probe-search' -Rule $probeRule
 Check 'search still runs against a mock lacking Architecture/ExcludePreview params, without erroring' ((@($script:Calls -match '^CatalogSearch probe-search')).Count -eq 1)
 
 Write-Host "`n=== A2c Invoke-CatalogUpdateSearch against the real MSCatalogLTS 2.1.0.1 parameter surface ==="
-# The installed 2.1.0.1 (Terry's PC, 2026-09-24) hides Dynamic Updates without -IncludeDynamic, reads one page without
+# The installed 2.1.0.1 (the build PC, 2026-09-24) hides Dynamic Updates without -IncludeDynamic, reads one page without
 # -AllPages, has -IncludePreview instead of -ExcludePreview, and rewrites searches starting "Dynamic Update for ...".
 $simpleCatalogMock = ${function:Get-MSCatalogUpdate}
 function Get-MSCatalogUpdate { [CmdletBinding()] param([string]$Search, [string]$Architecture, [switch]$IncludeDynamic, [switch]$AllPages, [switch]$IncludePreview)
@@ -187,7 +187,7 @@ Check 'neither current file pruned the other (both KBs present in Downloaded)' (
 # Capture log lines for A7 as well as printing them (mocks.ps1's Write-Log only prints).
 $script:LogLines = [System.Collections.Generic.List[string]]::new()
 function Write-Log { param($Message, $Level = 'INFO') $script:LogLines.Add("[$Level] $Message"); Write-Host ("   [{0}] {1}" -f $Level, $Message) }
-Write-Host "`n=== A7 Real catalog shapes (Terry's LTSC 2019 test, 2026-09-23): architecture from the title, title filters, multi-file entries, not-applicable .NET parts ==="
+Write-Host "`n=== A7 Real catalog shapes (the operator's LTSC 2019 test, 2026-09-23): architecture from the title, title filters, multi-file entries, not-applicable .NET parts ==="
 # Real Get-MSCatalogUpdate results have Title/Products/Classification/LastUpdated/Version/Size/SizeInBytes/Guid/FileNames -
 # no Architecture property. The x86 combined .NET CU entry names no architecture in its title; the x64 one ends "for x64".
 $t86 = '2026-09 Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version 1809 (KB5126144)'
@@ -217,7 +217,7 @@ $b21 = ConvertTo-OsProfile -Data (Get-BuiltInProfileData | Where-Object { $_.fol
 $lcu21 = [pscustomobject]@{ architecture = 'x64'; excludePreview = $true; buildFilter = $b21.CatalogSearch['LCU'].buildFilter }
 Check 'built-in 21H2 LCU filter rejects Windows 11 21H2 and accepts Windows 10 21H2' ((Test-CatalogCandidate -Result (Real-Result '2026-09 Cumulative Update for Windows 10 Version 21H2 for x64-based Systems (KB5126200)') -Rule $lcu21) -and -not (Test-CatalogCandidate -Result (Real-Result '2026-09 Cumulative Update for Windows 11 Version 21H2 for x64-based Systems (KB5126201)') -Rule $lcu21))
 
-# End to end: the x86 entry is listed first (as on Terry's machine), the x64 entry downloads two files.
+# End to end: the x86 entry is listed first (as on the build machine), the x64 entry downloads two files.
 Reset-Test
 $realDef = ConvertTo-OsProfile -Data ([ordered]@{
     name = 'TestOS3'; folder = 'TestOS3'; editionRegex = 'a'; preferredIndex = 1
@@ -235,7 +235,7 @@ $net3 = @(Get-ChildItem (Join-Path $paths3.Patches 'NETCU') -File | Where-Object
 Check 'both files of the entry kept (4.7.2 and 4.8 parts); the previous month''s file pruned' (($net3 -join ',') -eq 'windows10.0-kb5126043-x64.msu,windows10.0-kb5126048-x64-ndp48.msu')
 Check 'Downloaded lists each file under its own KB, with the catalog entry KB alongside' ((@($resReal.Downloaded | ForEach-Object { $_.Kb } | Sort-Object) -join ',') -eq 'KB5126043,KB5126048' -and @($resReal.Downloaded | Where-Object { $_.EntryKb -eq 'KB5126144' }).Count -eq 2)
 
-# Safe OS DU vs Setup DU on 1809: same title shape, told apart only by Products (Terry, 2026-09-23: the Safe OS DU is
+# Safe OS DU vs Setup DU on 1809: same title shape, told apart only by Products (2026-09-23: the Safe OS DU is
 # '2026-08 Dynamic Update for Windows 10 Version 1809 for x64-based Systems (KB5120247)', products 'Windows 10 and
 # later Dynamic Update, Windows Safe OS Dynamic Update'). The Setup DU's Products value is assumed, not yet seen.
 $tSafe = '2026-08 Dynamic Update for Windows 10 Version 1809 for x64-based Systems (KB5120247)'
@@ -290,7 +290,7 @@ foreach ($k in $cases) {
     Check "built-in $($k.f) $($k.c): accepts the real entry, rejects its $(@($k.no).Count) neighbour(s)" ($okPass -and $noPass.Count -eq 0) "accepted=$okPass wronglyAccepted=$(($noPass | ForEach-Object { $_.Title }) -join ' | ')"
 }
 
-# A class whose search returns nothing must not stop the run (Terry's real LTSC 2019 dry run: the Safe OS DU search
+# A class whose search returns nothing must not stop the run (the operator's real LTSC 2019 dry run: the Safe OS DU search
 # returned 0 results and the run died on '.Count' under StrictMode); later classes still run and it is reported.
 Reset-Test
 $zeroDef = ConvertTo-OsProfile -Data ([ordered]@{
@@ -326,7 +326,7 @@ $threw = $false; try { Add-Packages -MountPath (Join-Path $base 'mnt') -Packages
 Check '-SkipNotApplicable: the not-applicable 4.8 part is skipped with a WARN, the 4.7.2 part still applied' (-not $threw -and ($script:Calls -match '^AddPkg windows10.0-kb5126043-x64.msu') -and ($script:LogLines -match 'Skipped \.NET CU windows10.0-kb5126048-x64-ndp48.msu: not applicable'))
 $threw = $false; try { Add-Packages -MountPath (Join-Path $base 'mnt') -Packages $pkgs -Target 'install.wim index 1' -Label 'LCU (final)' } catch { $threw = $true }
 Check 'without -SkipNotApplicable (every other class) a not-applicable package still fails the run' $threw
-# What real DISM did on Terry's LTSC 2019 run (2026-09-25): the .MSU returned success, but CBS logged 0x800f081e and
+# What real DISM did on the LTSC 2019 run (2026-09-25): the .MSU returned success, but CBS logged 0x800f081e and
 # installed nothing. The package list is unchanged, so the 4.8 part must be reported as skipped, not added.
 function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath, $LogPath)
     Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)")
@@ -340,7 +340,7 @@ Reset-Test; $script:LogLines.Clear()
 $null = Add-Packages -MountPath (Join-Path $base 'mnt') -Packages @($pkgs[1]) -Target 'install.wim index 1' -Label 'LCU (final)'
 Check 'classes without -SkipNotApplicable are not compared (no extra package-list reads, no skip WARN)' (-not ($script:LogLines -match 'Skipped'))
 
-Write-Host "`n=== A9 each KB named once in the confirm dialog / log, and each pick downloaded once (Terry, 2026-09-24) ==="
+Write-Host "`n=== A9 each KB named once in the confirm dialog / log, and each pick downloaded once (2026-09-24) ==="
 Check 'Format-CatalogPick: a title that already ends in its KB is left as it is' ((Format-CatalogPick -Title $t64 -Kb 'KB5126144') -eq $t64)
 Check 'Format-CatalogPick: a title without the KB gets it appended' ((Format-CatalogPick -Title 'Some update' -Kb 'KB1234567') -eq 'Some update (KB1234567)')
 Check 'Format-CatalogPick: no KB leaves the title alone' ((Format-CatalogPick -Title 'Some update' -Kb '') -eq 'Some update')
@@ -363,7 +363,7 @@ Reset-Test; Get-ChildItem (Join-Path $paths3.Patches 'NETCU') -File | Remove-Ite
 $null = Invoke-PatchAcquisition -Options ([pscustomobject]@{ OsName = 'TestOS3'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $false; NetCU = $true; SafeOS = $false; SetupDU = $false }) -Definition $realDef -Paths $paths3
 Check 'the confirmed real run downloads the picked entry exactly once' (@($script:Calls -match '^CatalogSave').Count -eq 1)
 
-Write-Host "`n=== A10 a pick whose file is already in PATCHES is never pruned (Terry's Win11 24H2 run, 2026-09-24) ==="
+Write-Host "`n=== A10 a pick whose file is already in PATCHES is never pruned (the operator's Win11 24H2 run, 2026-09-24) ==="
 # The real run: PATCHES\LCU already held windows11.0-kb5129195-x64.msu; the module skipped it (no -Force), only the
 # checkpoint was new, and the pruning deleted the LCU it had just picked.
 $tW11 = '2026-09 Cumulative Update for Windows 11, version 24H2 for x64-based Systems (KB5129195) (26100.9457)'
@@ -400,7 +400,7 @@ $dupDir = Join-Path $base 'dupcache'; New-File (Join-Path $dupDir 'windows11.0-k
 $null = Update-PatchCache -Folder $dupDir -KeepFiles @((Join-Path $dupDir 'windows11.0-kb5126052-x64-ndp481.msu')) -KeepKbs @('KB5126052')
 Check 'a same-KB older copy is removed when this run saved that KB' ((@(Get-ChildItem $dupDir -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name) -join ',') -eq 'windows11.0-kb5126052-x64-ndp481.msu')
 
-Write-Host "`n=== A12 download only what is missing (TODO step 14, Terry 2026-09-27) ==="
+Write-Host "`n=== A12 download only what is missing (TODO step 14, 2026-09-27) ==="
 # The Win11 LCU entry downloads two files (the LCU and its checkpoint), named after other KBs than nothing the title
 # tells beforehand - real results have an empty FileNames - so the record written at download time is what knows.
 Get-ChildItem $lcu4 -File -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test; $script:LogLines.Clear()

@@ -97,7 +97,7 @@ $r = Get-IsoRoleMap @($os,$fod,$lpWithFeat)
 Check 'KMS 2021 (LangPackAll that also carries language features): no error, both used as FOD sources' (($r.LpDrive -eq $lpWithFeat.Drive) -and (@($r.FodDrives).Count -eq 2))
 $r = Get-IsoRoleMap @($os,$lpWithFeat)
 Check 'IoT 2021 (OS + LangPackAll that carries language features): one ISO fills LP and FOD' (($r.LpDrive -eq $lpWithFeat.Drive) -and ($r.FodDrives[0] -eq $lpWithFeat.Drive))
-# Terry's LTSC 2019 folder (2026-09-25): OS + LangPackAll + FOD part 1 + FOD part 2; part 2 has no language features
+# the operator's LTSC 2019 folder (2026-09-25): OS + LangPackAll + FOD part 1 + FOD part 2; part 2 has no language features
 # but is still a FOD ISO (DISM's catalogue under metadata, package-identity cabs) - it was reported as "not recognised".
 $fod2 = Make-Iso 'fod1809p2' @('metadata/DesktopTargetCompDB_Neutral.xml.cab', 'Microsoft-Windows-Hyper-V-Server-FoD-Package~31bf3856ad364e35~amd64~~.cab')
 $fod2b = Make-Iso 'fodcabsonly' @('Microsoft-Windows-SNMP-Client-Package~31bf3856ad364e35~amd64~~.cab')
@@ -107,7 +107,7 @@ Check 'a FOD ISO is recognised by its package-identity cabs alone' ((Get-IsoRole
 Check 'the Language Pack ISO is still not a FOD ISO, and a junk ISO is still unrecognised' ((@((Get-IsoRoleMap @($os,$lp)).FodDrives).Count -eq 0) -and (@((Get-IsoRoleMap @($os,$junk)).Unclassified).Count -eq 1))
 $r = Get-IsoRoleMap @($os,$svr,$lp)
 Check 'two LP candidates: the LP-only ISO wins over the combined one' ($r.LpDrive -eq $lp.Drive)
-# Languages go into install.wim only; WinRE and boot.wim stay English-only (Terry, 2026-09-26)
+# Languages go into install.wim only; WinRE and boot.wim stay English-only (2026-09-26)
 Check 'no WinPE language step is left (WinRE and boot.wim stay English-only)' (-not (Get-Command Add-WinPeLanguages -ErrorAction SilentlyContinue) -and -not (Get-Command Find-WinPeOcRoot -ErrorAction SilentlyContinue))
 Check 'Service-WinRe and Service-BootWim no longer take languages' (-not (Get-Command Service-WinRe).Parameters.ContainsKey('Languages') -and -not (Get-Command Service-BootWim).Parameters.ContainsKey('Languages'))
 

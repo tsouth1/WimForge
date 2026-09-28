@@ -22,7 +22,7 @@
                (Win11 24H2+/Server 2025) are looked up from a profile-supplied KB list, not derived automatically -
                open point, see TODO.md step 5. Catalog search strings shipped in the built-in profiles are
                best-effort and need spot-checking against catalog.update.microsoft.com.
-      * Fixed (after Terry's real-catalog test, LTSC 2019): catalog results carry no Architecture property and the
+      * Fixed (after the operator's real-catalog test, LTSC 2019): catalog results carry no Architecture property and the
                catalog search matches words loosely, so an x86 entry could be picked for an x64 profile. The
                architecture is now checked against the title (and each downloaded file name) instead.
       * Fixed: a catalog entry can download several files (the combined .NET CU "3.5, 4.7.2 and 4.8" for 1809,
@@ -31,7 +31,7 @@
       * Fixed: a .NET CU file that does not apply to the image (the 4.8 part on an image without .NET 4.8) is
                skipped with a WARN instead of failing the whole servicing run.
       * Fixed: a catalog search with no match stopped the whole download with "The property 'Count' cannot be found"
-               (Terry's first real dry run, LTSC 2019, Safe OS DU search); it is now reported as a skipped class.
+               (the operator's first real dry run, LTSC 2019, Safe OS DU search); it is now reported as a skipped class.
       * Added: catalogSearch rules take productFilter / productExclude (regular expressions against the catalog
                Products field). The 1809 Safe OS DU is titled plain "Dynamic Update for Windows 10 Version 1809" and is
                only marked as Safe OS by its Products entry; the 1809 SafeOS/SetupDU rules now use that.
@@ -45,7 +45,7 @@
                Win11 24H2 gained a .NET CU rule.
       * Fixed: the "confirm download" dialog and the "selected" log line listed every KB twice (the catalog title
                already ends in it). Display only - each pick was always downloaded once.
-      * Fixed: a real download could delete the patch it had just picked (Terry's Win11 24H2 run removed the LCU): the
+      * Fixed: a real download could delete the patch it had just picked (the operator's Win11 24H2 run removed the LCU): the
                module skips a file that already exists unless -Force is passed, and the pruning kept only files new or
                re-written in the run. -Force is now passed, and pruning never removes a file whose KB was picked in the
                run unless the run also saved a file with that KB.
@@ -56,22 +56,22 @@
                is installed and the checkpoint stays in the same folder for DISM to apply where needed - Microsoft's
                method. Before, every file was added, so the checkpoint was installed directly into WinRE, install.wim
                and WinPE. A single LCU file is installed as before.
-      * Fixed (Terry's 2026-09-25 Win11 change log): Section A rows show the time each step succeeded, not the time
+      * Fixed (the operator's 2026-09-25 Win11 change log): Section A rows show the time each step succeeded, not the time
                the log was written; the Setup DU expanded into the media is listed; Windows' housekeeping folders under
                WindowsApps ("Deleted", "Merged") are no longer listed as staged appx packages. [string[]] parameters that
                are counted default to an empty array (Windows PowerShell 5.1 throws on @($x).Count when one is unbound).
-      * Fixed (Terry's 2026-09-25 LTSC 2019 run): a .NET CU part that DISM finds not applicable while still returning
+      * Fixed (the operator's 2026-09-25 LTSC 2019 run): a .NET CU part that DISM finds not applicable while still returning
                success for the .MSU (the 4.8 part on a 4.7.2 image) was logged and recorded as added; the package list
                is now compared before and after, and an unchanged list is logged as a WARN and recorded as skipped.
       * Fixed: a Features on Demand ISO without language features (1809 "FOD part 2") is recognised as an extra FOD
                source by its metadata\*CompDB* catalogue or package-identity cabs, instead of "not recognised".
-      * Changed (Terry, 2026-09-26): languages go into install.wim only. WinRE and boot.wim stay English-only - the
+      * Changed (2026-09-26): languages go into install.wim only. WinRE and boot.wim stay English-only - the
                WinPE language step (lp.cab, WinPE component, font and speech cabs, lang.ini) is removed; WinRE and
                boot.wim are still patched.
-      * Changed (Terry, 2026-09-26): the Languages tab lists Profiles\Languages.json (created from the built-in copy
-               of Terry's list when missing; a bad file falls back to the built-in list) as "full name - code"; runs,
+      * Changed (2026-09-26): the Languages tab lists Profiles\Languages.json (created from the built-in copy
+               of the operator's list when missing; a bad file falls back to the built-in list) as "full name - code"; runs,
                saved choices and profile defaults use the code. A profile default not on the list is logged, not selected.
-      * Added (Terry, 2026-09-27): "Save settings" and "Reset to defaults" buttons. The selected OS's checkboxes and
+      * Added (2026-09-27): "Save settings" and "Reset to defaults" buttons. The selected OS's checkboxes and
                languages are saved to Settings\<profile folder>.json (repository root to Settings\General.json), beside
                Profiles\, and applied whenever that OS is selected; an OS without saved settings gets the defaults.
     Version 2.2.0 (draft - test against non-production images first).
@@ -348,7 +348,7 @@ function Import-OsProfiles {
         try {
             # Languages.json (the Languages tab list, step 10e) lives in the same folder but is not an OS profile.
             $profileFiles = { @(Get-ChildItem -LiteralPath $Directory -Filter '*.json' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne $script:LanguagesFileName } | Sort-Object Name) }
-            # Every start and every Reload: a built-in profile whose file is missing is written again (Terry, 2026-09-27),
+            # Every start and every Reload: a built-in profile whose file is missing is written again (2026-09-27),
             # so deleting one file and pressing Reload gives a fresh copy of that OS. Existing files are never changed;
             # an OS is switched off by renaming its file to <folder>.json.disabled. The OS names already defined by the
             # existing files are read first, so an OS kept under another file name is not duplicated.
@@ -377,7 +377,7 @@ $script:OsDefinitions = Import-OsProfiles   # built-ins until a Profiles folder 
 
 # ---------- language list (Languages tab, TODO step 10e) ----------
 function Get-BuiltInLanguageData {
-    # The languages offered on the Languages tab: Terry's Languages.json (repo root, 2026-09-26). Written to
+    # The languages offered on the Languages tab: The operator's Languages.json (repo root, 2026-09-26). Written to
     # Profiles\Languages.json when that file is missing; the file then wins, so the list is edited there.
     return @(
         @{ language = 'Catalan (Spain)'; code = 'ca-es' }, @{ language = 'Czech (Czech Republic)'; code = 'cs-cz' },
@@ -534,9 +534,9 @@ function Read-ColorSchemeSetting {
     catch { Write-Log "Saved settings $file could not be used ($($_.Exception.Message))." 'WARN'; return '' }
 }
 function Get-ColorSchemes {
-    # The colour schemes on the General Settings tab (Terry, 2026-09-27). 'Default' is the original look: the window keeps
+    # The colour schemes on the General Settings tab (2026-09-27). 'Default' is the original look: the window keeps
     # the standard Windows controls and only these colours are applied. The other schemes restyle every control.
-    # Palette = the colours as Terry gave them (shown as swatches); Colors = the colour used for each part of the window.
+    # Palette = the colours as the operator gave them (shown as swatches); Colors = the colour used for each part of the window.
     # Colours not in a palette (light text on dark backgrounds, warning / error log colours where none was given) are
     # chosen to stay readable against that scheme's backgrounds.
     $s = [ordered]@{}
@@ -571,6 +571,23 @@ function Get-ColorSchemes {
             Hover = '#3A3A3A'; SelectionBg = '#D7263D'; SelectionText = '#F2F2F2'; InfoText = '#B8B8B8'; WarnText = '#FF6B7A'; CodeBg = '#1C1C1C'
             LogBg = '#121212'; LogText = '#B8B8B8'; LogSuccess = '#B8B8B8'; LogWarn = '#F2F2F2'; LogError = '#D7263D' } }
     return $s
+}
+function Find-InstructionsFile {
+    # The first INSTRUCTIONS.md found in $Folders (in order; any letter case), or $null.
+    param([string[]]$Folders)
+    foreach ($f in @($Folders | Where-Object { $_ })) {
+        if (-not (Test-Path -LiteralPath $f -PathType Container)) { continue }
+        $hit = Get-ChildItem -LiteralPath $f -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'INSTRUCTIONS.md' } | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+function Get-FileStamp {
+    # Path, size and last-write time of a file, to tell whether it changed since it was last read; 'missing' for none.
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return 'missing' }
+    $i = Get-Item -LiteralPath $Path
+    return "$($i.FullName)|$($i.Length)|$($i.LastWriteTimeUtc.Ticks)"
 }
 function ConvertFrom-MarkdownBlocks {
     # The Markdown subset INSTRUCTIONS.md uses (TODO 10b), split into blocks for the Instructions tab: Heading (Level 1-6),
@@ -627,6 +644,12 @@ function Get-LogLineKind {
     if ($Line -match '^(\d{2}:\d{2}:\d{2} )?\[(WARN|CANCELLED)\]') { return 'Warn' }
     if ($Line -match '(?i)VALIDATION GATE: PASSED|PREFLIGHT OK|completed successfully|All \d+ language packs located|\bsaved to\b') { return 'Success' }
     return 'Normal'
+}
+function Get-DefaultRoot {
+    # The repository root when none is saved: the script's own folder (no fixed drive letter), else the current folder.
+    param([string]$ScriptDir)
+    if ($ScriptDir) { return $(if ($ScriptDir.Length -gt 3) { $ScriptDir.TrimEnd('\') } else { $ScriptDir }) }
+    return (Get-Location -PSProvider FileSystem).Path
 }
 function Read-GeneralSettings {
     # The saved repository root, or '' when there is none or the file is unusable (WARN).
@@ -872,9 +895,9 @@ function Test-PatchTuesday {
 }
 function Format-CatalogPick {
     # "<title> (<KB>)" for the dry-run dialog and log - but catalog titles already end in "(KBnnnnnnn)", so the KB is only
-    # added when the title does not contain it (Terry, 2026-09-24: every KB was listed twice).
+    # added when the title does not contain it (2026-09-24: every KB was listed twice).
     # The release date and classification follow in brackets, so an out-of-band release ("Updates", mid-month) is told
-    # apart from the Patch Tuesday one ("Security Updates") before anything is downloaded (Terry, 2026-09-24).
+    # apart from the Patch Tuesday one ("Security Updates") before anything is downloaded (2026-09-24).
     # -Release (LCU only) names Patch Tuesday vs out-of-band from the date: Microsoft classed the September 2026 Win11
     # out-of-band LCU "Security Updates", so the classification alone does not tell them apart.
     param([string]$Title, [string]$Kb, [datetime]$Date = [datetime]::MinValue, [string]$Classification = '', [switch]$Release)
@@ -977,7 +1000,7 @@ function Test-ArchMatch {
 function Test-CatalogCandidate {
     # Filters one Get-MSCatalogUpdate result against a resolved catalogSearch rule. Reads whatever property names the
     # installed module version actually exposes (via Get-ProfileValue, which is name-tolerant) instead of assuming one.
-    # Architecture: real MSCatalogLTS results have no Architecture property (confirmed on Terry's machine), and the
+    # Architecture: real MSCatalogLTS results have no Architecture property (confirmed on the build machine), and the
     # catalog search matches words loosely ("for x64" in the search still returns the x86 entry), so when the result
     # has no such property the title must name the wanted architecture - a title naming none is rejected too,
     # because that is exactly how the combined .NET CU's x86 entry looks. Set architecture to '' in the profile to
@@ -991,7 +1014,7 @@ function Test-CatalogCandidate {
     if ($Rule.buildFilter -and $title -notmatch $Rule.buildFilter) { return $false }
     # Products (a string such as "Windows 10, Windows 10 LTSB", or a list): some classes can only be told apart here.
     # The 1809 Safe OS DU is titled plain "Dynamic Update for Windows 10 Version 1809 ..." - its Products entry
-    # "Windows Safe OS Dynamic Update" is what marks it (Terry, 2026-09-23). Read by name so a rule object without
+    # "Windows Safe OS Dynamic Update" is what marks it (2026-09-23). Read by name so a rule object without
     # these keys still works under StrictMode.
     $productFilter = [string](Get-ProfileValue $Rule 'productFilter' '')
     $productExclude = [string](Get-ProfileValue $Rule 'productExclude' '')
@@ -1015,7 +1038,7 @@ function Invoke-CatalogUpdateSearch {
     # declares them (confirmed real parameters of the MSCatalogLTS/MSCatalog family, per its source on GitHub - but the
     # exact surface can still drift between module versions, so this checks rather than assumes). Test-CatalogCandidate
     # below still re-checks everything in PowerShell as a backstop, and is what applies buildFilter either way.
-    # Checked against the installed MSCatalogLTS 2.1.0.1 on Terry's PC (2026-09-24), which differs from the upstream source:
+    # Checked against the installed MSCatalogLTS 2.1.0.1 on the build PC (2026-09-24), which differs from the upstream source:
     # - every title containing "Dynamic" is dropped unless -IncludeDynamic is passed (Safe OS / Setup DU found nothing);
     # - only the first page (25 rows) is read unless -AllPages is passed (the 1809 Setup DU is well past page 1);
     # - previews are left out unless -IncludePreview is passed; there is no -ExcludePreview;
@@ -1050,7 +1073,7 @@ function Save-CatalogCandidate {
     # KB5126144) downloads windows10.0-kb5126043-x64.msu (3.5/4.7.2) and windows10.0-kb5126048-x64-ndp48.msu (4.8),
     # each named after its own component KB, not the entry's KB. The real cmdlet names files from the download URL,
     # so no renaming is needed. -DownloadAll / -AcceptMultiFileUpdates / -Confirm are passed only when the installed
-    # module declares them (-DownloadAll confirmed on Terry's machine); without them a multi-file entry would need
+    # module declares them (-DownloadAll confirmed on the build machine); without them a multi-file entry would need
     # interactive input, which a background run can never provide. Returns $null when no new or re-written file
     # appeared; the caller then logs a WARN and leaves the folder unpruned rather than guessing which file is current.
     param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][string]$Destination)
@@ -1063,7 +1086,7 @@ function Save-CatalogCandidate {
     if ($cmd.Parameters.ContainsKey('AcceptMultiFileUpdates')) { $params['AcceptMultiFileUpdates'] = $true }
     if ($cmd.Parameters.ContainsKey('Confirm')) { $params['Confirm'] = $false }
     # MSCatalogLTS 2.1.0.1 skips a file that already exists unless -Force is passed. A skipped file is neither new nor
-    # re-written, so it would not be recognised as this run's download and the pruning below would delete it (Terry's
+    # re-written, so it would not be recognised as this run's download and the pruning below would delete it (the operator's
     # Win11 24H2 run 2026-09-24 deleted the LCU it had just picked). Re-downloading is the price of always knowing.
     if ($cmd.Parameters.ContainsKey('Force')) { $params['Force'] = $true }
     Save-MSCatalogUpdate @params -ErrorAction Stop | Out-Null
@@ -1104,7 +1127,7 @@ function Update-PatchCache {
     }
     return $removed
 }
-# ---------- "download only what is missing" (TODO step 14, Terry 2026-09-27) ----------
+# ---------- "download only what is missing" (TODO step 14, 2026-09-27) ----------
 # Each PATCHES\<class> folder keeps _downloads.json: for every catalog entry downloaded there (by its Guid), the files it
 # produced and their sizes. A pick is "already present" when every one of those files is still there at that size (an
 # interrupted or replaced file counts as missing), or - when the catalog result lists its file names - when all of them
@@ -1230,7 +1253,7 @@ function Invoke-PatchAcquisition {
             Assert-NotCancelled
             $ruleObj = [pscustomobject]@{ search = $term; architecture = $ruleArch; excludePreview = $ruleExcludePreview; buildFilter = $ruleBuildFilter; productFilter = $ruleProductFilter; productExclude = $ruleProductExclude }
             # @() is required: a function returning an empty array hands the caller $null, and on Windows PowerShell 5.1 a
-            # single result comes back as a bare object - under StrictMode .Count on either throws (seen on Terry's first
+            # single result comes back as a bare object - under StrictMode .Count on either throws (seen on the first
             # real dry run, LTSC 2019, when the Safe OS DU search returned nothing).
             try { $candidates = @(Search-CatalogCandidates -Rule $ruleObj -Build $build) }
             catch { Write-Log "Catalog search failed for $class ('$term'): $($_.Exception.Message)" 'ERROR'; $skippedClasses.Add("$class (search failed for '$term': $($_.Exception.Message))"); continue }
@@ -1272,7 +1295,7 @@ function Invoke-PatchAcquisition {
                 $classFilesKept.Add($saved)
                 $savedSize = (Get-Item -LiteralPath $saved).Length
                 $entryFiles.Add([pscustomobject]@{ Name = $leaf; Size = [string]$savedSize })
-                # Every file is named in the log (Terry, 2026-09-28: single-file entries used to leave no trace of their file).
+                # Every file is named in the log (2026-09-28: single-file entries used to leave no trace of their file).
                 Write-Log ("{0}: downloaded {1} ({2:N1} MB) to PATCHES\{3}" -f $class, $leaf, ($savedSize / 1MB), $folders[$class])
             }
             # Remember what this entry produced, so the next Download patches can skip it (step 14).
@@ -1383,7 +1406,7 @@ function Add-Packages {
         Assert-NotCancelled
         Write-Log "Adding $Label $($pkg.FullName) to $Target"
         try {
-            # For a .MSU, DISM can decide "not applicable" (0x800f081e) internally and still return success - Terry's
+            # For a .MSU, DISM can decide "not applicable" (0x800f081e) internally and still return success - The operator's
             # LTSC 2019 run (2026-09-25) logged the .NET 4.8 part as added although DISM skipped it. So where skipping is
             # allowed, the image's package list is compared before and after: no change means nothing was installed.
             $before = if ($SkipNotApplicable) { Get-PackageFingerprint $MountPath } else { $null }
@@ -1529,7 +1552,7 @@ function Get-MsuServicingStack {
 }
 function Service-WinRe {
     # Extracts winre.wim from the currently mounted OS image, services it, and exports the result to $OutputPath.
-    # No languages: they go into install.wim only; WinRE and boot.wim stay English-only (Terry, 2026-09-26).
+    # No languages: they go into install.wim only; WinRE and boot.wim stay English-only (2026-09-26).
     param([string]$OsMount, [string]$WinReMount, [string]$Temp, [string]$OutputPath, [hashtable]$Packages)
     Assert-NotCancelled
     $dl = $script:DismLogArgs
@@ -1546,7 +1569,7 @@ function Service-WinRe {
         Add-Packages $WinReMount $Packages.SSU 'WinRE' -Label 'SSU' -IgnoreCombinedLcu7007e
         # WinRE gets only the servicing stack of the combined LCU. Where the .msu holds an SSU-*.cab, only that cab is added:
         # adding the whole .msu to an 1809 WinRE installs the RollupFix payload too and fails with 0x8007371b (missing
-        # qps-ploc files; Terry's LTSC 2019 IoT run, 2026-09-28). Without an SSU cab, the .msu is added as Microsoft documents.
+        # qps-ploc files; the operator's LTSC 2019 IoT run, 2026-09-28). Without an SSU cab, the .msu is added as Microsoft documents.
         foreach ($lcuPkg in @($Packages.LCU | Where-Object { $_ })) {
             $ssuCab = Get-MsuServicingStack -MsuPath $lcuPkg.FullName -Destination (Join-Path $Temp 'lcu_ssu')
             if ($ssuCab) { Add-Packages $WinReMount @($ssuCab) 'WinRE' -Label "servicing stack from $(Split-Path $lcuPkg.FullName -Leaf)" -IgnoreCombinedLcu7007e }
@@ -1566,7 +1589,7 @@ function Service-WinRe {
 }
 # ---------- provisioned apps (TODO steps 11 / 11b) ----------
 # The Apps tab lists the provisioned apps of the selected edition from Profiles\Apps\<profile folder>_Appx.json (11b,
-# Terry 2026-09-27): one scan per OS. The list is read from the image only by "Read apps from the ISO", or by a preflight
+# 2026-09-27): one scan per OS. The list is read from the image only by "Read apps from the ISO", or by a preflight
 # when there is no list yet or the OS ISO has changed (name, size or date - a new ISO may add or remove apps). A real run
 # never writes it. Ticked apps are kept by DisplayName (versions change with every ISO).
 $script:OldAppInventoryFileName = 'ProvisionedApps.json'   # step 11's place, <OS folder>\ProvisionedApps.json; moved once
@@ -1700,7 +1723,7 @@ function Service-InstallIndex {
         Mount-WindowsImage -ImagePath $ImagePath -Index $Index -Path $Paths.MainMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
 
         # 0. Provisioned apps (step 11): the ticked apps are removed - the first change to the image, so every later step only
-        #    services the apps that stay (Terry, 2026-09-22). They are matched against what this image really provisions, not
+        #    services the apps that stay (2026-09-22). They are matched against what this image really provisions, not
         #    against the Apps tab's list, which a run never writes (11b).
         if (@($RemoveApps).Count -gt 0) {
             $nRemoved = Remove-ProvisionedApps -Mount $Paths.MainMount -Names $RemoveApps -Target $target
@@ -1787,7 +1810,7 @@ function Save-Boot2023Files {
 }
 function Service-BootWim {
     # Patches every boot.wim image (1 = WinPE, 2 = WinPE + Windows Setup) for the refreshed media. No languages: boot.wim
-    # stays English-only (Terry, 2026-09-26). Returns the folder holding the files saved from the Setup image, and with
+    # stays English-only (2026-09-26). Returns the folder holding the files saved from the Setup image, and with
     # -Save2023 the CA 2023 boot files in its CA2023 sub-folder (taken from the first image, as Microsoft's script does).
     param([string]$SourceBoot, [string]$Destination, [hashtable]$Paths, [hashtable]$Packages, [switch]$Save2023)
     $dl = $script:DismLogArgs
@@ -1909,7 +1932,7 @@ function Test-OutputWim {
 # ---------- change log ----------
 function Test-AppxPackageFolder {
     # Package folders under WindowsApps are named <Name>_<Version>_<Arch>_<ResourceId>_<PublisherId>; Windows' own
-    # housekeeping folders there ("Deleted", "Merged", "MovedPackages", ...) are not packages (Terry's 2026-09-25 change log).
+    # housekeeping folders there ("Deleted", "Merged", "MovedPackages", ...) are not packages (the operator's 2026-09-25 change log).
     param([string]$Name)
     return ($Name -match '^[^_]+_\d+(\.\d+){1,3}_')
 }
@@ -1949,7 +1972,7 @@ function Write-ChangeLog {
         foreach ($src in @($IsoSources | Where-Object { $_ })) { & $addRow 'Header' "Source ISO ($($src.Role))" $src.File '' '' '' }
         foreach ($e in @($Events | Sort-Object Time)) {
             $ver = if ($e.Kb) { $e.Kb } else { $e.Detail }
-            # Each Section A row carries the time its step succeeded, not the time the log was written (Terry, 2026-09-25).
+            # Each Section A row carries the time its step succeeded, not the time the log was written (2026-09-25).
             $when = if ($e.Time -is [datetime]) { $e.Time.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
             & $addRow 'A' $e.Item $ver 'Added' $e.Target '' $when
         }
@@ -2078,7 +2101,7 @@ function Set-Media2023BootFiles {
     return $target
 }
 function New-Media2023 {
-    # The CA 2023 media, built alongside the standard media (Terry, 2026-09-27): a copy of the finished refreshed media
+    # The CA 2023 media, built alongside the standard media (2026-09-27): a copy of the finished refreshed media
     # with the CA 2023 boot files swapped in, then checked - the boot manager's embedded signature must be issued by
     # 'Windows UEFI CA 2023'. It boots only on PCs whose firmware trusts that certificate.
     param([string]$MediaFolder, [string]$ExFiles, [hashtable]$Paths)
@@ -2236,11 +2259,11 @@ function Initialize-Repository {
 # ---------- SCCM import (TODO step 7) ----------
 # A finished run writes NEWWIM\RunResult.json; "Import into SCCM" (SCCM tab) copies that run's install.wim (OS image) or
 # media folder (upgrade package) into a sub-folder of the content source folder on this server, creates the OS image /
-# upgrade package from its UNC path, and distributes it to a distribution point or group. Decisions (Terry, 2026-09-27):
+# upgrade package from its UNC path, and distributes it to a distribution point or group. Decisions (2026-09-27):
 # a same-named object is never touched - the new one gets " (2)", " (3)", ...; an image whose validation gate FAILED is
 # refused; an import is started with the button, or after a run when "Import after the run finishes" is ticked.
 # Every call into Configuration Manager goes through the small Sccm* wrappers below, so the test kit can replace them.
-$script:SccmNameDateFormat = 'yyyyMM'   # image name = OS name + this date (Terry, 2026-09-21)
+$script:SccmNameDateFormat = 'yyyyMM'   # image name = OS name + this date (2026-09-21)
 $script:RunResultFileName  = 'RunResult.json'
 function Get-SccmImageName {
     param([string]$OsName, [datetime]$Date = (Get-Date))
@@ -2319,7 +2342,7 @@ function Connect-SccmSite {
     # Loads the module, reads the site code and lists the distribution points and groups (the SCCM tab's Connect button).
     param([Parameter(Mandatory)][string]$SiteServer)
     Write-Log "Connecting to Configuration Manager site server $SiteServer"
-    # Loading the console's module alone usually takes 20-60 seconds (Terry's first Connect took about a minute), so each
+    # Loading the console's module alone usually takes 20-60 seconds (the operator's first Connect took about a minute), so each
     # step is shown in the status line and the header.
     Set-Phase 'Loading the Configuration Manager module'; Set-Progress 10 'Loading the Configuration Manager module (can take a minute)'
     Import-SccmModule
@@ -2506,7 +2529,7 @@ function Invoke-MediaRefresh {
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
         $lcuComing = $false
         if (-not $appsOnly) {
-            # Step 14 (Terry, 2026-09-27): "Download the latest patches before the run" - the catalog check and a download
+            # Step 14 (2026-09-27): "Download the latest patches before the run" - the catalog check and a download
             # of only what is missing, before the patch folders are read. Unticked, the run uses PATCHES as it is.
             if ([bool](Get-ProfileValue $Options 'AutoDownload' $false)) {
                 $acqOpts = [pscustomobject]@{ OsName = $name; Root = $Options.Root; Mode = 'Download'; DryRun = [bool]$Options.PreflightOnly
@@ -2540,7 +2563,7 @@ function Invoke-MediaRefresh {
         $isoFiles = @(Get-ChildItem -LiteralPath $paths.ISO -Filter '*.iso' -File)
         if ($isoFiles.Count -eq 0) { throw "No ISO files found in $($paths.ISO)." }
         if ($appsOnly) {
-            # Apps tab > Read apps from the ISO needs only the OS ISO (Terry, 2026-09-27: "at least a few minutes"). The full
+            # Apps tab > Read apps from the ISO needs only the OS ISO (2026-09-27: "at least a few minutes"). The full
             # role detection below searches the Language Pack and FOD ISOs file by file, so here each ISO is mounted in turn
             # until the one with sources\install.wim (or .esd) is found; any other ISO is dismounted again at once.
             Set-Phase 'Finding the OS ISO'; Set-Progress 10 'Finding the OS ISO'
@@ -2681,7 +2704,7 @@ function Invoke-MediaRefresh {
         $bootFiles = $null
         if ($doMedia -and -not $finalInstall) { throw 'Refreshed media requires Create updated install.wim.' }
         if ($doBoot) {
-            # boot.wim is patched only for the refreshed media / ISO (Terry, 2026-09-27): SCCM task sequences and upgrade
+            # boot.wim is patched only for the refreshed media / ISO (2026-09-27): SCCM task sequences and upgrade
             # packages never use the OS media's boot.wim, so there is no separate NEWWIM\boot.wim any more.
             $sourceBoot = Join-Chain $osDrive @('sources', 'boot.wim')
             if (-not (Test-Path -LiteralPath $sourceBoot)) { throw "boot.wim not found at $sourceBoot" }
@@ -2734,7 +2757,7 @@ function Invoke-MediaRefresh {
     } finally { Dismount-AllIso }
 }
 
-# ---------- run config files and the command line (Terry, 2026-09-28) ----------
+# ---------- run config files and the command line (2026-09-28) ----------
 # Tools > Save run config... writes everything the window would pass to a run into one JSON file; the script then runs
 # the same session without a window:  MediaRefresh_v2.4.ps1 -Config <file> [-Preflight]. The option names are the saved-
 # settings names ($script:SettingOptionNames); a missing option takes the window's default (below - a test keeps the two
@@ -2869,7 +2892,7 @@ if ($Config) {
   </Grid>
   <TabControl Grid.Row="1">
    <TabItem Header="Source and Targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-    <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="F:\mediaRefresh" Height="30" Padding="6"/>
+    <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="" Height="30" Padding="6"/>
     <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
     <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" IsEnabled="False" Margin="22,3,0,3" ToolTip="Available when the media folder is created"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder is created."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/></StackPanel></GroupBox>
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
@@ -2906,7 +2929,7 @@ if ($Config) {
     <StackPanel Grid.Row="9" Grid.Column="1" Margin="0,14,0,0"><Button x:Name="SccmImportButton" Content="Import into SCCM..." HorizontalAlignment="Left" Padding="16,5" ToolTip="Checks everything first and shows what it will do; nothing changes until you confirm"/><TextBlock x:Name="SccmLastRun" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/></StackPanel>
    </Grid></ScrollViewer></TabItem>
    <TabItem Header="Log"><RichTextBox x:Name="LogBox" Margin="12" IsReadOnly="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="{DynamicResource WF.LogBg}" Foreground="{DynamicResource WF.LogText}"><FlowDocument PagePadding="4"><Paragraph Margin="0"/></FlowDocument></RichTextBox></TabItem>
-   <TabItem Header="Instructions"><Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <TabItem x:Name="InstructionsTab" Header="Instructions"><Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <DockPanel Margin="0,0,0,8"><Button x:Name="ReloadInstructionsButton" DockPanel.Dock="Right" Content="Reload" Padding="14,3" ToolTip="Read INSTRUCTIONS.md again, for example after editing it"/><TextBlock x:Name="InstructionsSource" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource WF.SubtleText}"/></DockPanel>
     <FlowDocumentScrollViewer x:Name="InstructionsViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" IsToolBarVisible="False"/>
    </Grid></TabItem>
@@ -2929,7 +2952,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -3084,7 +3107,7 @@ $window.Add_SourceInitialized({ Set-TitleBarDark ([bool]$script:ColorSchemes[$sc
 # ---- Instructions tab (TODO 10b): INSTRUCTIONS.md beside the script, shown as a formatted document ----
 # ConvertFrom-MarkdownBlocks / Split-MarkdownInline (engine region) parse it; the colours are WF.* brushes, so the
 # document follows the colour scheme like the rest of the window.
-$script:InstructionsPath = Join-Path (Split-Path $script:ProfilesDir -Parent) 'INSTRUCTIONS.md'
+$script:InstructionsStamp = $null
 function Add-MarkdownInlines {
     param($Inlines, [string]$Text)
     foreach ($r in @(Split-MarkdownInline $Text)) {
@@ -3162,25 +3185,38 @@ function New-InstructionsDocument {
     return $doc
 }
 function Update-InstructionsTab {
-    # Renders INSTRUCTIONS.md (at start-up and on Reload). A missing or unreadable file is shown as such, never a crash.
-    $path = $script:InstructionsPath
+    # Renders INSTRUCTIONS.md from the script's folder, else the repository root (at start-up, on Reload, and when the tab
+    # is opened and the file has appeared or changed - also during a run). A missing or unreadable file never crashes.
+    param([switch]$IfChanged, [switch]$Quiet)
+    $folders = @((Split-Path $script:ProfilesDir -Parent), ([string]$script:RootText.Text).Trim())
+    $found = Find-InstructionsFile -Folders $folders
+    $stamp = Get-FileStamp $found
+    if ($IfChanged -and $stamp -eq $script:InstructionsStamp) { return }
     try {
-        if (Test-Path -LiteralPath $path) {
-            $md = [System.IO.File]::ReadAllText($path)
-            $src = "$path   (read at $(Get-Date -Format 'HH:mm:ss'))"
+        if ($found) {
+            $md = [System.IO.File]::ReadAllText($found)
+            $src = "$found   (read at $(Get-Date -Format 'HH:mm:ss'))"
+            if (-not $Quiet) { Write-Log "Instructions read from $found" }
         } else {
-            $md = '# Instructions' + "`n`n" + '`INSTRUCTIONS.md` was not found next to the script (' + $path + '). Copy it there and press Reload.'
-            $src = "$path (not found)"
+            $where = (@($folders | Where-Object { $_ } | Select-Object -Unique) -join ' or ')
+            $md = '# Instructions' + "`n`n" + '`INSTRUCTIONS.md` was not found in ' + $where + '. Copy it into the script''s folder and press Reload.'
+            $src = "INSTRUCTIONS.md not found in $where"
+            if (-not $Quiet) { Write-Log "INSTRUCTIONS.md was not found in $where" 'WARN' }
         }
         $script:InstructionsViewer.Document = New-InstructionsDocument $md
         $script:InstructionsSource.Text = $src
+        $script:InstructionsStamp = $stamp
     } catch {
         Write-Log "INSTRUCTIONS.md could not be shown: $($_.Exception.Message)" 'WARN'
-        $script:InstructionsSource.Text = "$path (could not be shown; see the Log tab)"
+        $script:InstructionsSource.Text = "$found (could not be shown; see the Log tab)"
     }
 }
-Update-InstructionsTab
+Update-InstructionsTab -Quiet
 $script:ReloadInstructionsButton.Add_Click({ Update-InstructionsTab })
+$script:InstructionsTab.AddHandler([System.Windows.Controls.Primitives.Selector]::SelectedEvent, [System.Windows.RoutedEventHandler]{
+    param($s, $e)
+    if ($e.OriginalSource -eq $script:InstructionsTab) { Update-InstructionsTab -IfChanged }
+})
 
 # The window's own checkbox defaults, restored when an OS without saved settings is selected.
 $script:DefaultChecks = @{}
@@ -3369,7 +3405,7 @@ function Get-UiOptions {
 }
 $script:OsCombo.Add_SelectionChanged({ Set-OsSettings; Update-ProfileInfo; Update-HeaderIdle })
 function Update-BootOption {
-    # The ISO and boot.wim options depend on the media folder, so they are available only while it is ticked (Terry,
+    # The ISO and boot.wim options depend on the media folder, so they are available only while it is ticked (
     # 2026-09-27); their own ticks are kept, so they come back as they were when the media folder is ticked again.
     $script:ChkBuildIso.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked
     $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked
@@ -3397,6 +3433,7 @@ $script:ReloadProfilesButton.Add_Click({
 })
 $savedRoot = Read-GeneralSettings -Directory $script:SettingsDir
 if ($savedRoot) { $script:RootText.Text = $savedRoot; Write-Log "Repository root loaded from saved settings: $savedRoot" }
+else { $script:RootText.Text = Get-DefaultRoot -ScriptDir $PSScriptRoot; Write-Log "Repository root: $($script:RootText.Text) (the script's folder; no root saved yet)" }
 $sccmSaved = Read-SccmGeneralSettings -Directory $script:SettingsDir
 $script:SccmSiteServer.Text = $sccmSaved.SiteServer; $script:SccmTarget.Text = $sccmSaved.Target
 if ($sccmSaved.TargetType -eq 'DPGroup') { $script:SccmTargetGroup.IsChecked = $true }

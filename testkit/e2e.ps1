@@ -141,7 +141,7 @@ Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'os2021kms' @('sources/install.wim')
 Patches 'Win10_Enterprise_LTSC_2021_KMS' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb3-x64.msu')
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8b
 Check 'KMS profile selected index 1 (the non-IoT edition)' ($out8b -match 'Selected client image index 1: Windows 10 Enterprise LTSC 2021')
-# real ISO layouts (Terry, 2026-09-27): KMS = [1] Enterprise LTSC, [2] Enterprise N LTSC; IoT = [1] Enterprise LTSC, [2] IoT Enterprise LTSC
+# real ISO layouts (2026-09-27): KMS = [1] Enterprise LTSC, [2] Enterprise N LTSC; IoT = [1] Enterprise LTSC, [2] IoT Enterprise LTSC
 Reset-Test; $script:SourceNames=@('Windows 10 Enterprise LTSC','Windows 10 Enterprise N LTSC')
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8c
 Check 'KMS real layout: index 1 (Enterprise LTSC), not the N edition' ($out8c -match 'Selected client image index 1: Windows 10 Enterprise LTSC\r?\n' -and $out8c -notmatch 'preferred index')
@@ -242,7 +242,7 @@ Check 'Resolve-LcuTarget: no KB numbers to go by -> everything installed, as bef
 $r3 = Resolve-LcuTarget -Files @((FI 'windows11.0-kb5129195-x64.msu'), (FI 'windows11.0-kb5043080-x64.msu'), (FI 'windows11.0-kb5060842-x64.msu'))
 Check 'Resolve-LcuTarget: with several checkpoints the highest KB is the target' ((@($r3.Install).Name -join ',') -eq 'windows11.0-kb5129195-x64.msu' -and @($r3.Checkpoints).Count -eq 2)
 
-Write-Host "`n=== E13 change log fixes from Terry's 2026-09-25 Win11 run ==="
+Write-Host "`n=== E13 change log fixes from the operator's 2026-09-25 Win11 run ==="
 # 1. Section A rows carry the time each step succeeded (the real log had every row at the write time, 11:04:10)
 $cl13 = Join-Path $base 'cl13'; New-Item -ItemType Directory -Force (Join-Path $cl13 'LOGS'), (Join-Path $cl13 'NEWWIM') | Out-Null
 $ev13 = @(
@@ -277,7 +277,7 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and (Test-Path 
 # 3. housekeeping folders under WindowsApps are not listed as staged appx packages
 $names13 = @('Clipchamp.Clipchamp_4.4.10720.0_x64__yxz26nhyzhsrt', 'Clipchamp.Clipchamp_4.4.10720.0_neutral_split.scale-100_yxz26nhyzhsrt', 'Microsoft.ApplicationCompatibilityEnhancements_1.2511.9.0_neutral_~_8wekyb3d8bbwe', 'Deleted', 'Merged', 'MovedPackages', 'DeletedAllUserPackages', 'Mutable')
 $kept13 = @($names13 | Where-Object { Test-AppxPackageFolder $_ })
-Write-Host "`n=== E14 languages go into install.wim only: WinRE and boot.wim stay English-only (Terry, 2026-09-26) ==="
+Write-Host "`n=== E14 languages go into install.wim only: WinRE and boot.wim stay English-only (2026-09-26) ==="
 # Ten languages with WinRE AND Boot ticked, and an LP ISO that also carries the WinPE language cabs the old code used
 Reset-Test; $script:ImageCount=1
 Fake-Iso 'Win10_Enterprise_LTSC_2019' 'os2019' @('sources/boot.wim')
@@ -339,7 +339,7 @@ $wl15 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'IN
 Clear-StaleIsoMounts (Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\ISO')
 Set-Item function:Write-Log $wl15
 Check 'an ISO already mounted at the start of a run is dismounted, with a WARN' ($script:AttachedIsos.Count -eq 0 -and [bool]($logs15 -match '^\[WARN\] ISO os2021kms\.iso was already mounted'))
-Write-Host "`n=== E16 boot.wim is patched only for the media, with setup.exe and the boot manager files from it (Terry, 2026-09-27) ==="
+Write-Host "`n=== E16 boot.wim is patched only for the media, with setup.exe and the boot manager files from it (2026-09-27) ==="
 # boot.wim with two images; index 2 is the Setup image, which carries the patched setup files. The ISO's own copies are 'orig'.
 Reset-Test; $script:ImageCount = 1; $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Enterprise')
 $lcu16 = Join-Path $base 'Win11Enterprise_24H2\PATCHES\LCU'; Get-ChildItem $lcu16 -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -392,7 +392,7 @@ Check 'an archive stamp already used in the same second gets a _2 folder' ((Test
 
 Check 'a servicing run calls the ISO check right after the stale-mount check' ($src -match "Clear-StaleMounts \`$paths\.Root\r?\n\s+Clear-StaleIsoMounts \`$paths\.ISO")
 
-Write-Host "`n=== E17 CA 2023 media alongside the standard media (Make2023BootableMedia.ps1 steps; Terry, 2026-09-27) ==="
+Write-Host "`n=== E17 CA 2023 media alongside the standard media (Make2023BootableMedia.ps1 steps; 2026-09-27) ==="
 # boot.wim index 1 carries the CA 2023 boot files (EX); index 2 is the Setup image as in E16. Real boot files are signed
 # PE files; here the content says which certificate "signed" them and Get-EmbeddedSignerIssuer reads that.
 $gwi17 = ${function:Get-WindowsImage}; $mwi17 = ${function:Mount-WindowsImage}; $iso17 = ${function:Build-IsoFromMedia}; $sig17 = ${function:Get-EmbeddedSignerIssuer}
@@ -535,7 +535,7 @@ Reset-Test; $logs18.Clear()
 Invoke-MediaRefresh $p18
 Set-Item function:Write-Log $wl18
 Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list was read from os11\.iso \(index 2\); .* so index 3 is read again') -and (Read-AppInventory -File $appsFile18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
-# A new month's ISO under the same file name (Terry, 2026-09-27: it may add or remove apps): a preflight reads the list again
+# A new month's ISO under the same file name (2026-09-27: it may add or remove apps): a preflight reads the list again
 $isoFile18 = Join-Path $os18 'ISO\os11.iso'; (Get-Item $isoFile18).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(1)
 $script:Prov18.Add((New-App18 'Microsoft.NewInOctober'))
 Reset-Test; $logs18.Clear()
@@ -618,7 +618,7 @@ Check 'an empty field is named' (Test-Refused19 (Opts19 @{ SccmTarget = '' }) 'D
 Remove-Item (Join-Path $nw19 'RunResult.json') -Force
 Check 'no finished run: refused with what to do' (Test-Refused19 (Opts19) 'There is no finished run to import*')
 
-Write-Host "`n=== E20 .NET Framework 3.5: every OS, always from the OS ISO's sources\sxs (Terry's question, 2026-09-27) ==="
+Write-Host "`n=== E20 .NET Framework 3.5: every OS, always from the OS ISO's sources\sxs (the operator's question, 2026-09-27) ==="
 $ewof20 = ${function:Enable-WindowsOptionalFeature}; $script:Nfx20 = [System.Collections.Generic.List[string]]::new()
 function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path, $FeatureName, [switch]$All, $Source, [switch]$LimitAccess, $LogPath) $script:Nfx20.Add("$FeatureName|$Source|All=$All|LimitAccess=$LimitAccess") }
 Get-ChildItem (Join-Path $base 'Windows_Server_2022\ISO') -Filter '*15.iso' | Remove-Item -Force   # E15's dummy ISO files
@@ -675,7 +675,7 @@ Check 'unticked: the catalog is not contacted, the folders are used as they are 
 Set-Item function:Write-Log $wl21; Set-Item function:Invoke-PatchAcquisition $ipa21; $script:Acq21Plan = @()
 Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
 
-Write-Host "`n=== E22 the command line: MediaRefresh_v2.4.ps1 -Config <file> [-Preflight] (Terry, 2026-09-28) ==="
+Write-Host "`n=== E22 the command line: MediaRefresh_v2.4.ps1 -Config <file> [-Preflight] (2026-09-28) ==="
 $pd22 = Join-Path $base '_profiles22'; $cfg22 = Join-Path $base '_cfg22\w11.json'
 $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1
 [void](Save-RunConfig -File $cfg22 -OsName 'Windows 11 Enterprise 24H2' -Root $base -Options @{ NetFx3 = $false; SetupDU = $false; Verify = $false } -Languages @())
@@ -706,7 +706,7 @@ Set-Item function:Invoke-MediaRefresh $savedImr22
 $cl22 = [regex]::Match($src, '(?s)\r?\n# Command line \(-Config\).*?\r?\n\}\r?\n').Value
 Check 'the command line branch sits after the engine and before the window, and exits with the run''s code' ($src.IndexOf('#endregion ENGINE') -lt $src.IndexOf('# Command line (-Config)') -and $src.IndexOf('# Command line (-Config)') -lt $src.IndexOf('#region GUI') -and $cl22 -match 'exit \(\[int\]\$cliCode\[-1\]\)')
 
-Write-Host "`n=== E23 WinRE gets only the servicing stack of a combined LCU .msu (Terry's LTSC 2019 IoT run, 2026-09-28: 0x8007371b) ==="
+Write-Host "`n=== E23 WinRE gets only the servicing stack of a combined LCU .msu (the operator's LTSC 2019 IoT run, 2026-09-28: 0x8007371b) ==="
 # The 1809 LCU .msu now holds SSU-17763.9242-x64.cab; adding the whole .msu to WinRE installed the RollupFix payload as well
 Reset-Test; $script:ImageCount = 1; $script:SourceNames = @('Windows 10 Enterprise LTSC')
 Remove-Item (Join-Path $base 'Win10_Enterprise_LTSC_2019\ISO\lp15.iso') -Force -ErrorAction SilentlyContinue   # E15's stand-in, not a mapped ISO
