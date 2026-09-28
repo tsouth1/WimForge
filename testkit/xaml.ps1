@@ -160,6 +160,8 @@ if ($wpf) {
     $script:ChkBoot.IsChecked = $false; $c2 = $script:ChkMedia2023.IsEnabled
     $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $false; $c3 = $script:ChkMedia2023.IsEnabled
     Check 'CA 2023 is available only with media and Patch boot.wim both ticked' ($c1 -and -not $c2 -and -not $c3)
+    $auto14 = $win.FindName('ChkAutoDownload')
+    Check 'Updates and Features: "Download the latest patches before the run" is there, off by default, and saved per OS (step 14)' ($null -ne $auto14 -and -not $script:DefaultChecks['AutoDownload'] -and $script:SettingOptionNames -contains 'AutoDownload' -and [string]$auto14.Content.Text -like 'Download the latest patches before the run (only what is missing)*use the patches already in the folders.')
 
     # Instructions tab (TODO 10b): the real window's tab and the real guide rendered as a FlowDocument
     foreach ($fn in 'Add-MarkdownInlines', 'New-InstructionsDocument', 'Update-InstructionsTab') {

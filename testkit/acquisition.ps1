@@ -103,13 +103,13 @@ Set-Item function:Get-MSCatalogUpdate $simpleCatalogMock
 Write-Host "`n=== A3 Update-PatchCache: keeps newest + chain, removes the rest, tolerates a missing folder ==="
 $cacheDir = Join-Path $base 'cache'; New-File (Join-Path $cacheDir 'old-kb1-x64.msu'); New-File (Join-Path $cacheDir 'old2.cab'); New-File (Join-Path $cacheDir 'chained-kb1234567-x64.msu'); New-File (Join-Path $cacheDir 'newest-kb2345678-x64.msu')
 $removed = Update-PatchCache -Folder $cacheDir -NewestFile (Join-Path $cacheDir 'newest-kb2345678-x64.msu') -KeepChain @('KB1234567')
-$remaining = @(Get-ChildItem $cacheDir -File | Select-Object -ExpandProperty Name | Sort-Object)
+$remaining = @(Get-ChildItem $cacheDir -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check 'newest + chained KB kept, others removed' (($remaining -join ',') -eq 'chained-kb1234567-x64.msu,newest-kb2345678-x64.msu')
 Check 'removed list has exactly the two superseded files' ($removed.Count -eq 2 -and $removed -contains 'old-kb1-x64.msu' -and $removed -contains 'old2.cab')
 Check 'a missing folder returns empty, no error' (@(Update-PatchCache -Folder (Join-Path $base 'doesnotexist') -NewestFile 'x.msu').Count -eq 0)
 $multiCacheDir = Join-Path $base 'cache2'; New-File (Join-Path $multiCacheDir 'stale-x64.msu'); New-File (Join-Path $multiCacheDir 'keep1-kb1111111-x64.msu'); New-File (Join-Path $multiCacheDir 'keep2-kb2222222-x64.msu')
 $removedMulti = Update-PatchCache -Folder $multiCacheDir -KeepFiles @((Join-Path $multiCacheDir 'keep1-kb1111111-x64.msu'), (Join-Path $multiCacheDir 'keep2-kb2222222-x64.msu'))
-$remainingMulti = @(Get-ChildItem $multiCacheDir -File | Select-Object -ExpandProperty Name | Sort-Object)
+$remainingMulti = @(Get-ChildItem $multiCacheDir -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check '-KeepFiles keeps every listed file (not just one newest), prunes the rest' (($remainingMulti -join ',') -eq 'keep1-kb1111111-x64.msu,keep2-kb2222222-x64.msu' -and @($removedMulti).Count -eq 1 -and $removedMulti -contains 'stale-x64.msu')
 
 Write-Host "`n=== A4 Invoke-PatchAcquisition: dry run changes nothing; a real run downloads, prunes, logs, and never touches SSU ==="
@@ -141,9 +141,9 @@ Reset-Test
 $optsReal = [pscustomobject]@{ OsName = 'TestOS'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $true; NetCU = $true; SafeOS = $false; SetupDU = $false }
 $resReal = Invoke-PatchAcquisition -Options $optsReal -Definition $definition -Paths $paths
 Check 'real run downloaded 2 files' (@($resReal.Downloaded).Count -eq 2)
-$lcuFiles = @(Get-ChildItem (Join-Path $paths.Patches 'LCU') -File | Select-Object -ExpandProperty Name)
+$lcuFiles = @(Get-ChildItem (Join-Path $paths.Patches 'LCU') -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name)
 Check 'LCU folder has only the new file (old one pruned)' (($lcuFiles -join ',') -eq 'windows-kb5044284-x64_abcd.msu')
-Check 'NetCU folder has the new file' ((@(Get-ChildItem (Join-Path $paths.Patches 'NETCU') -File | Select-Object -ExpandProperty Name) -join ',') -eq 'windows-kb5044999-x64-ndp48_efgh.msu')
+Check 'NetCU folder has the new file' ((@(Get-ChildItem (Join-Path $paths.Patches 'NETCU') -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name) -join ',') -eq 'windows-kb5044999-x64-ndp48_efgh.msu')
 Check 'real run never touches SSU either' (@(Get-ChildItem (Join-Path $paths.Patches 'SSU') -File).Count -eq 1)
 Check 'change events recorded for LCU and NetCU' (@($script:ChangeEvents | Where-Object { $_.Category -eq 'LCU' -and $_.Kb -eq 'KB5044284' }).Count -eq 1 -and @($script:ChangeEvents | Where-Object { $_.Category -eq 'NetCU' -and $_.Kb -eq 'KB5044999' }).Count -eq 1)
 Check 'result carries Mode/DryRun for the GUI to branch on' ($resReal.Mode -eq 'Download' -and $resReal.DryRun -eq $false)
@@ -180,7 +180,7 @@ Reset-Test
 $optsMultiReal = [pscustomobject]@{ OsName = 'TestOS2'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $false; NetCU = $true; SafeOS = $false; SetupDU = $false }
 $resMultiReal = Invoke-PatchAcquisition -Options $optsMultiReal -Definition $multiDef -Paths $paths2
 Check 'real run downloaded both term matches, not just one' (@($resMultiReal.Downloaded).Count -eq 2)
-$netcuFiles = @(Get-ChildItem (Join-Path $paths2.Patches 'NETCU') -File | Select-Object -ExpandProperty Name | Sort-Object)
+$netcuFiles = @(Get-ChildItem (Join-Path $paths2.Patches 'NETCU') -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check 'both downloaded files are kept side by side; the stale pre-existing file is pruned' (($netcuFiles -join ',') -eq 'windows10.0-kb6000001-x64-ndp48.msu,windows10.0-kb6000002-x64-ndp472.msu')
 Check 'neither current file pruned the other (both KBs present in Downloaded)' (@($resMultiReal.Downloaded | Where-Object { $_.Kb -eq 'KB6000001' }).Count -eq 1 -and @($resMultiReal.Downloaded | Where-Object { $_.Kb -eq 'KB6000002' }).Count -eq 1)
 
@@ -231,7 +231,7 @@ $script:CatalogFileNames[$t64] = @('windows10.0-kb5126048-x64-ndp48.msu', 'windo
 $resReal = Invoke-PatchAcquisition -Options ([pscustomobject]@{ OsName = 'TestOS3'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $false; NetCU = $true; SafeOS = $false; SetupDU = $false }) -Definition $realDef -Paths $paths3
 Check 'the x64 entry was saved, never the x86 one listed before it' (@($script:Calls -match '^CatalogSave').Count -eq 1 -and ($script:Calls -match '^CatalogSave') -match 'for x64 \(KB5126144\)')
 Check '-DownloadAll passed because the installed module declares it' ([bool]($script:Calls -match '^CatalogSave.*\[DownloadAll\]'))
-$net3 = @(Get-ChildItem (Join-Path $paths3.Patches 'NETCU') -File | Select-Object -ExpandProperty Name | Sort-Object)
+$net3 = @(Get-ChildItem (Join-Path $paths3.Patches 'NETCU') -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check 'both files of the entry kept (4.7.2 and 4.8 parts); the previous month''s file pruned' (($net3 -join ',') -eq 'windows10.0-kb5126043-x64.msu,windows10.0-kb5126048-x64-ndp48.msu')
 Check 'Downloaded lists each file under its own KB, with the catalog entry KB alongside' ((@($resReal.Downloaded | ForEach-Object { $_.Kb } | Sort-Object) -join ',') -eq 'KB5126043,KB5126048' -and @($resReal.Downloaded | Where-Object { $_.EntryKb -eq 'KB5126144' }).Count -eq 2)
 
@@ -359,7 +359,7 @@ Check 'without -Release (non-LCU classes) no Patch Tuesday / out-of-band label' 
 Check 'Format-CatalogPick: no date or classification adds no brackets' ((Format-CatalogPick -Title 'X (KB1)' -Kb 'KB1') -eq 'X (KB1)')
 $dialogLines = @($resDry9.Plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb)" })
 Check 'the confirm dialog line names the KB once' (([regex]::Matches(($dialogLines -join "`n"), 'KB5126144')).Count -eq 1) ($dialogLines -join ' | ')
-Reset-Test
+Reset-Test; Get-ChildItem (Join-Path $paths3.Patches 'NETCU') -File | Remove-Item -Force   # step 14: an entry already present is not downloaded at all
 $null = Invoke-PatchAcquisition -Options ([pscustomobject]@{ OsName = 'TestOS3'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $false; NetCU = $true; SafeOS = $false; SetupDU = $false }) -Definition $realDef -Paths $paths3
 Check 'the confirmed real run downloads the picked entry exactly once' (@($script:Calls -match '^CatalogSave').Count -eq 1)
 
@@ -380,7 +380,7 @@ function Reset-W11Lcu { Get-ChildItem $lcu4 -File -ErrorAction SilentlyContinue 
 $w11Opts = [pscustomobject]@{ OsName = 'TestOS4'; Root = $base; Mode = 'Download'; DryRun = $false; LCU = $true; NetCU = $false; SafeOS = $false; SetupDU = $false }
 Reset-W11Lcu; Reset-Test
 $null = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
-$lcuNow = @(Get-ChildItem $lcu4 -File | Select-Object -ExpandProperty Name | Sort-Object)
+$lcuNow = @(Get-ChildItem $lcu4 -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check '-Force is passed when the module declares it' ([bool]($script:Calls -match '^CatalogSave.*\[Force\]'))
 Check 'with -Force: the LCU and its checkpoint are kept, last month''s LCU removed' (($lcuNow -join ',') -eq 'windows11.0-kb5043080-x64.msu,windows11.0-kb5129195-x64.msu') ($lcuNow -join ',')
 # Safety net: a module without -Force skips the existing LCU file, as the real run did
@@ -390,7 +390,7 @@ function Save-MSCatalogUpdate { [CmdletBinding()] param($Update, [string]$Destin
         if (Test-Path $out) { Note "CatalogSkip $name"; continue }; Set-Content $out 'downloaded' } }
 Reset-W11Lcu; Reset-Test; $script:LogLines.Clear()
 $null = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
-$lcuNow = @(Get-ChildItem $lcu4 -File | Select-Object -ExpandProperty Name | Sort-Object)
+$lcuNow = @(Get-ChildItem $lcu4 -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name | Sort-Object)
 Check 'without -Force (module skips the existing file): the picked LCU is still kept' (($script:Calls -match '^CatalogSkip windows11.0-kb5129195') -and ($lcuNow -contains 'windows11.0-kb5129195-x64.msu')) ($lcuNow -join ',')
 Check '... the checkpoint is kept and last month''s LCU removed' (($lcuNow -contains 'windows11.0-kb5043080-x64.msu') -and ($lcuNow -notcontains 'windows11.0-kb5121003-x64.msu'))
 Check '... and the kept file is reported with a WARN' ([bool]($script:LogLines -match 'WARN.*Kept windows11.0-kb5129195-x64.msu'))
@@ -398,6 +398,46 @@ Set-Item function:Save-MSCatalogUpdate $forceMock
 # A same-KB older copy (the long "_<hash>" name) next to this run's new file is a true duplicate and still goes
 $dupDir = Join-Path $base 'dupcache'; New-File (Join-Path $dupDir 'windows11.0-kb5126052-x64-ndp481_082cfd58.msu'); New-File (Join-Path $dupDir 'windows11.0-kb5126052-x64-ndp481.msu')
 $null = Update-PatchCache -Folder $dupDir -KeepFiles @((Join-Path $dupDir 'windows11.0-kb5126052-x64-ndp481.msu')) -KeepKbs @('KB5126052')
-Check 'a same-KB older copy is removed when this run saved that KB' ((@(Get-ChildItem $dupDir -File | Select-Object -ExpandProperty Name) -join ',') -eq 'windows11.0-kb5126052-x64-ndp481.msu')
+Check 'a same-KB older copy is removed when this run saved that KB' ((@(Get-ChildItem $dupDir -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name) -join ',') -eq 'windows11.0-kb5126052-x64-ndp481.msu')
+
+Write-Host "`n=== A12 download only what is missing (TODO step 14, Terry 2026-09-27) ==="
+# The Win11 LCU entry downloads two files (the LCU and its checkpoint), named after other KBs than nothing the title
+# tells beforehand - real results have an empty FileNames - so the record written at download time is what knows.
+Get-ChildItem $lcu4 -File -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test
+$first14 = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+$rec14 = Read-DownloadRecord -Folder $lcu4
+$key14 = Get-CatalogEntryKey $script:CatalogResults['search-w11-lcu'][0]
+Check 'first download: both files fetched and recorded in PATCHES\LCU\_downloads.json under the catalog entry' (@($script:Calls -match '^CatalogSave').Count -eq 1 -and $rec14.ContainsKey($key14) -and (@($rec14[$key14].Files).Name -join ',') -eq 'windows11.0-kb5043080-x64.msu,windows11.0-kb5129195-x64.msu' -and $rec14[$key14].Kb -eq 'KB5129195')
+Reset-Test; $script:LogLines.Clear()
+$again14 = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+Check 'repeat with nothing new: nothing downloaded, both files kept, "up to date"' (@($script:Calls -match '^CatalogSave').Count -eq 0 -and $again14.UpToDate -and @($again14.AlreadyPresent).Count -eq 2 -and @($again14.Downloaded).Count -eq 0 -and (Test-Path (Join-Path $lcu4 'windows11.0-kb5129195-x64.msu')) -and (Test-Path (Join-Path $lcu4 'windows11.0-kb5043080-x64.msu')) -and [bool]($script:LogLines -match 'PATCHES is up to date'))
+$dry14 = Invoke-PatchAcquisition -Options ([pscustomobject]@{ OsName = 'TestOS4'; Root = $base; Mode = 'Download'; DryRun = $true; LCU = $true; NetCU = $false; SafeOS = $false; SetupDU = $false }) -Definition $w11Def -Paths $paths4
+Check 'the dry run marks the pick as already present (for the confirmation list)' ($dry14.Plan[0].Present -and $dry14.Plan[0].Folder -eq 'LCU' -and $dry14.UpToDate)
+Remove-Item (Join-Path $lcu4 'windows11.0-kb5043080-x64.msu'); Reset-Test
+$null = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+Check 'one file of the entry missing (the checkpoint deleted): the entry is downloaded again' (@($script:Calls -match '^CatalogSave').Count -eq 1 -and (Test-Path (Join-Path $lcu4 'windows11.0-kb5043080-x64.msu')))
+Set-Content (Join-Path $lcu4 'windows11.0-kb5129195-x64.msu') 'x'; Reset-Test   # a different size: an interrupted or replaced file
+$null = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+Check 'a recorded file with another size (interrupted or replaced): downloaded again' (@($script:Calls -match '^CatalogSave').Count -eq 1)
+# A new month's LCU (another catalog entry): downloaded; last month's files pruned and dropped from the record
+$tW11oct = '2026-10 Cumulative Update for Windows 11, version 24H2 for x64-based Systems (KB5130000) (26100.9600)'
+$script:CatalogResults['search-w11-lcu'] = @((Real-Result $tW11oct '10/13/2026 10:00:00 AM'))
+$script:CatalogFileNames[$tW11oct] = @('windows11.0-kb5130000-x64.msu', 'windows11.0-kb5043080-x64.msu')
+Reset-Test
+$oct14 = Invoke-PatchAcquisition -Options $w11Opts -Definition $w11Def -Paths $paths4
+$rec14b = Read-DownloadRecord -Folder $lcu4
+Check 'a new LCU: downloaded; the old LCU is pruned and its record entry dropped' (@($script:Calls -match '^CatalogSave').Count -eq 1 -and -not (Test-Path (Join-Path $lcu4 'windows11.0-kb5129195-x64.msu')) -and @($rec14b.Keys).Count -eq 1 -and $rec14b.ContainsKey((Get-CatalogEntryKey $script:CatalogResults['search-w11-lcu'][0])))
+# Without a record, a result that lists its file names (with the "_<hash>" the module drops) counts when they are all there
+$fnRes = [pscustomobject]@{ Title = 'x (KB5140000)'; Guid = 'aaaa'; FileNames = @('http://dl/windows11.0-kb5140000-x64_0123456789abcdef0123456789abcdef01234567.msu', 'windows11.0-kb5043080-x64_89abcdef0123456789ab.msu') }
+Check 'catalog file names are read as the module saves them (no "_<hash>")' ((@(Get-CatalogResultFileNames $fnRes) -join ',') -eq 'windows11.0-kb5140000-x64.msu,windows11.0-kb5043080-x64.msu')
+$fnDir = Join-Path $base 'fn14'; New-File (Join-Path $fnDir 'windows11.0-kb5140000-x64.msu')
+$missing14 = @(Get-PresentCatalogFiles -Result $fnRes -Folder $fnDir).Count
+New-File (Join-Path $fnDir 'windows11.0-kb5043080-x64.msu')
+Check 'no record: present only when every listed file is there' ($missing14 -eq 0 -and @(Get-PresentCatalogFiles -Result $fnRes -Folder $fnDir).Count -eq 2)
+Check 'no record and no file names (real results): downloaded' (@(Get-PresentCatalogFiles -Result ([pscustomobject]@{ Title = 'y'; Guid = 'bbbb'; FileNames = '' }) -Folder $fnDir).Count -eq 0)
+[System.IO.File]::WriteAllText((Join-Path $lcu4 '_downloads.json'), '{ not json'); $script:LogLines.Clear()
+Check 'an unusable record: a WARN, and its patches are downloaded again' ((Read-DownloadRecord -Folder $lcu4).Count -eq 0 -and [bool]($script:LogLines -match 'WARN.*Download record .* could not be used'))
+$pkg14 = Get-PackageSet -PatchRoot $paths4.Patches -Enabled @{ LCU = $true }
+Check 'the record file is never taken for a patch' (@($pkg14.LCU + $pkg14.LcuCheckpoints | Where-Object { $_.Name -like '_downloads*' }).Count -eq 0)
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

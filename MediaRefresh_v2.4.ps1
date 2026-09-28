@@ -421,7 +421,7 @@ function Import-LanguageList {
 # ---------- saved GUI settings per OS (TODO step 10c) ----------
 # Settings\<profile folder>.json holds one OS's checkboxes and ticked languages; Settings\General.json the repository
 # root. Kept apart from Profiles\ on purpose: profile files get regenerated, which must not wipe saved choices.
-$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval', 'SccmAutoImport')
+$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval', 'SccmAutoImport', 'AutoDownload')
 function Get-OsSettingsFile {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition)
     return (Join-Path $Directory ($Definition.Folder + '.json'))
@@ -1090,6 +1090,74 @@ function Update-PatchCache {
     }
     return $removed
 }
+# ---------- "download only what is missing" (TODO step 14, Terry 2026-09-27) ----------
+# Each PATCHES\<class> folder keeps _downloads.json: for every catalog entry downloaded there (by its Guid), the files it
+# produced and their sizes. A pick is "already present" when every one of those files is still there at that size (an
+# interrupted or replaced file counts as missing), or - when the catalog result lists its file names - when all of them
+# are there. Without either, a pick is downloaded (once; from then on the record knows it). The record matters because
+# one catalog entry can produce several files named after other KBs (1809 .NET CU; Win11 LCU + checkpoint).
+$script:DownloadRecordName = '_downloads.json'
+function Get-CatalogEntryKey {
+    param($Result)
+    $g = [string](Get-ProfileValue $Result 'Guid' '')
+    if ($g) { return $g.ToLowerInvariant() }
+    return ('title:' + [string](Get-ProfileValue $Result 'Title' ''))
+}
+function Read-DownloadRecord {
+    param([string]$Folder)
+    $table = @{}
+    $file = [System.IO.Path]::Combine($Folder, $script:DownloadRecordName)
+    if (-not (Test-Path -LiteralPath $file)) { return $table }
+    try {
+        $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
+        foreach ($e in @(Get-ProfileValue $o 'entries' @())) {
+            $k = [string](Get-ProfileValue $e 'key' ''); if (-not $k) { continue }
+            $table[$k] = [pscustomobject]@{ Key = $k; Kb = [string](Get-ProfileValue $e 'kb' ''); Title = [string](Get-ProfileValue $e 'title' ''); Downloaded = [string](Get-ProfileValue $e 'downloaded' '')
+                Files = @(@(Get-ProfileValue $e 'files' @()) | ForEach-Object { [pscustomobject]@{ Name = [string](Get-ProfileValue $_ 'name' ''); Size = [string](Get-ProfileValue $_ 'size' '') } } | Where-Object { $_.Name }) }
+        }
+    } catch { Write-Log "Download record $file could not be used ($($_.Exception.Message)); its patches are downloaded again." 'WARN' }
+    return $table
+}
+function Save-DownloadRecord {
+    # Writes the record, dropping entries whose files are no longer in the folder (pruned or deleted by hand).
+    param([string]$Folder, [hashtable]$Record)
+    if (-not (Test-Path -LiteralPath $Folder)) { return }
+    $keep = @($Record.Values | Where-Object { $e = $_; @($e.Files).Count -gt 0 -and @($e.Files | Where-Object { -not (Test-Path -LiteralPath ([System.IO.Path]::Combine($Folder, $_.Name))) }).Count -eq 0 } | Sort-Object Key)
+    $data = [ordered]@{ schemaVersion = 1; note = 'Written by WimForge Download patches: which files each catalog entry produced, so a repeat download can skip them.'
+        entries = @($keep | ForEach-Object { [ordered]@{ key = $_.Key; kb = $_.Kb; title = $_.Title; downloaded = $_.Downloaded; files = @($_.Files | ForEach-Object { [ordered]@{ name = $_.Name; size = $_.Size } }) } }) }
+    [System.IO.File]::WriteAllText([System.IO.Path]::Combine($Folder, $script:DownloadRecordName), (($data | ConvertTo-Json -Depth 5) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+}
+function Get-CatalogResultFileNames {
+    # The file names a catalog result says it downloads, as Save-MSCatalogUpdate names them (URL leaf without the
+    # "_<hash>" part). Real MSCatalogLTS 2.1.0.1 results leave FileNames empty; then this returns nothing.
+    param($Result)
+    $raw = @(Get-ProfileValue $Result 'FileNames' @()) | ForEach-Object { [string]$_ -split '[,;\s]+' } | Where-Object { $_ }
+    return @($raw | ForEach-Object {
+        $leaf = ($_ -split '[/\\]')[-1]
+        $leaf -replace '_[0-9a-fA-F]{16,}(?=\.[A-Za-z0-9]+$)', ''
+    } | Where-Object { $_ -match '\.(msu|cab)$' } | Select-Object -Unique)
+}
+function Get-PresentCatalogFiles {
+    # The full paths of a picked catalog entry's files when they are ALL already in $Folder; otherwise @().
+    param($Result, [Parameter(Mandatory)][string]$Folder, [hashtable]$Record = @{})
+    $key = Get-CatalogEntryKey $Result
+    if ($Record.ContainsKey($key)) {
+        $files = @($Record[$key].Files)
+        $ok = $files.Count -gt 0
+        foreach ($f in $files) {
+            $p = [System.IO.Path]::Combine($Folder, $f.Name)
+            if (-not (Test-Path -LiteralPath $p) -or ([string](Get-Item -LiteralPath $p).Length -ne $f.Size)) { $ok = $false; break }
+        }
+        if ($ok) { return @($files | ForEach-Object { [System.IO.Path]::Combine($Folder, $_.Name) }) }
+        return @()
+    }
+    $names = @(Get-CatalogResultFileNames $Result)
+    if ($names.Count -gt 0) {
+        $paths = @($names | ForEach-Object { [System.IO.Path]::Combine($Folder, $_) })
+        if (@($paths | Where-Object { -not (Test-Path -LiteralPath $_) -or (Get-Item -LiteralPath $_).Length -eq 0 }).Count -eq 0) { return $paths }
+    }
+    return @()
+}
 function Invoke-PatchAcquisition {
     # Entry point for the "Download patches..." action. $Options.DryRun=$true only searches and reports what WOULD be
     # downloaded/kept/removed - nothing is written or deleted. See TODO.md step 5 for the open points (checkpoint-CU
@@ -1114,7 +1182,9 @@ function Invoke-PatchAcquisition {
     $plan = [System.Collections.Generic.List[object]]::new()
     $downloaded = [System.Collections.Generic.List[object]]::new()
     $removed = [System.Collections.Generic.List[object]]::new()
+    $alreadyPresent = [System.Collections.Generic.List[object]]::new()
     $skippedClasses = [System.Collections.Generic.List[string]]::new()
+    $removedNow = @()
     $n = 0
     foreach ($class in $classes) {
         $n++
@@ -1139,6 +1209,9 @@ function Invoke-PatchAcquisition {
         # of this run's downloads for the class are kept together when pruning - not just the single newest.
         $classFilesKept = [System.Collections.Generic.List[string]]::new()
         $classPickedKbs = [System.Collections.Generic.List[string]]::new()
+        $folder = Join-Path $Paths.Patches $folders[$class]
+        $record = Read-DownloadRecord -Folder $folder
+        $recordChanged = $false; $removedNow = @()
         foreach ($term in $searchTerms) {
             Assert-NotCancelled
             $ruleObj = [pscustomobject]@{ search = $term; architecture = $ruleArch; excludePreview = $ruleExcludePreview; buildFilter = $ruleBuildFilter; productFilter = $ruleProductFilter; productExclude = $ruleProductExclude }
@@ -1152,12 +1225,20 @@ function Invoke-PatchAcquisition {
             $title = [string](Get-ProfileValue $best 'Title' '(untitled catalog result)')
             $kb = Get-KbFromName $title
             $released = Get-CatalogDate $best; $classification = [string](Get-ProfileValue $best 'Classification' '')
-            $plan.Add([pscustomobject]@{ Class = $class; Title = $title; Kb = $kb; Date = $released; Classification = $classification })
+            $present = @(Get-PresentCatalogFiles -Result $best -Folder $folder -Record $record)
+            $plan.Add([pscustomobject]@{ Class = $class; Title = $title; Kb = $kb; Date = $released; Classification = $classification; Present = ($present.Count -gt 0); Folder = $folders[$class] })
             if ($kb) { $classPickedKbs.Add($kb) }
             Write-Log "$class`: selected '$(Format-CatalogPick -Title $title -Kb $kb -Date $released -Classification $classification -Release:($class -eq 'LCU'))'$(if ($searchTerms.Count -gt 1) { " [search: $term]" })"
+            if ($present.Count -gt 0) { Write-Log "$class`: already in PATCHES\$($folders[$class]) ($(($present | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')); not downloaded again." }
+            elseif (-not $dryRun) { Write-Log "$class`: not in PATCHES\$($folders[$class]) yet; downloading." }
             if ($dryRun) { continue }
+            if ($present.Count -gt 0) {
+                # Step 14: nothing to fetch. Its files stay (the pruning below keeps them) and nothing is recorded as a download.
+                foreach ($p in $present) { $classFilesKept.Add($p); $alreadyPresent.Add([pscustomobject]@{ Class = $class; File = $p; EntryKb = $kb }) }
+                continue
+            }
 
-            $folder = Join-Path $Paths.Patches $folders[$class]
+            $entryFiles = [System.Collections.Generic.List[object]]::new()
             $savedFiles = @(Save-CatalogCandidate -Result $best -Destination $folder | Where-Object { $_ })
             if ($savedFiles.Count -eq 0) { Write-Log "$class`: download reported success but no file could be located in $folder (search '$term')." 'WARN'; continue }
             if ($savedFiles.Count -gt 1) { Write-Log "$class`: catalog entry$(if ($kb) { " $kb" }) downloaded $($savedFiles.Count) files: $(($savedFiles | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')" }
@@ -1175,20 +1256,31 @@ function Invoke-PatchAcquisition {
                 Add-ChangeEvent -Category $class -Item $leaf -Target $folder -Kb $(if ($fileKb) { $fileKb } else { $kb }) -Detail $detail
                 $downloaded.Add([pscustomobject]@{ Class = $class; File = $saved; Kb = $(if ($fileKb) { $fileKb } else { $kb }); EntryKb = $kb })
                 $classFilesKept.Add($saved)
+                $entryFiles.Add([pscustomobject]@{ Name = $leaf; Size = [string](Get-Item -LiteralPath $saved).Length })
+            }
+            # Remember what this entry produced, so the next Download patches can skip it (step 14).
+            if ($entryFiles.Count -gt 0) {
+                $record[(Get-CatalogEntryKey $best)] = [pscustomobject]@{ Key = (Get-CatalogEntryKey $best); Kb = $kb; Title = $title; Downloaded = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); Files = @($entryFiles) }
+                $recordChanged = $true
             }
         }
         if (-not $dryRun -and $classFilesKept.Count -gt 0) {
-            $folder = Join-Path $Paths.Patches $folders[$class]
             $removedNow = Update-PatchCache -Folder $folder -KeepFiles @($classFilesKept) -KeepChain $chainKbs -KeepKbs @($classPickedKbs)
             foreach ($r in $removedNow) { $removed.Add([pscustomobject]@{ Class = $class; File = $r }) }
         }
+        if (-not $dryRun -and ($recordChanged -or @($removedNow).Count -gt 0)) {
+            try { Save-DownloadRecord -Folder $folder -Record $record } catch { Write-Log "The download record in $folder could not be written: $($_.Exception.Message)" 'WARN' }
+        }
     }
     foreach ($s in $skippedClasses) { Write-Log "Skipped $s" 'WARN' }
+    if ($plan.Count -gt 0 -and @($plan | Where-Object { -not $_.Present }).Count -eq 0) { Write-Log 'PATCHES is up to date: every detected patch is already in its folder, so nothing was downloaded.' }
+    elseif (-not $dryRun) { Write-Log "Download patches: $($downloaded.Count) file(s) downloaded, $($alreadyPresent.Count) already present." }
     Set-Progress 95 'Acquisition done'
     Set-Phase 'Done'
     return [pscustomobject]@{
         Mode = 'Download'; DryRun = $dryRun; OsName = $Definition.Name; Plan = @($plan)
-        Downloaded = @($downloaded); Removed = @($removed); SkippedClasses = @($skippedClasses)
+        Downloaded = @($downloaded); Removed = @($removed); SkippedClasses = @($skippedClasses); AlreadyPresent = @($alreadyPresent)
+        UpToDate = [bool]($plan.Count -gt 0 -and @($plan | Where-Object { -not $_.Present }).Count -eq 0)
         NewWim = ''; Preflight = $false; VerifyIssues = $null; Gate = $null
     }
 }
@@ -2379,9 +2471,34 @@ function Invoke-MediaRefresh {
         if ($want2023 -and -not $doBoot) { Write-Log 'CA 2023 media is ticked, but it needs the media and Patch boot.wim (its boot files come from the patched boot.wim); it is skipped.' 'WARN' }
         elseif ($do2023) { Write-Log "CA 2023 media: built alongside the standard media in NEWWIM\Media_CA2023$(if ($Options.BuildIso) { ', with its own ISO' }), boot manager signed by Windows UEFI CA 2023." }
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
+        $lcuComing = $false
         if (-not $appsOnly) {
+            # Step 14 (Terry, 2026-09-27): "Download the latest patches before the run" - the catalog check and a download
+            # of only what is missing, before the patch folders are read. Unticked, the run uses PATCHES as it is.
+            if ([bool](Get-ProfileValue $Options 'AutoDownload' $false)) {
+                $acqOpts = [pscustomobject]@{ OsName = $name; Root = $Options.Root; Mode = 'Download'; DryRun = [bool]$Options.PreflightOnly
+                    LCU = $enabled.LCU; NetCU = $enabled.NetCU; SafeOS = $enabled.SafeOS; SetupDU = $enabled.SetupDU }
+                Set-Phase $(if ($Options.PreflightOnly) { 'Checking for new patches' } else { 'Downloading the latest patches' })
+                try {
+                    $acq = Invoke-PatchAcquisition -Options $acqOpts -Definition $definition -Paths $paths
+                    if ($Options.PreflightOnly) {
+                        $toGet = @(@($acq.Plan) | Where-Object { -not $_.Present })
+                        $lcuComing = @($toGet | Where-Object { $_.Class -eq 'LCU' }).Count -gt 0
+                        Write-Log $(if ($toGet.Count -eq 0) { 'Latest patches: PATCHES is up to date; the run will download nothing.' } else { "Latest patches: the run will first download $($toGet.Count) catalog entr$(if ($toGet.Count -eq 1) { 'y' } else { 'ies' }): $(($toGet | ForEach-Object { "$($_.Class) $($_.Kb)" }) -join ', ')." })
+                    }
+                } catch {
+                    Write-Log "The latest patches could not be $(if ($Options.PreflightOnly) { 'checked' } else { 'downloaded' }) ($($_.Exception.Message)); $(if ($Options.PreflightOnly) { 'the run will try again' } else { 'this run uses the patches already in the folders' })." 'WARN'
+                }
+                Set-Phase -OsName $name -Phase $(if ($Options.PreflightOnly) { 'Preflight' } else { 'Starting' })
+            } else { Write-Log 'Patches: the ones already in PATCHES are used (Download the latest patches before the run is not ticked).' }
             $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
-            Test-PackageSet -Definition $definition -Packages $packages -Enabled $enabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
+            $checkEnabled = $enabled.Clone()
+            if ($lcuComing -and @($packages.LCU).Count -eq 0) {
+                # A preflight with an empty PATCHES\LCU is fine when the run downloads the LCU first.
+                Write-Log 'PATCHES\LCU is empty now; the run downloads the LCU before servicing.'
+                $checkEnabled.LCU = $false
+            }
+            Test-PackageSet -Definition $definition -Packages $packages -Enabled $checkEnabled -DoWinRe ([bool]$Options.WinRE) -BuildMedia ([bool]$Options.BuildMedia)
         }
 
         # ISO discovery by content
@@ -2604,7 +2721,7 @@ function Invoke-MediaRefresh {
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
    <TabItem Header="Updates and Features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-    <GroupBox Grid.Column="0" Header="Patch selection" Margin="0,0,10,0"><StackPanel Margin="12"><CheckBox x:Name="ChkSSU" Content="Servicing Stack Update (PATCHES\SSU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkLCU" Content="Latest Cumulative Update (PATCHES\LCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSafeOS" Content="Safe OS Dynamic Update (PATCHES\SAFEOSDU, used for WinRE)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkNetCU" Content=".NET Cumulative Update (PATCHES\NETCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSetupDU" Content="Setup Dynamic Update (PATCHES\SETUPDU, used for refreshed media)" IsChecked="True" Margin="0,5"/></StackPanel></GroupBox>
+    <GroupBox Grid.Column="0" Header="Patch selection" Margin="0,0,10,0"><StackPanel Margin="12"><CheckBox x:Name="ChkAutoDownload" IsChecked="False" Margin="0,0,0,10" ToolTip="Ticked: the run first searches the Microsoft Update Catalog (like Download patches...) and downloads only the ticked updates that are not in PATCHES yet. Unticked: the run uses the patches already in the folders. PATCHES\SSU is always placed by hand."><TextBlock TextWrapping="Wrap" Text="Download the latest patches before the run (only what is missing). Unticked: use the patches already in the folders."/></CheckBox><CheckBox x:Name="ChkSSU" Content="Servicing Stack Update (PATCHES\SSU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkLCU" Content="Latest Cumulative Update (PATCHES\LCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSafeOS" Content="Safe OS Dynamic Update (PATCHES\SAFEOSDU, used for WinRE)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkNetCU" Content=".NET Cumulative Update (PATCHES\NETCU)" IsChecked="True" Margin="0,5"/><CheckBox x:Name="ChkSetupDU" Content="Setup Dynamic Update (PATCHES\SETUPDU, used for refreshed media)" IsChecked="True" Margin="0,5"/></StackPanel></GroupBox>
     <GroupBox Grid.Column="1" Header="Optional content" Margin="10,0,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkNetFx3" Content="Enable .NET Framework 3.5 from OS ISO sources\sxs" IsChecked="False" Margin="0,5"/><TextBlock Text="Ticked patch types with an empty folder are logged and skipped, except LCU (and the SSU on legacy OSes), which stop the run so you never get an unpatched image by accident." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,16,0,0"/></StackPanel></GroupBox>
    </Grid></TabItem>
    <TabItem Header="Languages"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="Language packs, language features and fonts to add to install.wim (WinRE and boot.wim stay English-only). Requires a Language Pack ISO and a Features on Demand ISO. Leave empty for English only. Defaults follow the selected operating system. The list comes from Profiles\Languages.json." TextWrapping="Wrap"/><ListBox x:Name="LanguageList" Grid.Row="1" SelectionMode="Multiple" Margin="0,12,0,0"/></Grid></TabItem>
@@ -2658,7 +2775,7 @@ function Invoke-MediaRefresh {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -3092,7 +3209,7 @@ function Get-UiOptions {
         SccmSiteServer = ([string]$script:SccmSiteServer.Text).Trim(); SccmTargetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); SccmTarget = ([string]$script:SccmTarget.Text).Trim()
         SccmContentSource = ([string]$script:SccmContentSource.Text).Trim(); SccmSourceServer = $script:SccmSourceServer; SccmPackageType = (Get-SccmPackageTypeTag); SccmImageName = ([string]$script:SccmImageName.Text).Trim()
         SSU = [bool]$script:ChkSSU.IsChecked; LCU = [bool]$script:ChkLCU.IsChecked; SafeOS = [bool]$script:ChkSafeOS.IsChecked
-        NetCU = [bool]$script:ChkNetCU.IsChecked; SetupDU = [bool]$script:ChkSetupDU.IsChecked; NetFx3 = [bool]$script:ChkNetFx3.IsChecked
+        NetCU = [bool]$script:ChkNetCU.IsChecked; SetupDU = [bool]$script:ChkSetupDU.IsChecked; NetFx3 = [bool]$script:ChkNetFx3.IsChecked; AutoDownload = [bool]$script:ChkAutoDownload.IsChecked
         Languages = $langs; ProfilesDir = $script:ProfilesDir
     }
 }
@@ -3303,9 +3420,14 @@ function Complete-BackgroundRun {
             $msg = "No catalog results to download.$(if ($skip) { "`n`nSkipped:`n - $skip" })"
             [System.Windows.MessageBox]::Show($msg, 'WimForge', 'OK', 'Information') | Out-Null
             $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
-        } else {
+        } elseif (@($plan | Where-Object { -not [bool](Get-ProfileValue $_ 'Present' $false) }).Count -eq 0) {
+            # Step 14: everything detected is already in the folders - nothing to download, so no confirmation.
             $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))" })
-            $msg = "This would download and keep the following (older files already in the same PATCHES class are removed; PATCHES\SSU is never touched):`n`n$($lines -join "`n")`n`nThe newest cumulative release is picked, out-of-band included. The LCU line says whether its release date is Patch Tuesday (the second Tuesday) or out-of-band.`n`nDownload these now?"
+            [System.Windows.MessageBox]::Show("PATCHES is up to date - every detected patch is already in its folder, so nothing needs downloading:`n`n$($lines -join "`n")", 'WimForge - Download patches', 'OK', 'Information') | Out-Null
+            $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        } else {
+            $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))`n      $(if ([bool](Get-ProfileValue $_ 'Present' $false)) { "already in PATCHES\$($_.Folder) - not downloaded again" } else { 'will be downloaded' })" })
+            $msg = "Latest patches found (older files in the same PATCHES class are removed; PATCHES\SSU is never touched):`n`n$($lines -join "`n")`n`nThe newest cumulative release is picked, out-of-band included. The LCU line says whether its release date is Patch Tuesday (the second Tuesday) or out-of-band.`n`nDownload the missing ones now?"
             $answer = [System.Windows.MessageBox]::Show($msg, 'WimForge - confirm download', 'YesNo', 'Question')
             if ($answer -eq 'Yes' -and $script:PendingDownloadOptions) {
                 $go = $script:PendingDownloadOptions
@@ -3358,7 +3480,7 @@ function Complete-BackgroundRun {
         }
         if ($isDownload) {
             $dl = @($res.Downloaded); $rm = @($res.Removed); $skip = @($res.SkippedClasses)
-            $msg = "Downloaded $($dl.Count) file(s)."
+            $msg = "Downloaded $($dl.Count) file(s); $(@(Get-ProfileValue $res 'AlreadyPresent' @()).Count) already present."
             if ($dl.Count -gt 0) { $msg += "`n`n" + (($dl | ForEach-Object { "  $($_.Class): $(Split-Path $_.File -Leaf)" }) -join "`n") }
             if ($rm.Count -gt 0) { $msg += "`n`nRemoved $($rm.Count) superseded file(s)." }
             if ($skip.Count -gt 0) { $msg += "`n`nSkipped: " + ($skip -join '; ') }

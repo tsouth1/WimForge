@@ -641,4 +641,38 @@ Check 'with NetFx3 unticked, a missing sources\sxs does not matter' ($script:Las
 New-File (Join-Path $isos 'os11\sources\sxs\microsoft-windows-netfx3-ondemand-package~31bf3856ad364e35~amd64~~.cab')
 Set-Item function:Enable-WindowsOptionalFeature $ewof20
 
+Write-Host "`n=== E21 Download the latest patches before the run (TODO step 14 part 2; the catalog mocked) ==="
+$ipa21 = ${function:Invoke-PatchAcquisition}; $script:Acq21 = [System.Collections.Generic.List[string]]::new(); $script:Acq21Plan = @(); $script:Acq21Fail = $false
+function Invoke-PatchAcquisition { param($Options, $Definition, $Paths)
+    $script:Acq21.Add("DryRun=$($Options.DryRun);LCU=$($Options.LCU);NetCU=$($Options.NetCU);Mounts=$(@($script:Calls -match '^Mount ').Count)")
+    if ($script:Acq21Fail) { throw 'The remote name could not be resolved: catalog.update.microsoft.com' }
+    if (-not $Options.DryRun) { New-File (Join-Path $Paths.Patches 'LCU\windows11.0-kb5129195-x64.msu') }   # "downloaded"
+    [pscustomobject]@{ Mode = 'Download'; DryRun = $Options.DryRun; Plan = @($script:Acq21Plan); Downloaded = @(); AlreadyPresent = @(); UpToDate = $false } }
+$logs21 = [System.Collections.Generic.List[string]]::new(); $wl21 = ${function:Write-Log}
+function Write-Log { param($Message, $Level = 'INFO') $logs21.Add("[$Level] $Message") }
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1
+$lcu21 = Join-Path $base 'Win11Enterprise_24H2\PATCHES\LCU'
+# Ticked, real run, empty LCU folder: the download happens first, before any image is mounted, and the run services it
+Get-ChildItem $lcu21 -File -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test
+$o21 = Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; SetupDU = $false; Verify = $false }; $o21 | Add-Member -NotePropertyName AutoDownload -NotePropertyValue $true -Force
+Invoke-MediaRefresh $o21
+Check 'ticked: the latest patches are downloaded first (before any mount), then the run services them' ($script:Acq21.Count -eq 1 -and $script:Acq21[0] -eq 'DryRun=False;LCU=True;NetCU=True;Mounts=0' -and @($script:Calls -match '^AddPkg windows11\.0-kb5129195-x64\.msu @ MainOS').Count -ge 1) (($script:Acq21 -join ' / ') + ' | ' + ($script:Calls -join '; '))
+# A catalog failure: WARN, and the run goes on with what is in the folders
+$script:Acq21.Clear(); $script:Acq21Fail = $true; Reset-Test; $logs21.Clear()
+Invoke-MediaRefresh $o21
+$script:Acq21Fail = $false
+Check 'the catalog cannot be reached: a WARN, and the run uses the patches already in the folders' ([bool]($logs21 -match '^\[WARN\] The latest patches could not be downloaded \(.*catalog.*\); this run uses the patches already in the folders') -and $script:LastResult.Install)
+# Preflight: only checks (DryRun); with an empty LCU folder and an LCU on the way it still passes
+Get-ChildItem $lcu21 -File | Remove-Item -Force; $script:Acq21.Clear(); Reset-Test; $logs21.Clear()
+$script:Acq21Plan = @([pscustomobject]@{ Class = 'LCU'; Kb = 'KB5129195'; Present = $false }, [pscustomobject]@{ Class = 'NetCU'; Kb = 'KB5126052'; Present = $true })
+$p21 = Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false }; $p21 | Add-Member -NotePropertyName AutoDownload -NotePropertyValue $true -Force
+Invoke-MediaRefresh $p21
+Check 'preflight: only checks the catalog, says what the run will download, and accepts the empty LCU folder' ($script:Acq21[0] -like 'DryRun=True*' -and $script:LastResult.Preflight -and [bool]($logs21 -match 'the run will first download 1 catalog entry: LCU KB5129195') -and [bool]($logs21 -match 'PATCHES\\LCU is empty now; the run downloads the LCU before servicing') -and @(Get-ChildItem $lcu21 -File).Count -eq 0)
+# Unticked: never contacts the catalog; an empty LCU folder stops the preflight as before
+$script:Acq21.Clear(); Reset-Test; $logs21.Clear(); $threw = $false
+try { Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false }) } catch { $threw = $true; $m21 = $_.Exception.Message }
+Check 'unticked: the catalog is not contacted, the folders are used as they are (an empty LCU folder still stops it)' ($script:Acq21.Count -eq 0 -and [bool]($logs21 -match 'Patches: the ones already in PATCHES are used') -and $threw -and $m21 -like '*PATCHES\LCU is empty*')
+Set-Item function:Write-Log $wl21; Set-Item function:Invoke-PatchAcquisition $ipa21; $script:Acq21Plan = @()
+Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb5129195-x64.msu')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

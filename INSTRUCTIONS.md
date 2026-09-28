@@ -75,7 +75,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 - **Repository root** - the folder that holds the OS folders.
 - **Operating system** - the OS to work on. The line under it shows the profile file in use and the end-of-support date (in red when support ends within 180 days or has ended).
-- **Download patches...** - searches the Microsoft Update Catalog for the selected OS and every ticked update kind (LCU, .NET CU, Safe OS DU, Setup DU). It always shows what it found first (title, KB, release date, and for the LCU whether it is the Patch Tuesday or an out-of-band release) and downloads only after you confirm. Older files of the same kind are then removed from that PATCHES folder. `PATCHES\SSU` is never touched.
+- **Download patches...** - searches the Microsoft Update Catalog for the selected OS and every ticked update kind (LCU, .NET CU, Safe OS DU, Setup DU). It always shows what it found first (title, KB, release date, and for the LCU whether it is the Patch Tuesday or an out-of-band release) and downloads only after you confirm - and only what is not already there: each line says "already in PATCHES\..." or "will be downloaded", and when everything is present you are told PATCHES is up to date and nothing is downloaded. Older files of the same kind are then removed from that PATCHES folder. `PATCHES\SSU` is never touched. Each folder keeps a small `_downloads.json` that remembers which files each catalog entry produced (an entry is downloaded again if one of its files is missing or has changed size).
 - **Reload profiles** - re-reads the files in `Profiles`.
 
 **Outputs:**
@@ -92,6 +92,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 - **Servicing Stack Update**, **Latest Cumulative Update**, **Safe OS Dynamic Update**, **.NET Cumulative Update**, **Setup Dynamic Update** - which PATCHES folders are used. A ticked folder that is empty is logged and skipped, except the LCU (and the SSU on LTSC 2019 and LTSC 2021), which stop the run so an unpatched image is never produced by accident.
   - About the LCU on Windows 11 24H2: when `PATCHES\LCU` holds the LCU and its checkpoint update, only the LCU is installed and DISM takes what it needs from the checkpoint in the same folder (Microsoft's method). Keep both files in that folder and nothing else.
+- **Download the latest patches before the run** - off by default. Ticked: the run first searches the catalog, like "Download patches...", and downloads only the ticked updates that are not in PATCHES yet (a preflight only checks and says what the run would download). If the catalog cannot be reached, the run carries on with the patches already in the folders and logs a warning. Unticked: the run uses the patches already in the folders. Saved per OS.
 - **Enable .NET Framework 3.5** - available for **every** operating system (on Windows Server 2022 it is enabled in all four indexes). Its files always come from the **OS ISO's own `sources\sxs` folder**, never from Windows Update. It is enabled after the component cleanup and before the .NET cumulative update, so the .NET CU also updates it. A preflight stops with a clear message if the OS ISO has no `sources\sxs`. The tick is saved per OS.
 
 ### Languages tab

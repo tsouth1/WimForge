@@ -6,7 +6,7 @@ Last updated: 2026-09-24. The list now tracks one script only, v2.4. Older versi
 
 Where v2.4 stands:
 
-- **Mock test kit:** 7 suites, 498 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
+- **Mock test kit:** 7 suites, 514 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-27).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -26,7 +26,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [11](#s11) | App / provisioned-app removal (debloat), first in the servicing order | Claude | Built: Apps tab, list read from the image, ticked apps removed first; 11b one scan per OS in Profiles\Apps (confirm on a real run) |
 | [12](#s12) | Windows UEFI CA 2023 boot media: CA 2023 media + ISO alongside the standard ones (12a); bootable WinPE rescue ISO (12b) | Claude | 12a built (confirm on a real run and a real boot); 12b not started |
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + Terry | Not started |
-| [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Not started (Terry, 2026-09-27) |
+| [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Built (mock-tested); confirm with a real Download patches and a real run |
 
 Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
@@ -401,6 +401,11 @@ Add these three OSes to the set the tool services, alongside the existing five (
 
 **Owner:** Claude. **Asked by Terry, 2026-09-27.**
 
+**Built 2026-09-27 (decision, Terry: option (a) - "Download the latest patches before the run"):**
+- **Only what is missing:** each `PATCHES\<class>` folder keeps `_downloads.json` - per catalog entry (by its Guid) the files it produced and their sizes, written after each download. A pick is already present when every recorded file is there at its recorded size, or (without a record) when the result lists file names and all are there; real MSCatalogLTS results leave FileNames empty, so the first Download patches after this change downloads once more and records it. Present picks are not downloaded, are kept by the pruning, and are not recorded as downloads in the change log; the record drops entries whose files are gone. The dry-run list marks each pick "already in PATCHES\..." or "will be downloaded"; when all are present the dialog says PATCHES is up to date and asks nothing; the result message counts downloaded vs already present. `-Force` stays for a pick that is downloaded (the 2026-09-24 safety net).
+- **Download the latest patches before the run** (Updates and Features tab, saved option `AutoDownload`, off by default; unticked = use the patches already in the folders): a real run calls the same acquisition (download only what is missing) before reading the patch folders; a preflight only checks (dry run) and logs what the run would download, and accepts an empty `PATCHES\LCU` when an LCU is on the way; a catalog failure is a WARN and the run carries on with the folders as they are. The downloads are change-log rows of the run.
+- **Tests:** 11 in `acquisition.ps1` (A12: first download recorded; repeat downloads nothing and reports up to date; dry run marks present; a missing or re-sized file is downloaded again; a new month's entry downloads and the old one is pruned from folder and record; file names from results without the hash; no record and no names downloads; a bad record; the record is never a package), 4 in `e2e.ps1` (E21, catalog mocked: ticked run downloads before any mount; catalog failure WARN and carry on; preflight only checks and accepts an empty LCU folder when one is coming; unticked never contacts the catalog), 1 in `xaml.ps1`; 6 existing acquisition checks adjusted for the record file.
+
 **How it works today (for reference):** "Download patches..." searches the catalog, shows the picks, and on confirmation downloads **every** pick again - `-Force` is passed since 2026-09-24, because MSCatalogLTS 2.1.0.1 skips an existing file without it and the pruning then removed the LCU it had just picked (step 2A). So a repeat run re-downloads files it already has (several GB for the Win11 LCU + checkpoint). Servicing runs never download anything: they always use what is in the PATCHES folders.
 
 **Wanted:**
@@ -480,6 +485,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-09-27: step 14 built - Download patches only downloads what is missing (a _downloads.json record per PATCHES folder; 'PATCHES is up to date'); new option 'Download the latest patches before the run' (off = use the folders as they are). Test kit 514 checks.
 - 2026-09-27: step 11b built - app list in Profiles\Apps\<folder>_Appx.json, one scan per OS: read again only when missing or the OS ISO (name, size, date) / index changed; a real run never writes it; the Apps tab points out a changed ISO; an old ProvisionedApps.json is moved once. Test kit 498 checks.
 - 2026-09-27: Read apps from the ISO made faster and visible (Terry: 'at least a few minutes'; LTSC 2021 returned no apps, as expected for LTSC): it mounts only the OS ISO - trying the ISOs in turn and dismounting any other one at once - instead of full role detection, which searched the Language Pack and FOD ISOs file by file; the status line shows each step (finding the OS ISO, mounting the edition read-only, reading the apps, discarding the mount), also during a preflight. Test kit 489 checks.
 - 2026-09-27: Spanish (Mexico) - es-mx added to the built-in language list and the repo Languages.json (21 entries). An existing Profiles\Languages.json is not changed: add the line there, or delete the file and press Reload profiles to get the new list.
