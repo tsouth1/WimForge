@@ -28,6 +28,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + operator | Not started |
 | [15](#s15) | Run configs and the command line: `-Config <file> [-Preflight]` runs without the window | Claude | Built (mock-tested + command line smoke-tested); confirm with a real elevated run |
 | [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Built (mock-tested); confirm with a real Download patches and a real run |
+| [16](#s16) | Media-only run: build the media / ISO around the existing NEWWIM\install.wim, without servicing install.wim again | Claude | Not started (asked 2026-09-28) |
 
 Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
@@ -425,6 +426,24 @@ Add these three OSes to the set the tool services, alongside the existing five (
 **Built:** JSON (like the profiles and saved settings). **Tools > Save run config...** writes the selected OS's choices - repository root, OS, every option (the saved-settings names, incl. `AutoDownload`, `AppRemoval`, `SccmAutoImport`), languages, apps to remove and the SCCM values - by default to `Configs\<folder>_run.json` beside the script (`Save-RunConfig`). `MediaRefresh_v2.4.ps1 -Config <file> [-Preflight]` runs the same engine without the window, synchronously (`Invoke-CommandLineRun`): profiles and `Languages.json` from the Profiles folder beside the script, the config checked (`Read-RunConfig`: unknown OS / language / key / option, non-true/false values, missing os or root - all listed in one message), turned into the run's options (`ConvertTo-RunOptions`: missing options take the window's defaults - `$script:OptionDefaults`, kept equal to the window's by a test -, missing `languages` the profile's defaults, the ISO only with the media folder, apps only with AppRemoval), logged to the console and LOGS. Exit codes: 0 success, 1 failed / bad config, 2 validation gate FAILED, 3 SCCM import (asked for by the config) failed; the import never runs after a FAILED gate or a preflight. The branch sits between the engine and the window regions, so nothing of the window is built.
 - **Tests:** 7 in `profiles.ps1` (P16), 8 in `e2e.ps1` (E22: a real preflight from a config; bad config; each exit code with the engine replaced; the branch position), 3 in `xaml.ps1` (defaults equal the window's; the menu item; saving from the window reads back). Smoke-tested as a separate process (unelevated copy): missing file and misspelled option exit 1 at once with the reason, a valid config reaches the engine (which then needs elevation), no window opens; the window still starts normally without `-Config`.
 - **Next (step 8):** a scheduled run = Task Scheduler + `-Config`; a batch queue = a config (or list of configs) with several OSes.
+
+---
+
+<a id="s16"></a>
+## 16. Build the media from an existing install.wim (media-only run)
+
+**Owner:** Claude. **Asked 2026-09-28.** **Status:** not started.
+
+**Why:** building the media always rebuilds install.wim first (about 3 h for LTSC 2019 with two languages on the 2-vCPU build host), because "Refreshed media requires Create updated install.wim". The three LTSC 2019 IoT runs of 2026-09-28 each spent that time only to test a boot.wim / media fix; install.wim had passed the gate each time. A media-only run would test boot.wim and media fixes in about 20-30 minutes, and could rebuild media for an image already imported into SCCM.
+
+**Wanted:**
+- An option on Source and Targets, for example **"Use the existing NEWWIM\install.wim"**, offered only while "Create updated install.wim" is unticked and the media folder is ticked. The run skips install.wim servicing, WinRE and verify; it services boot.wim (with the fallbacks from 2026-09-28), builds the media folder around the existing `NEWWIM\install.wim`, and the ISO / CA 2023 media when ticked.
+- **Which install.wim:** the one `NEWWIM\RunResult.json` names. Refuse (with the reason) when there is none, when its gate was FAILED, or when the file is missing or changed since that run (size / date in the record). Its build must match the OS ISO's family (e.g. 17763 for the 1809 ISO), since the media's `boot.wim`, `setup.exe` and Setup DU come from that ISO.
+- **The previous output:** the existing install.wim must not be archived or moved by `Backup-PreviousOutput` before the media is built around it (today the media step archives the previous NEWWIM output first) - the old media folder and ISOs are archived, the install.wim stays or is copied.
+- **Records:** the change log for this run lists the boot.wim / media rows and names the install.wim it used (its build and the run that made it); `RunResult.json` keeps pointing at the same install.wim with the new media folder added. Preflight checks the same conditions without building anything. The run config / `-Config` gets the matching option.
+- **Tests:** refused with no RunResult, a FAILED gate, a missing or changed install.wim, or a mismatched build; a media-only run mounts no install.wim, services boot.wim and builds the media around the existing file; the existing install.wim is not archived; change log and RunResult as above.
+
+**Done when:** a real media-only run on the LTSC 2019 IoT folder builds the media (and ISO) from the install.wim of the last passing run in well under an hour, and the full run is unchanged.
 <a id="built"></a>
 ## Built into v2.4 (reference)
 
