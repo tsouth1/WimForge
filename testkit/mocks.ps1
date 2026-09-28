@@ -40,6 +40,12 @@ $script:ProvisionedAppx = @()
 $script:FreeGB = 500.0
 function Get-FreeSpaceGB { param([string]$Path) return $script:FreeGB }
 function Invoke-DismExe { param([string[]]$Arguments,[string]$Description,[switch]$AllowPending) Note "DISM: $Description" }
+# fake .msu files are not cabinets: $script:MsuSsu maps an .msu name to the SSU cab it holds (none by default); E23 tests the real one
+$script:RealGetMsuServicingStack = ${function:Get-MsuServicingStack}
+$script:MsuSsu = @{}
+function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination)
+  $n = $script:MsuSsu[(Split-Path $MsuPath -Leaf)]; if (-not $n) { return $null }
+  New-Item -ItemType Directory -Force $Destination | Out-Null; $f = Join-Path $Destination $n; Set-Content $f 'ssu'; return (Get-Item $f) }
 
 $pass = 0; $fail = 0
 function Check($name, [bool]$ok, $detail='') { if ($ok) { $script:pass++; Write-Host "PASS  $name" -ForegroundColor Green } else { $script:fail++; Write-Host "FAIL  $name  $detail" -ForegroundColor Red } }

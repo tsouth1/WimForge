@@ -31,6 +31,7 @@ function Export-WindowsImage { [CmdletBinding()] param($SourceImagePath,$SourceI
   Note "Export -> $(Split-Path $DestinationImagePath -Leaf)"; Set-Content $DestinationImagePath 'x' }
 function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath) return @() }
 function Invoke-DismExe { param([string[]]$Arguments,[string]$Description,[switch]$AllowPending) Note "DISM: $Description" }
+function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination) return $null }   # fake .msu files hold no SSU cab
 
 $pass = 0; $fail = 0
 function Check($name, [bool]$ok, $detail='') { if ($ok) { $script:pass++; Write-Host "PASS  $name" -ForegroundColor Green } else { $script:fail++; Write-Host "FAIL  $name  $detail" -ForegroundColor Red } }

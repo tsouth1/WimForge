@@ -1517,6 +1517,16 @@ function Add-OfflineLanguages {
 }
 
 # ---------- servicing ----------
+function Get-MsuServicingStack {
+    # Extracts the SSU-*.cab from a combined LCU .msu into $Destination; returns its FileInfo, or $null when there is none.
+    param([Parameter(Mandatory)][string]$MsuPath, [Parameter(Mandatory)][string]$Destination)
+    if ($MsuPath -notmatch '(?i)\.msu$') { return $null }
+    Remove-DirectoryContents $Destination
+    Ensure-Directory $Destination
+    & "$env:SystemRoot\System32\expand.exe" $MsuPath '-F:SSU-*.cab' $Destination | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Log "Could not look for a servicing stack inside $(Split-Path $MsuPath -Leaf) (expand exit code $LASTEXITCODE)." 'WARN'; return $null }
+    return (Get-ChildItem -LiteralPath $Destination -Filter 'SSU-*.cab' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
 function Service-WinRe {
     # Extracts winre.wim from the currently mounted OS image, services it, and exports the result to $OutputPath.
     # No languages: they go into install.wim only; WinRE and boot.wim stay English-only (Terry, 2026-09-26).
@@ -1534,8 +1544,14 @@ function Service-WinRe {
     try {
         Mount-WindowsImage -ImagePath $working -Index 1 -Path $WinReMount -CheckIntegrity @dl -ErrorAction Stop | Out-Null
         Add-Packages $WinReMount $Packages.SSU 'WinRE' -Label 'SSU' -IgnoreCombinedLcu7007e
-        # Microsoft's WinRE step 1: add the combined LCU; only its servicing stack applies to WinRE, the LCU payload does not.
-        Add-Packages $WinReMount $Packages.LCU 'WinRE' -Label 'LCU (servicing stack only)' -IgnoreCombinedLcu7007e
+        # WinRE gets only the servicing stack of the combined LCU. Where the .msu holds an SSU-*.cab, only that cab is added:
+        # adding the whole .msu to an 1809 WinRE installs the RollupFix payload too and fails with 0x8007371b (missing
+        # qps-ploc files; Terry's LTSC 2019 IoT run, 2026-09-28). Without an SSU cab, the .msu is added as Microsoft documents.
+        foreach ($lcuPkg in @($Packages.LCU | Where-Object { $_ })) {
+            $ssuCab = Get-MsuServicingStack -MsuPath $lcuPkg.FullName -Destination (Join-Path $Temp 'lcu_ssu')
+            if ($ssuCab) { Add-Packages $WinReMount @($ssuCab) 'WinRE' -Label "servicing stack from $(Split-Path $lcuPkg.FullName -Leaf)" -IgnoreCombinedLcu7007e }
+            else { Add-Packages $WinReMount @($lcuPkg) 'WinRE' -Label 'LCU (servicing stack only)' -IgnoreCombinedLcu7007e }
+        }
         Add-Packages $WinReMount $Packages.SafeOS 'WinRE' -Label 'Safe OS DU'
         Invoke-DismExe -Arguments @("/Image:$WinReMount", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase', '/Defer') -Description 'Cleaning WinRE'
         Dismount-WindowsImage -Path $WinReMount -Save -CheckIntegrity @dl -ErrorAction Stop | Out-Null

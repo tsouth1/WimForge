@@ -706,4 +706,39 @@ Set-Item function:Invoke-MediaRefresh $savedImr22
 $cl22 = [regex]::Match($src, '(?s)\r?\n# Command line \(-Config\).*?\r?\n\}\r?\n').Value
 Check 'the command line branch sits after the engine and before the window, and exits with the run''s code' ($src.IndexOf('#endregion ENGINE') -lt $src.IndexOf('# Command line (-Config)') -and $src.IndexOf('# Command line (-Config)') -lt $src.IndexOf('#region GUI') -and $cl22 -match 'exit \(\[int\]\$cliCode\[-1\]\)')
 
+Write-Host "`n=== E23 WinRE gets only the servicing stack of a combined LCU .msu (Terry's LTSC 2019 IoT run, 2026-09-28: 0x8007371b) ==="
+# The 1809 LCU .msu now holds SSU-17763.9242-x64.cab; adding the whole .msu to WinRE installed the RollupFix payload as well
+Reset-Test; $script:ImageCount = 1; $script:SourceNames = @('Windows 10 Enterprise LTSC')
+Remove-Item (Join-Path $base 'Win10_Enterprise_LTSC_2019\ISO\lp15.iso') -Force -ErrorAction SilentlyContinue   # E15's stand-in, not a mapped ISO
+$lcu23 = @(Get-ChildItem (Join-Path $base 'Win10_Enterprise_LTSC_2019\PATCHES\LCU') -File)[0].Name
+$script:MsuSsu = @{ $lcu23 = 'SSU-17763.9242-x64.cab' }
+$logs23 = [System.Collections.Generic.List[string]]::new()
+$wl = ${function:Write-Log}; function Write-Log { param($Message,$Level='INFO') $logs23.Add("[$Level] $Message") }
+Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false })
+Set-Item function:Write-Log $wl
+$add23 = @($script:Calls -match '^AddPkg ')
+Check 'WinRE gets the SSU cab from inside the LCU .msu, not the .msu itself' (@($add23 -match '^AddPkg SSU-17763\.9242-x64\.cab @ WinRE$').Count -eq 1 -and @($add23 -match "^AddPkg $([regex]::Escape($lcu23)) @ WinRE$").Count -eq 0) ($add23 -join ' | ')
+Check 'install.wim still gets the whole LCU .msu, and nothing else gets the extracted cab' (@($add23 -match "^AddPkg $([regex]::Escape($lcu23)) @ ").Count -ge 1 -and @($add23 -match '^AddPkg SSU-17763').Count -eq 1) ($add23 -join ' | ')
+Check 'the log names where the servicing stack came from' ([bool]($logs23 -match "^\[INFO\] Adding servicing stack from $([regex]::Escape($lcu23)) .*SSU-17763\.9242-x64\.cab to WinRE$")) ($logs23 -match 'Adding' -join ' | ')
+$script:MsuSsu = @{}
+Reset-Test
+Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false })
+Check 'an .msu without an SSU cab is still added to WinRE as before (Microsoft''s documented step)' (@($script:Calls -match "^AddPkg $([regex]::Escape($lcu23)) @ WinRE$").Count -eq 1)
+$makecab23 = Join-Path $env:SystemRoot 'System32\makecab.exe'
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and (Test-Path $makecab23)) {
+    # the real function on a real cabinet named .msu, as a combined LCU is
+    $d23 = Join-Path $base 'msu23'; New-File (Join-Path $d23 'SSU-17763.9242-x64.cab') 'servicing stack'; New-File (Join-Path $d23 'Windows10.0-KB5129238-x64.cab') 'rollup'
+    function New-Cab23($name, $files) {
+        Set-Content (Join-Path $d23 'list.txt') ($files -join "`r`n")
+        Push-Location $d23
+        & $makecab23 /D CompressionType=MSZIP /D "DiskDirectoryTemplate=$d23" /D "CabinetNameTemplate=$name" /F (Join-Path $d23 'list.txt') | Out-Null
+        Pop-Location
+        return (Join-Path $d23 $name) }
+    $msuA = New-Cab23 'windows10.0-kb5129238-x64.msu' @('SSU-17763.9242-x64.cab', 'Windows10.0-KB5129238-x64.cab')
+    $msuB = New-Cab23 'windows10.0-kb5000001-x64.msu' @('Windows10.0-KB5129238-x64.cab', 'SSU-17763.9242-x64.cab.txt')
+    $gotA = & $script:RealGetMsuServicingStack -MsuPath $msuA -Destination (Join-Path $base 'x23a')
+    Check 'Get-MsuServicingStack extracts SSU-*.cab from a combined .msu and returns it' ($gotA -and $gotA.Name -eq 'SSU-17763.9242-x64.cab' -and (Get-Content -Raw $gotA.FullName).Trim() -eq 'servicing stack' -and @(Get-ChildItem (Join-Path $base 'x23a')).Count -eq 1) "$gotA"
+    Check 'Get-MsuServicingStack returns nothing for an .msu without an SSU cab, or for a .cab' ($null -eq (& $script:RealGetMsuServicingStack -MsuPath $msuB -Destination (Join-Path $base 'x23b')) -and $null -eq (& $script:RealGetMsuServicingStack -MsuPath (Join-Path $d23 'SSU-17763.9242-x64.cab') -Destination (Join-Path $base 'x23c')))
+} else { Write-Host 'SKIP  Get-MsuServicingStack on a real cabinet (needs Windows makecab.exe/expand.exe)' }
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

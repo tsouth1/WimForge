@@ -82,7 +82,7 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 - **Preflight check only** - checks ISOs, patch folders, language packs, edition and free space in about a minute; changes nothing.
 - **Create updated install.wim** - the main output.
-- **Service embedded WinRE** - patches the recovery environment inside the image once and reuses it for every index. WinRE gets the servicing stack from the LCU (the log says "LCU (servicing stack only)"; the rest of the LCU does not apply to WinRE) and the Safe OS Dynamic Update.
+- **Service embedded WinRE** - patches the recovery environment inside the image once and reuses it for every index. WinRE gets the servicing stack from the LCU and the Safe OS Dynamic Update. When the LCU .msu carries its own servicing stack (an `SSU-*.cab` inside, as the Windows 10 1809 LCUs now do), only that cab is extracted and added (the log says "servicing stack from <LCU file>"); otherwise the .msu is added and the log says "LCU (servicing stack only)". The rest of the LCU never goes into WinRE.
 - **Verify the final install.wim** - mounts the result read-only, logs its version, and checks that the cumulative update, the language packs and their fonts are really installed. Needed for the validation gate and for the full change log.
 - **Create refreshed media folder** - a complete installation media folder in `NEWWIM\Media`, for an OS Upgrade Package, a bootable USB stick or the ISO. It carries the new `install.wim` and the Setup Dynamic Update. The options below it are available only while it is ticked.
   - **Also build an ISO from that media** - builds `UpdatedMedia_<date>.iso` in `NEWWIM` (needs the Windows ADK).
