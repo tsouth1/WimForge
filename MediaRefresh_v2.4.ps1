@@ -2198,11 +2198,38 @@ function New-RefreshedMedia {
     Write-Log "Refreshed media folder ready: $media"
     return $media
 }
+$script:NoAdkMessage = 'No local ADK installation found. This option is not available.'
+function Find-Oscdimg {
+    # Oscdimg.exe of the local Windows ADK (Deployment Tools), needed to build an ISO; $null when there is none. Looks where
+    # the ADK says it is installed (KitsRoot10 in the registry, any drive), then the default folder, then the PATH.
+    param([string[]]$KitsRoots)
+    if ($null -eq $KitsRoots) {
+        $KitsRoots = @()
+        foreach ($key in 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots') {
+            try { $v = (Get-ItemProperty -LiteralPath $key -Name KitsRoot10 -ErrorAction Stop).KitsRoot10; if ($v) { $KitsRoots += [string]$v } } catch { }
+        }
+        if (${env:ProgramFiles(x86)}) { $KitsRoots += [System.IO.Path]::Combine(${env:ProgramFiles(x86)}, 'Windows Kits', '10') }
+    }
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    foreach ($root in @($KitsRoots | Where-Object { $_ } | Select-Object -Unique)) {
+        $tools = [System.IO.Path]::Combine($root, 'Assessment and Deployment Kit', 'Deployment Tools')
+        $exact = [System.IO.Path]::Combine($tools, $arch, 'Oscdimg', 'oscdimg.exe')
+        if (Test-Path -LiteralPath $exact -PathType Leaf) { return $exact }
+        if (Test-Path -LiteralPath $tools -PathType Container) {
+            $any = Get-ChildItem -LiteralPath $tools -Filter oscdimg.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($any) { return $any.FullName }
+        }
+    }
+    $onPath = Get-Command oscdimg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($onPath) { return $onPath.Source }
+    return $null
+}
 function Build-IsoFromMedia {
     # -EfiBootFile efisys_ex.bin for the CA 2023 media (its UEFI boot image), as Microsoft's script does.
     param([string]$MediaFolder, [hashtable]$Paths, [string]$EfiBootFile = 'efisys.bin', [string]$NamePrefix = 'UpdatedMedia')
-    $oscdimg = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools" -Filter oscdimg.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $oscdimg) { throw 'Oscdimg.exe was not found. Install the Windows ADK Deployment Tools.' }
+    $oscdimgPath = Find-Oscdimg
+    if (-not $oscdimgPath) { throw "$($script:NoAdkMessage) Oscdimg.exe (Windows ADK Deployment Tools) is needed to build the ISO." }
+    $oscdimg = Get-Item -LiteralPath $oscdimgPath
     $bios = Join-Chain $MediaFolder @('boot', 'etfsboot.com'); $uefi = Join-Chain $MediaFolder @('efi', 'microsoft', 'boot', $EfiBootFile)
     if (-not (Test-Path -LiteralPath $bios) -or -not (Test-Path -LiteralPath $uefi)) { throw "Required BIOS or UEFI boot sector files (etfsboot.com, $EfiBootFile) were not found in the media." }
     $isoOut = Join-Path $Paths.NewWim ("{0}_{1}.iso" -f $NamePrefix, (Get-Date -Format 'yyyyMMdd_HHmmss'))
@@ -2581,6 +2608,12 @@ function Invoke-MediaRefresh {
         $do2023 = $want2023 -and $doBoot
         if ($want2023 -and -not $doBoot) { Write-Log 'CA 2023 media is ticked, but it needs the media and Patch boot.wim (its boot files come from the patched boot.wim); it is skipped.' 'WARN' }
         elseif ($do2023) { Write-Log "CA 2023 media: built alongside the standard media in NEWWIM\Media_CA2023$(if ($Options.BuildIso) { ', with its own ISO' }), boot manager signed by Windows UEFI CA 2023." }
+        if ([bool]$Options.BuildIso -and -not $appsOnly) {
+            # Checked before anything is mounted: a missing ADK used to surface only after hours of servicing (2026-09-29).
+            $oscdimgAtStart = Find-Oscdimg
+            if (-not $oscdimgAtStart) { throw "Build an ISO: $($script:NoAdkMessage) Oscdimg.exe (Windows ADK Deployment Tools) is needed; install it or untick the ISO option." }
+            Write-Log "ISO: Oscdimg found at $oscdimgAtStart"
+        }
         $enabled = @{ LCU = [bool]$Options.LCU; SSU = [bool]$Options.SSU; NetCU = [bool]$Options.NetCU; SafeOS = [bool]$Options.SafeOS; SetupDU = [bool]$Options.SetupDU }
         $lcuComing = $false
         if (-not $appsOnly) {
@@ -3479,6 +3512,22 @@ function Update-BootOption {
     $script:ChkMedia2023.IsEnabled = $script:ChkBoot.IsEnabled -and [bool]$script:ChkBoot.IsChecked
 }
 foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso, $script:ChkBoot)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
+# Build an ISO needs Oscdimg from the local ADK (2026-09-29): ticking it checks for the ADK; without one the box is unticked
+# again. A click shows the message; saved settings ticking it are unticked with a WARN in the log only. A found Oscdimg is
+# remembered for the session; "not found" is checked again on the next tick (the ADK may have been installed meanwhile).
+$script:OscdimgPath = $null; $script:IsoRefusedNote = $false
+function Confirm-IsoOption {
+    if ($script:OscdimgPath -and (Test-Path -LiteralPath $script:OscdimgPath)) { return $true }
+    $script:OscdimgPath = Find-Oscdimg
+    if ($script:OscdimgPath) { return $true }
+    $script:ChkBuildIso.IsChecked = $false
+    return $false
+}
+$script:ChkBuildIso.Add_Checked({ if (-not (Confirm-IsoOption)) { $script:IsoRefusedNote = $true; Write-Log "Build an ISO was unticked: $($script:NoAdkMessage)" 'WARN' } })
+$script:ChkBuildIso.Add_Click({
+    if ($script:IsoRefusedNote -and -not $script:ChkBuildIso.IsChecked) { [System.Windows.MessageBox]::Show($script:NoAdkMessage, 'WimForge', 'OK', 'Warning') | Out-Null }
+    $script:IsoRefusedNote = $false
+})
 $script:SaveSettingsButton.Add_Click({
     if (-not $script:RunButton.IsEnabled) { return }
     try { if (Save-CurrentOsSettings) { $script:Status.Text = "Settings saved for $([string]$script:OsCombo.SelectedItem)" } }

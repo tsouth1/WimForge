@@ -797,6 +797,18 @@ Reset-Test; $msg25b = ''
 try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true }) } catch { $msg25b = $_.Exception.Message }
 Set-Item function:Write-Log $wl; Set-Item function:Add-WindowsPackage $savedAdd24
 Check 'another boot.wim error is not retried: one mount, and the media is not built' (@($script:Calls -match '^Mount boot\.working\.wim idx1').Count -eq 1 -and $msg25b -like 'The media was not built: *0x80070002*') $msg25b
+Write-Host "`n=== E26 Build an ISO without a local ADK stops the run before anything is mounted (2026-09-29) ==="
+$script:MockOscdimg = $null; $script:MsuSsu = @{}
+foreach ($pre26 in $false, $true) {
+    Reset-Test; $msg26 = ''
+    try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true; BuildIso=$true; Preflight=$pre26 }) } catch { $msg26 = $_.Exception.Message }
+    Check "$(if ($pre26) { 'preflight' } else { 'run' }): stops with the ADK message, nothing mounted" ($msg26 -like 'Build an ISO: No local ADK installation found. This option is not available.*untick the ISO option.' -and @($script:Calls -match '^Mount ').Count -eq 0) "$msg26 | $($script:Calls -join ' | ')"
+}
+Reset-Test; $msg26 = ''
+try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ NetFx3=$false; SetupDU=$false; Verify=$false; Boot=$true; BuildMedia=$true; BuildIso=$false }) } catch { $msg26 = $_.Exception.Message }
+Check 'without the ISO option the ADK is not needed: the media folder is still built' ($msg26 -eq '') $msg26
+$script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+
 Check 'E24''s case (every boot.wim package fails) is retried once without the LCU, then stops' ($e24retries -eq 1 -and $e24mounts -eq 2) "retries $e24retries, mounts $e24mounts"
 $script:MsuSsu = @{}
 

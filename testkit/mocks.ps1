@@ -46,6 +46,10 @@ $script:MsuSsu = @{}
 function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination)
   $n = $script:MsuSsu[(Split-Path $MsuPath -Leaf)]; if (-not $n) { return $null }
   New-Item -ItemType Directory -Force $Destination | Out-Null; $f = Join-Path $Destination $n; Set-Content $f 'ssu'; return (Get-Item $f) }
+# the ADK's Oscdimg: found by default (runs with an ISO); $null = no local ADK. P18 tests the real lookup.
+$script:RealFindOscdimg = ${function:Find-Oscdimg}
+$script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+function Find-Oscdimg { param([string[]]$KitsRoots) return $script:MockOscdimg }
 $script:RealExpandCombinedMsu = ${function:Expand-CombinedMsu}
 function Expand-CombinedMsu { param([string]$MsuPath, [string]$Destination)
   $leaf = Split-Path $MsuPath -Leaf; $n = $script:MsuSsu[$leaf]; if (-not $n) { return $null }

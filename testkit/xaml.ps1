@@ -174,6 +174,19 @@ if ($wpf) {
     $script:ChkBoot.IsChecked = $false; $c2 = $script:ChkMedia2023.IsEnabled
     $script:ChkBoot.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $false; $c3 = $script:ChkMedia2023.IsEnabled
     Check 'CA 2023 is available only with media and Patch boot.wim both ticked' ($c1 -and -not $c2 -and -not $c3)
+    # Build an ISO checks for the local ADK when it is ticked (2026-09-29); the click's message box is not raised here (it blocks)
+    Invoke-Expression ([regex]::Match($src, "(?s)function Confirm-IsoOption \{.*?\r?\n\}\r?\n").Value)
+    Invoke-Expression ([regex]::Match($src, '\$script:ChkBuildIso\.Add_Checked\(\{ if \(-not \(Confirm-IsoOption\)\)[^\r\n]*').Value)
+    $script:OscdimgPath = $null; $script:IsoRefusedNote = $false
+    $script:ChkBuildMedia.IsChecked = $true; $script:ChkBuildIso.IsChecked = $false
+    $script:MockOscdimg = $null; $script:WarnLines.Clear()
+    $script:ChkBuildIso.IsChecked = $true
+    Check 'no local ADK: ticking Build an ISO unticks it again and logs the message' (-not $script:ChkBuildIso.IsChecked -and $script:IsoRefusedNote -and [bool]($script:WarnLines -match '^\[WARN\] Build an ISO was unticked: No local ADK installation found\. This option is not available\.$')) ($script:WarnLines -join ' | ')
+    $script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'; $script:IsoRefusedNote = $false
+    $script:ChkBuildIso.IsChecked = $true
+    Check 'with the ADK found, the tick stays' ([bool]$script:ChkBuildIso.IsChecked -and -not $script:IsoRefusedNote)
+    Check 'a click that was refused shows "No local ADK installation found. This option is not available."' ($src -match '(?s)\$script:ChkBuildIso\.Add_Click\(\{\s*if \(\$script:IsoRefusedNote -and -not \$script:ChkBuildIso\.IsChecked\) \{ \[System\.Windows\.MessageBox\]::Show\(\$script:NoAdkMessage')
+    $script:ChkBuildIso.IsChecked = $false; $script:ChkBuildMedia.IsChecked = $false
     $auto14 = $win.FindName('ChkAutoDownload')
     Check 'Updates and Features: "Download the latest patches before the run" is there, off by default, and saved per OS (step 14)' ($null -ne $auto14 -and -not $script:DefaultChecks['AutoDownload'] -and $script:SettingOptionNames -contains 'AutoDownload' -and [string]$auto14.Content.Text -like 'Download the latest patches before the run (only what is missing)*use the patches already in the folders.')
 

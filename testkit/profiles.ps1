@@ -420,4 +420,17 @@ Check 'Find-InstructionsFile: first folder that has it, any letter case; $null w
 $st17a = Get-FileStamp (Join-Path $d17 'b\Instructions.MD'); [System.IO.File]::WriteAllText((Join-Path $d17 'b\Instructions.MD'), '# b changed')
 Check 'Get-FileStamp changes when the file changes, and is "missing" for no file' ($st17a -ne (Get-FileStamp (Join-Path $d17 'b\Instructions.MD')) -and (Get-FileStamp '') -eq 'missing' -and (Get-FileStamp (Join-Path $d17 'nope.md')) -eq 'missing')
 
+Write-Host "`n=== P18 Build an ISO needs the local ADK's Oscdimg (2026-09-29) ==="
+$k18 = Join-Path $PWD 'tst_root\kits'; $t18 = Join-Path $k18 'Assessment and Deployment Kit\Deployment Tools'
+New-Item -ItemType Directory -Force (Join-Path $t18 'amd64\Oscdimg'), (Join-Path $t18 'x86\Oscdimg') | Out-Null
+Set-Content (Join-Path $t18 'x86\Oscdimg\oscdimg.exe') 'x'
+Check 'Find-Oscdimg: an ADK with Oscdimg for another architecture only is still found' ((& $script:RealFindOscdimg -KitsRoots @($k18)) -eq (Join-Path $t18 'x86\Oscdimg\oscdimg.exe'))
+Set-Content (Join-Path $t18 'amd64\Oscdimg\oscdimg.exe') 'x'
+$arch18 = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+if ($arch18 -eq 'amd64') { Check 'Find-Oscdimg: the host architecture''s Oscdimg is preferred, under the ADK root the registry names (any drive)' ((& $script:RealFindOscdimg -KitsRoots @((Join-Path $k18 'nope'), $k18)) -eq (Join-Path $t18 'amd64\Oscdimg\oscdimg.exe')) }
+if (-not (Get-Command oscdimg.exe -ErrorAction SilentlyContinue)) {
+    Check 'Find-Oscdimg: no ADK under any root and none on the PATH -> $null' ($null -eq (& $script:RealFindOscdimg -KitsRoots @((Join-Path $k18 'nope'))))
+} else { Write-Host 'SKIP  Find-Oscdimg not-found case (oscdimg.exe is on the PATH here)' }
+Check 'the message is the one asked for' ($script:NoAdkMessage -eq 'No local ADK installation found. This option is not available.')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"
