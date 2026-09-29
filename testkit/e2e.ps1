@@ -534,7 +534,7 @@ $j18 = Get-Content -Raw $appsFile18 | ConvertFrom-Json; $j18.index = 2; ($j18 | 
 Reset-Test; $logs18.Clear()
 Invoke-MediaRefresh $p18
 Set-Item function:Write-Log $wl18
-Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list was read from os11\.iso \(index 2\); .* so index 3 is read again') -and (Read-AppInventory -File $appsFile18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
+Check 'preflight with a list from another index: reads it again (read-only)' ([bool]($logs18 -match 'The app list is out of date: it was read from index 2; this run uses index 3\. .* so index 3 is read again') -and (Read-AppInventory -File $appsFile18).Index -eq 3 -and @($script:Calls -match 'save$').Count -eq 0)
 # A new month's ISO under the same file name (2026-09-27: it may add or remove apps): a preflight reads the list again
 $isoFile18 = Join-Path $os18 'ISO\os11.iso'; (Get-Item $isoFile18).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(1)
 $script:Prov18.Add((New-App18 'Microsoft.NewInOctober'))
@@ -547,7 +547,10 @@ Check 'a new ISO under the same name (new date): the preflight reads the list ag
 Reset-Test; Reset-Prov18; $logs18.Clear(); $listTime18b = (Get-Item $appsFile18).LastWriteTimeUtc
 Invoke-MediaRefresh $o18
 Set-Item function:Write-Log $wl18
-Check 'a real run with an out-of-date list: a WARN, the list is not touched, the ticked app is still removed' ([bool]($logs18 -match "^\[WARN\] The Apps tab's list is from os11\.iso, not the current OS ISO") -and (Get-Item $appsFile18).LastWriteTimeUtc -eq $listTime18b -and @($script:Calls -match '^RemoveAppx Microsoft\.BingNews').Count -eq 1)
+Check 'a real run with an out-of-date list: a WARN naming the reason, the list is not touched, the ticked app is still removed' ([bool]($logs18 -match "^\[WARN\] The Apps tab's list may be out of date \(os11\.iso is dated .*, but the list was read from a copy dated .*\); this run removes") -and (Get-Item $appsFile18).LastWriteTimeUtc -eq $listTime18b -and @($script:Calls -match '^RemoveAppx Microsoft\.BingNews').Count -eq 1)
+$iso18id = [pscustomobject]@{ Name = 'a.iso'; Size = 100; Time = '638000000000000000' }
+$inv18ok = [pscustomobject]@{ Source = 'a.iso'; Index = 3; IsoSize = '100'; IsoTime = '638000000000000000' }
+Check 'Get-AppInventoryStaleReason names each reason, and is empty when the list is current' ((Get-AppInventoryStaleReason -Inventory $inv18ok -Iso $iso18id -Index 3) -eq '' -and (Get-AppInventoryStaleReason -Inventory $null -Iso $iso18id -Index 3) -eq 'there is no list yet' -and (Get-AppInventoryStaleReason -Inventory ([pscustomobject]@{ Source = 'b.iso'; Index = 3; IsoSize = '100'; IsoTime = '1' }) -Iso $iso18id -Index 3) -like 'it was read from b.iso, not the current OS ISO a.iso' -and (Get-AppInventoryStaleReason -Inventory ([pscustomobject]@{ Source = 'a.iso'; Index = 3; IsoSize = ''; IsoTime = '' }) -Iso $iso18id -Index 3) -like "it was saved before WimForge recorded the ISO's size and date*" -and (Get-AppInventoryStaleReason -Inventory ([pscustomobject]@{ Source = 'a.iso'; Index = 3; IsoSize = '99'; IsoTime = '638000000000000000' }) -Iso $iso18id -Index 3) -like 'a.iso has a different size*')
 # Windows Server: ticked apps are ignored with a WARN
 Reset-Test; $logs18.Clear(); $script:ImageCount = 4
 function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }

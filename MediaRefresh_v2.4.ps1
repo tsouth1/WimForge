@@ -1548,7 +1548,7 @@ function Get-MsuServicingStack {
     Remove-DirectoryContents $Destination
     Ensure-Directory $Destination
     & "$env:SystemRoot\System32\expand.exe" $MsuPath '-F:SSU-*.cab' $Destination | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Log "Could not look for a servicing stack inside $(Split-Path $MsuPath -Leaf) (expand exit code $LASTEXITCODE)." 'WARN'; return $null }
+    if ($LASTEXITCODE -ne 0) { Write-Log "$(Split-Path $MsuPath -Leaf) is not a cabinet expand.exe can open (the newer .msu format, e.g. Windows 11 24H2 - expand exit code $LASTEXITCODE); it is added whole, as Microsoft documents."; return $null }
     return (Get-ChildItem -LiteralPath $Destination -Filter 'SSU-*.cab' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 function Expand-CombinedMsu {
@@ -1558,7 +1558,7 @@ function Expand-CombinedMsu {
     if ($MsuPath -notmatch '(?i)\.msu$') { return $null }
     Remove-DirectoryContents $Destination
     & "$env:SystemRoot\System32\expand.exe" $MsuPath '-F:*.cab' $Destination | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Log "Could not open $(Split-Path $MsuPath -Leaf) (expand exit code $LASTEXITCODE)." 'WARN'; return $null }
+    if ($LASTEXITCODE -ne 0) { Write-Log "$(Split-Path $MsuPath -Leaf) is not a cabinet expand.exe can open (the newer .msu format, e.g. Windows 11 24H2 - expand exit code $LASTEXITCODE); boot.wim gets it whole."; return $null }
     $cabs = @(Get-ChildItem -LiteralPath $Destination -Filter '*.cab' -File -ErrorAction SilentlyContinue)
     $ssu = $cabs | Where-Object { $_.Name -like 'SSU-*.cab' } | Select-Object -First 1
     $updates = @($cabs | Where-Object { $_.Name -notlike 'SSU-*.cab' -and $_.Name -ine 'WSUSSCAN.cab' } | Sort-Object Name)
@@ -1635,6 +1635,23 @@ function Test-AppInventoryCurrent {
     param($Inventory, $Iso, [int]$Index)
     if (-not $Inventory -or -not $Iso) { return $false }
     return ($Inventory.Source -eq $Iso.Name -and [string]$Inventory.IsoSize -eq [string]$Iso.Size -and $Inventory.IsoTime -eq $Iso.Time -and $Inventory.Index -eq $Index)
+}
+function Get-AppInventoryStaleReason {
+    # Why the saved app list does not count as read from this ISO and index, for the log; '' when it is current.
+    # (The Win11 run of 2026-09-29 warned "from X, not the current OS ISO X" - same name, so the reason has to be named.)
+    param($Inventory, $Iso, [int]$Index)
+    if (-not $Inventory) { return 'there is no list yet' }
+    if (-not $Iso) { return 'the OS ISO could not be identified' }
+    if ($Inventory.Source -ne $Iso.Name) { return "it was read from $($Inventory.Source), not the current OS ISO $($Iso.Name)" }
+    if ($Inventory.Index -ne $Index) { return "it was read from index $($Inventory.Index); this run uses index $Index" }
+    if (-not $Inventory.IsoSize -or -not $Inventory.IsoTime) { return "it was saved before WimForge recorded the ISO's size and date, so it cannot tell whether $($Iso.Name) is the same file" }
+    if ([string]$Inventory.IsoSize -ne [string]$Iso.Size) { return "$($Iso.Name) has a different size than when the list was read (a new ISO with the same name)" }
+    if ($Inventory.IsoTime -ne $Iso.Time) {
+        $was = try { ([datetime]::new([int64]$Inventory.IsoTime, 'Utc')).ToLocalTime().ToString('yyyy-MM-dd HH:mm') } catch { $Inventory.IsoTime }
+        $now = try { ([datetime]::new([int64]$Iso.Time, 'Utc')).ToLocalTime().ToString('yyyy-MM-dd HH:mm') } catch { $Iso.Time }
+        return "$($Iso.Name) is dated $now, but the list was read from a copy dated $was (a new ISO with the same name, or the file was copied again)"
+    }
+    return ''
 }
 function Get-ProvisionedApps {
     param([Parameter(Mandatory)][string]$Mount)
@@ -2717,16 +2734,18 @@ function Invoke-MediaRefresh {
             # the one it was read from (name, size or date: a new ISO may add or remove apps) or the index differs. A real run
             # never writes it - it only says when the list is out of date (removal matches the mounted image anyway).
             $appInv = Read-AppInventory -File $appListFile
-            $isCurrent = Test-AppInventoryCurrent -Inventory $appInv -Iso (Get-IsoIdentity $osIsoPath) -Index ([int]$selected.ImageIndex)
+            $osIsoId = Get-IsoIdentity $osIsoPath
+            $isCurrent = Test-AppInventoryCurrent -Inventory $appInv -Iso $osIsoId -Index ([int]$selected.ImageIndex)
+            $staleWhy = if ($isCurrent) { '' } else { Get-AppInventoryStaleReason -Inventory $appInv -Iso $osIsoId -Index ([int]$selected.ImageIndex) }
             if ($Options.PreflightOnly -and -not $isCurrent) {
                 Set-Phase 'Reading provisioned apps'
-                Write-Log $(if ($appInv) { "The app list was read from $($appInv.Source) (index $($appInv.Index)); the OS ISO is now $osIsoFile, which may add or remove apps, so index $($selected.ImageIndex) is read again." } else { 'No app list yet for this OS; reading it for the Apps tab.' })
+                Write-Log $(if ($appInv) { "The app list is out of date: $staleWhy. A new ISO may add or remove apps, so index $($selected.ImageIndex) is read again." } else { 'No app list yet for this OS; reading it for the Apps tab.' })
                 # Not fatal: a preflight checks the run's inputs; the app list is a convenience for the Apps tab.
                 try { [void](Update-AppInventoryFromIso -Paths $paths -SourceWim $sourceWim -Selected $selected -IsoPath $osIsoPath -File $appListFile) }
                 catch { Write-Log "The app list could not be read ($($_.Exception.Message)); use Read apps from the ISO on the Apps tab." 'WARN' }
                 $appInv = Read-AppInventory -File $appListFile
             } elseif (-not $Options.PreflightOnly -and -not $isCurrent -and $removeApps.Count -gt 0) {
-                Write-Log "The Apps tab's list is $(if ($appInv) { "from $($appInv.Source), not the current OS ISO $osIsoFile" } else { 'missing' }); this run removes the ticked apps it finds in the image. A preflight or Read apps from the ISO brings the list up to date." 'WARN'
+                Write-Log "The Apps tab's list may be out of date ($staleWhy); this run removes the ticked apps it finds in the image. A preflight or Read apps from the ISO brings the list up to date." 'WARN'
             }
             if ($removeApps.Count -gt 0) {
                 Write-Log "App removal: $($removeApps.Count) app(s) ticked: $($removeApps -join ', ')"
