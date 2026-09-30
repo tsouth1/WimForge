@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    WimForge v2.4 - GUI offline servicing for Configuration Manager OSD WIMs.
+    WimForge v2.5 - GUI offline servicing for Configuration Manager OSD WIMs.
 .DESCRIPTION
     Mounts the OS ISO (plus optional Language Pack and FOD ISOs, detected by CONTENT, not file name),
     exports the configured client edition or preserves all Server indexes, services install.wim
@@ -14,6 +14,13 @@
       ->  LCU (final)  ->  component cleanup  ->  NetFx3 -> .NET CU  ->  export -> verify
 
 .NOTES
+    Version 2.5.0 (2026-09-30; the file keeps its v2.4 name so existing docs, run configs and scheduled tasks still work).
+      * Added: run configs and the command line (-Config <file> [-Preflight]); Tools > New OS from existing, Rename OS,
+               Check OS profile, Edit OS profile, Open Profiles folder; the {version} release placeholder in profiles;
+               the local ADK check for Build an ISO; the app list per OS in Profiles\Apps; download only what is missing.
+      * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
+               install.wim; no fixed drive letter (the repository root defaults to the script's folder).
+      * Real runs: Windows 11 24H2 Enterprise and Windows 10 LTSC 2019 (IoT) install.wim with gate PASSED.
     Version 2.4.0 (draft - mock-tested; real catalog dry runs for LTSC 2019 only; never run against real images or a real DISM yet).
       * Added: acquisition layer (step 5) - "Download patches..." searches the Microsoft Update Catalog via the
                MSCatalogLTS module using per-profile catalogSearch rules, shows a dry-run preview of what it found,
@@ -176,7 +183,7 @@ $script:IsoSources    = [System.Collections.Generic.List[object]]::new()   # hea
 $script:VerifyInventory  = [System.Collections.Generic.List[object]]::new()   # Section B: final-state inventory from the verify mount
 $script:VerifyBuildAfter = $null
 $script:BuildBefore      = $null
-$script:ToolVersion      = '2.4.0'
+$script:ToolVersion      = '2.5.0'
 
 $script:ClientLpPattern = 'Microsoft-Windows-Client-Language-Pack_x64_{0}.cab'
 $script:ServerLpPattern = 'Microsoft-Windows-Server-Language-Pack_x64_{0}.cab'
@@ -3235,7 +3242,7 @@ if ($Config) {
 
 #region GUI
 [xml]$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="WimForge v2.4" Height="780" Width="1040" WindowStartupLocation="CenterScreen" Background="{DynamicResource WF.WindowBg}" Foreground="{DynamicResource WF.Text}">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="WimForge v2.5" Height="780" Width="1040" WindowStartupLocation="CenterScreen" Background="{DynamicResource WF.WindowBg}" Foreground="{DynamicResource WF.Text}">
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
