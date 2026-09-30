@@ -433,4 +433,70 @@ if (-not (Get-Command oscdimg.exe -ErrorAction SilentlyContinue)) {
 } else { Write-Host 'SKIP  Find-Oscdimg not-found case (oscdimg.exe is on the PATH here)' }
 Check 'the message is the one asked for' ($script:NoAdkMessage -eq 'No local ADK installation found. This option is not available.')
 
+Write-Host "`n=== P19 adding and renaming an OS: release placeholder, stable folder key, New OS / Rename OS (2026-09-30) ==="
+$bi19 = Import-OsProfiles
+$w11 = $bi19['Windows 11 Enterprise 24H2']; $w19 = $bi19['Windows 10 Enterprise LTSC 2019 (IoT)']
+Check 'built-in profiles carry their release, and {version} gives the same catalog searches as before' ($w11.Version -eq '24H2' -and $w19.Version -eq '1809' -and $w11.CatalogSearch.LCU.search -eq 'Windows 11, version 24H2' -and $w11.CatalogSearch.LCU.buildFilter -eq '^\d{4}-\d{2} Cumulative Update for Windows 11,? version 24H2' -and $w19.CatalogSearch.NetCU.search -eq 'Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version 1809 for x64' -and $bi19['Windows Server 2022'].CatalogSearch.SafeOS.productFilter -eq 'Safe OS')
+Check 'the built-in data itself uses {version} (a new release is a one-field change)' (@(Get-BuiltInProfileData | Where-Object { ($_.catalogSearch | ConvertTo-Json -Depth 5) -match '\{version\}' }).Count -eq 5)
+$d19 = (@(Get-BuiltInProfileData)[3] | ConvertTo-Json -Depth 8 | ConvertFrom-Json)
+$d19.version = ''; $err19 = ''; try { [void](ConvertTo-OsProfile -Data $d19) } catch { $err19 = $_.Exception.Message }
+Check '{version} with an empty version: a plain message naming the field' ($err19 -like "'catalogSearch.*' uses {version}, but the profile's 'version' is empty.*") $err19
+$d19.version = '24.2'; $v19 = ConvertTo-OsProfile -Data $d19
+Check 'the release is escaped in the regular-expression fields, literal in the search' ($v19.CatalogSearch.LCU.search -eq 'Windows 11, version 24.2' -and $v19.CatalogSearch.LCU.buildFilter -like '*version 24\.2')
+$d19.version = 'bad/name'; $err19 = ''; try { [void](ConvertTo-OsProfile -Data $d19) } catch { $err19 = $_.Exception.Message }
+Check 'a release with odd characters is refused' ($err19 -like "'version' must be a short release name*")
+Check 'ConvertTo-OsFolderName follows the built-in style' ((ConvertTo-OsFolderName 'Windows 11 Enterprise 26H2') -eq 'Win11_Enterprise_26H2' -and (ConvertTo-OsFolderName 'Windows Server 2025') -eq 'Windows_Server_2025' -and (ConvertTo-OsFolderName 'Windows 10 Enterprise LTSC 2019 (IoT)') -eq 'Win10_Enterprise_LTSC_2019_IoT')
+Check 'Test-OsFolderName refuses bad folder names' ((Test-OsFolderName 'Win11_26H2') -eq '' -and (Test-OsFolderName '') -ne '' -and (Test-OsFolderName 'a\b') -ne '' -and (Test-OsFolderName 'CON') -ne '' -and (Test-OsFolderName '_x') -ne '')
+# New OS from existing: 26H2 from the 24H2 profile, on disk
+$pd19 = Join-Path $PWD 'tst_root\p19profiles'; $root19 = Join-Path $PWD 'tst_root\p19repo'; $set19 = Join-Path $PWD 'tst_root\p19settings'
+foreach ($d in $pd19, $root19, $set19) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
+$defs19 = Import-OsProfiles -Directory $pd19
+$n19 = New-OsProfileFromBase -ProfilesDir $pd19 -Base $defs19['Windows 11 Enterprise 24H2'] -Definitions $defs19 -Name 'Windows 11 Enterprise 26H2' -Version '26H2' -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19; $new19 = $defs19['Windows 11 Enterprise 26H2']
+Check 'New OS: the profile file, the list entry, and the catalog searches for the new release' ((Split-Path $n19.File -Leaf) -eq 'Win11_Enterprise_26H2.json' -and $null -ne $new19 -and $new19.Version -eq '26H2' -and $new19.CatalogSearch.LCU.search -eq 'Windows 11, version 26H2' -and $new19.CatalogSearch.SetupDU.buildFilter -like '*version 26H2' -and $new19.EditionRegex -eq $defs19['Windows 11 Enterprise 24H2'].EditionRegex -and $new19.SortOrder -eq 41)
+Check 'New OS: support date cleared, a note on what to check, and the 24H2 profile unchanged' ($new19.EndOfSupport -eq '' -and $new19.Notes -like "Created from 'Windows 11 Enterprise 24H2'*Check OS profile*" -and $defs19['Windows 11 Enterprise 24H2'].CatalogSearch.LCU.search -eq 'Windows 11, version 24H2')
+Check 'New OS: the repository folders are created (ISO, PATCHES\LCU, ...)' ($n19.Repository -eq (Join-Path $root19 'Win11_Enterprise_26H2') -and (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2\ISO')) -and (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2\PATCHES\SETUPDU')))
+$e1 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Windows 11 Enterprise 26H2' -Version '27H2') } catch { $e1 = $_.Exception.Message }
+$e2 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Another' -Folder 'Win11_Enterprise_24H2' -Version '27H2') } catch { $e2 = $_.Exception.Message }
+$e3 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Another' -Folder 'Win11Enterprise_24H2' -Version '27H2') } catch { $e3 = $_.Exception.Message }
+Check 'New OS refuses a name or folder already in use (also an accepted old folder name)' ($e1 -eq "An OS named 'Windows 11 Enterprise 26H2' already exists." -and $e2 -like "The folder name 'Win11_Enterprise_24H2' is already used*" -and $e3 -like "The folder name 'Win11Enterprise_24H2' is already used*") "$e1 | $e2 | $e3"
+# an older profile file with the release written out (no 'version', no {version}): the text is replaced
+$old19 = (@(Get-BuiltInProfileData)[4] | ConvertTo-Json -Depth 8) -replace '\{version\}', '21H2' | ConvertFrom-Json
+$old19.PSObject.Properties.Remove('version'); $old19.name = 'Server Old Style'; $old19.folder = 'Server_Old'
+[System.IO.File]::WriteAllText((Join-Path $pd19 'Server_Old.json'), ($old19 | ConvertTo-Json -Depth 8))
+$defs19 = Import-OsProfiles -Directory $pd19
+$n19b = New-OsProfileFromBase -ProfilesDir $pd19 -Base $defs19['Server Old Style'] -Definitions $defs19 -Name 'Server New Style' -Version '24H2' -ReplaceText '21H2'
+$defs19 = Import-OsProfiles -Directory $pd19
+Check 'New OS from an older profile file: the written-out release is replaced in every catalog search' ($n19b.Replaced -eq 8 -and -not $n19b.UsesPlaceholder -and $defs19['Server New Style'].CatalogSearch.LCU.search -eq 'Cumulative Update for Microsoft server operating system version 24H2' -and $defs19['Server New Style'].CatalogSearch.LCU.buildFilter -like '*version 24H2')
+# Rename OS: display name only, then the folder as well
+New-Item -ItemType Directory -Force $set19, (Join-Path $pd19 'Apps') | Out-Null
+[void](Save-OsSettings -Directory $set19 -Definition $new19 -Options @{ NetFx3 = $true })
+[System.IO.File]::WriteAllText((Join-Path $pd19 'Apps\Win11_Enterprise_26H2_Appx.json'), '{ "apps": [] }')
+$r1 = Rename-OsProfile -ProfilesDir $pd19 -Definition $new19 -Definitions $defs19 -NewName 'Win 11 26H2 Enterprise' -SettingsDir $set19 -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19
+Check 'Rename OS, name only: same file and folder, settings still found (they are keyed by folder)' ($defs19.Contains('Win 11 26H2 Enterprise') -and -not $defs19.Contains('Windows 11 Enterprise 26H2') -and $r1.File -eq $n19.File -and @($r1.Moves).Count -eq 0 -and $null -ne (Read-OsSettings -Directory $set19 -Definition $defs19['Win 11 26H2 Enterprise']))
+$r2 = Rename-OsProfile -ProfilesDir $pd19 -Definition $defs19['Win 11 26H2 Enterprise'] -Definitions $defs19 -NewName 'Windows 11 Enterprise 26H2' -NewFolder 'W11_26H2' -SettingsDir $set19 -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19; $ren19 = $defs19['Windows 11 Enterprise 26H2']
+Check 'Rename OS, folder too: profile file, saved settings, app list and repository folder move; the old folder stays accepted' ($ren19.Folder -eq 'W11_26H2' -and $ren19.AltFolders -contains 'Win11_Enterprise_26H2' -and (Test-Path (Join-Path $pd19 'W11_26H2.json')) -and -not (Test-Path (Join-Path $pd19 'Win11_Enterprise_26H2.json')) -and (Test-Path (Join-Path $set19 'W11_26H2.json')) -and (Test-Path (Join-Path $pd19 'Apps\W11_26H2_Appx.json')) -and (Test-Path (Join-Path $root19 'W11_26H2\ISO')) -and -not (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2')) -and @($r2.Moves).Count -eq 4) (@($r2.Moves) -join ' | ')
+# renaming a built-in's folder leaves <old>.json.disabled, so Reload does not bring the old built-in back
+$cnt19 = $defs19.Count
+$r3 = Rename-OsProfile -ProfilesDir $pd19 -Definition $defs19['Windows Server 2022'] -Definitions $defs19 -NewName 'Windows Server 2022 Datacenter' -NewFolder 'Server2022' -SettingsDir $set19 -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19
+Check 'Rename OS of a built-in: the old built-in is not recreated on Reload' ($defs19.Count -eq $cnt19 -and $defs19.Contains('Windows Server 2022 Datacenter') -and -not $defs19.Contains('Windows Server 2022') -and (Test-Path (Join-Path $pd19 'Windows_Server_2022.json.disabled'))) (@($defs19.Keys) -join ', ')
+$e4 = ''; try { [void](Rename-OsProfile -ProfilesDir $pd19 -Definition $ren19 -Definitions $defs19 -NewName 'Windows 11 Enterprise 24H2' -SettingsDir $set19) } catch { $e4 = $_.Exception.Message }
+$script:MountedList = @([pscustomobject]@{ Path = (Join-Path $root19 'W11_26H2\MOUNT\MainOS'); MountStatus = 'Ok' })
+$e5 = ''; try { [void](Rename-OsProfile -ProfilesDir $pd19 -Definition $ren19 -Definitions $defs19 -NewName 'X' -NewFolder 'X_26H2' -SettingsDir $set19 -Root $root19) } catch { $e5 = $_.Exception.Message }
+$script:MountedList = @()
+Check 'Rename OS refuses a name in use, and a folder move while an image is mounted in it (nothing changed)' ($e4 -eq "An OS named 'Windows 11 Enterprise 24H2' already exists." -and $e5 -like 'An image is still mounted under *Cleanup Mountpoints*' -and (Test-Path (Join-Path $pd19 'W11_26H2.json'))) "$e4 | $e5"
+# run configs: the folder is the stable key
+$rc19 = Join-Path $PWD 'tst_root\p19run.json'
+[void](Save-RunConfig -File $rc19 -OsName 'Windows 11 Enterprise 26H2' -Folder 'W11_26H2' -Root $root19)
+$j19 = Get-Content -Raw $rc19 | ConvertFrom-Json; $j19.os = 'An Old Display Name'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5))
+$c19 = Read-RunConfig -File $rc19 -Definitions $defs19
+Check 'a run config whose OS was renamed is found by its folder, and says so' ($c19.OsName -eq 'Windows 11 Enterprise 26H2' -and $c19.ResolvedFrom -eq "'An Old Display Name'" -and $j19.folder -eq 'W11_26H2')
+$j19.folder = ''; $j19.os = 'Win11_Enterprise_26H2'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5))
+Check 'a run config may name the OS by a folder name (current or old)' ((Read-RunConfig -File $rc19 -Definitions $defs19).OsName -eq 'Windows 11 Enterprise 26H2')
+$j19.os = 'Windows 12'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5)); $e6 = ''; try { [void](Read-RunConfig -File $rc19 -Definitions $defs19) } catch { $e6 = $_.Exception.Message }
+Check 'an unknown OS is still refused with the list of profiles' ($e6 -like "*'os' is 'Windows 12', which is not one of the profiles:*") $e6
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

@@ -812,6 +812,26 @@ try { Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' @() @{ N
 Check 'without the ISO option the ADK is not needed: the media folder is still built' ($msg26 -eq '') $msg26
 $script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
 
+Write-Host "`n=== E27 Tools > Check OS profile: folder, edition on the ISO, catalog dry run; changes nothing (2026-09-30) ==="
+$ipa27 = ${function:Invoke-PatchAcquisition}; $script:Acq27 = @()
+function Invoke-PatchAcquisition { param($Options, $Definition, $Paths)
+    $script:Acq27 += "DryRun=$($Options.DryRun)"
+    [pscustomobject]@{ Mode = 'Download'; DryRun = $true; Plan = @([pscustomobject]@{ Class = 'LCU'; Title = '2026-09 Cumulative Update for Windows 11, version 24H2 (KB5129195)'; Date = '2026-09-14' }); SkippedClasses = @('SetupDU (no catalog result matched ''Setup Dynamic Update for Windows 11, version 24H2'')') } }
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1
+Reset-Test; $logs27 = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs27.Add("[$Level] $Message") }
+$pc27 = Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'ProfileCheck'; OsName = 'Windows 11 Enterprise 24H2'; Root = $base; Catalog = $true })
+Check 'Check OS profile finds the edition the profile picks on the ISO, and what the catalog finds' ($pc27.Mode -eq 'ProfileCheck' -and @($pc27.Found -match "^edition: index 3 'Windows 11 Enterprise', build ").Count -eq 1 -and @($pc27.Found -match '^LCU: 2026-09 Cumulative Update').Count -eq 1 -and $script:Acq27 -contains 'DryRun=True') ($pc27.Summary)
+Check 'and lists what to fix: no support end date, a catalog search that found nothing' (@($pc27.Problems -match '^no support end date').Count -eq 1 -and @($pc27.Problems -match '^catalog SetupDU \(no catalog result').Count -eq 1 -and $pc27.Summary -like '*To fix or check:*')
+Check 'it changes nothing: no image mounted, no package added, ISOs dismounted' (@($script:Calls -match '^(Mount |AddPkg|Dismount )').Count -eq 0 -and @($script:Calls -match '^IsoDismount').Count -ge 1) ($script:Calls -join ' | ')
+# a profile whose edition rule no longer fits the ISO, and an OS without a repository folder
+$bad27 = ConvertTo-OsProfile -Data ([pscustomobject]@{ name = 'Test 27'; folder = 'Win11Enterprise_24H2'; version = '24H2'; editionRegex = '^Windows 11 Enterprise LTSC$'; preferredIndex = 9; endOfSupport = '2027-10-12' })
+$pc27b = Invoke-ProfileCheck -Options ([pscustomobject]@{ Root = $base; Catalog = $false }) -Definition $bad27
+$none27 = ConvertTo-OsProfile -Data ([pscustomobject]@{ name = 'Test 27b'; folder = 'Win11_Enterprise_26H2'; version = '26H2'; editionRegex = '^Windows 11 Enterprise$'; preferredIndex = 3; endOfSupport = '2029-10-09' })
+$pc27c = Invoke-ProfileCheck -Options ([pscustomobject]@{ Root = $base; Catalog = $true }) -Definition $none27
+Set-Item function:Write-Log $wl; Set-Item function:Invoke-PatchAcquisition $ipa27
+Check 'an edition rule that does not fit the ISO is reported with what to correct' (@($pc27b.Problems -match "^edition: No edition matched .*correct 'editionRegex' or 'preferredIndex'").Count -eq 1 -and @($pc27b.Problems).Count -eq 1) (@($pc27b.Problems) -join ' | ')
+Check 'a new OS without its repository folder (and without catalog rules): both reported, and the catalog is not searched' (@($pc27c.Problems).Count -eq 2 -and @($pc27c.Problems)[0] -like 'the repository folder * does not exist*' -and @($pc27c.Problems)[1] -like "no 'catalogSearch' rules*" -and @($script:Acq27).Count -eq 1) (@($pc27c.Problems) -join ' | ')
+
 Check 'E24''s case (every boot.wim package fails) is retried once without the LCU, then stops' ($e24retries -eq 1 -and $e24mounts -eq 2) "retries $e24retries, mounts $e24mounts"
 $script:MsuSsu = @{}
 

@@ -200,26 +200,26 @@ $script:OutputArchived  = $false
 function Get-BuiltInProfileData {
     $noOrder = { [ordered]@{ SSU = @(); LCU = @(); NetCU = @(); SafeOS = @(); SetupDU = @() } }
     return @(
-        [ordered]@{ schemaVersion = 1; name = 'Windows 10 Enterprise LTSC 2019 (IoT)'; sortOrder = 10; folder = 'Win10_Enterprise_LTSC_2019'; altFolders = @()
+        [ordered]@{ schemaVersion = 1; name = 'Windows 10 Enterprise LTSC 2019 (IoT)'; sortOrder = 10; folder = 'Win10_Enterprise_LTSC_2019'; version = '1809'; altFolders = @()
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 10 (IoT )?Enterprise LTSC( 2019)?$'; preferredIndex = 1
             lpPattern = $script:ClientLpPattern; ssuRequired = $true; defaultLanguages = $script:DefaultLanguageSet; packageOrder = (& $noOrder)
-            endOfSupport = '2029-01-10'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'Needs the 1809 Language Pack ISO for languages. SSU KB5005112 goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version 1809 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version 1809'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version 1809 for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.7\.2 and 4\.8 for Windows 10 Version 1809'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 1809 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 1809'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 1809 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 1809'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
-        [ordered]@{ schemaVersion = 1; name = 'Windows 10 IoT Enterprise LTSC 2021'; sortOrder = 20; folder = 'Win10_IoT_Enterprise_LTSC_2021'; altFolders = @('Win10_IOT_Enterprise_LTSC_2021')
+            endOfSupport = '2029-01-10'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'Needs the 1809 Language Pack ISO for languages. SSU KB5005112 goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.7\.2 and 4\.8 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+        [ordered]@{ schemaVersion = 1; name = 'Windows 10 IoT Enterprise LTSC 2021'; sortOrder = 20; folder = 'Win10_IoT_Enterprise_LTSC_2021'; version = '21H2'; altFolders = @('Win10_IOT_Enterprise_LTSC_2021')
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 10 IoT Enterprise LTSC( 2021)?$'; preferredIndex = 2
             lpPattern = $script:ClientLpPattern; ssuRequired = $true; defaultLanguages = $script:DefaultLanguageSet; packageOrder = (& $noOrder)
-            endOfSupport = '2032-01-14'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version 21H2'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version 21H2 for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version 21H2'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 21H2'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 21H2'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
-        [ordered]@{ schemaVersion = 1; name = 'Windows 10 Enterprise LTSC 2021 (KMS)'; sortOrder = 30; folder = 'Win10_Enterprise_LTSC_2021_KMS'; altFolders = @()
+            endOfSupport = '2032-01-14'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+        [ordered]@{ schemaVersion = 1; name = 'Windows 10 Enterprise LTSC 2021 (KMS)'; sortOrder = 30; folder = 'Win10_Enterprise_LTSC_2021_KMS'; version = '21H2'; altFolders = @()
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 10 Enterprise LTSC( 2021)?$'; preferredIndex = 1
             lpPattern = $script:ClientLpPattern; ssuRequired = $true; defaultLanguages = $script:DefaultLanguageSet; packageOrder = (& $noOrder)
-            endOfSupport = '2027-01-13'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Support ends 2027-01-13; plan the replacement. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version 21H2'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version 21H2 for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version 21H2'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 21H2'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version 21H2'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
-        [ordered]@{ schemaVersion = 1; name = 'Windows 11 Enterprise 24H2'; sortOrder = 40; folder = 'Win11_Enterprise_24H2'; altFolders = @('Win11Enterprise_24H2')
+            endOfSupport = '2027-01-13'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Support ends 2027-01-13; plan the replacement. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+        [ordered]@{ schemaVersion = 1; name = 'Windows 11 Enterprise 24H2'; sortOrder = 40; folder = 'Win11_Enterprise_24H2'; version = '24H2'; altFolders = @('Win11Enterprise_24H2')
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 11 Enterprise$'; preferredIndex = 3
             lpPattern = $script:ClientLpPattern; ssuRequired = $false; defaultLanguages = @(); packageOrder = (& $noOrder)
-            endOfSupport = ''; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'English only. Support end date not yet checked against the Microsoft lifecycle page. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Windows 11, version 24H2'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 11,? version 24H2'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 24H2 for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5 and 4\.8\.1 for Windows 11,? version 24H2'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Safe OS Dynamic Update for Windows 11, version 24H2'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Safe OS Dynamic Update for Windows 11,? version 24H2'; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Setup Dynamic Update for Windows 11, version 24H2'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Setup Dynamic Update for Windows 11,? version 24H2'; checkpointKBs = @() } } }
-        [ordered]@{ schemaVersion = 1; name = 'Windows Server 2022'; sortOrder = 50; folder = 'Windows_Server_2022'; altFolders = @()
+            endOfSupport = ''; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'English only. Support end date not yet checked against the Microsoft lifecycle page. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Windows 11, version {version}'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 11,? version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5 and 4\.8\.1 for Windows 11,? version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Safe OS Dynamic Update for Windows 11, version {version}'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Safe OS Dynamic Update for Windows 11,? version {version}'; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Setup Dynamic Update for Windows 11, version {version}'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Setup Dynamic Update for Windows 11,? version {version}'; checkpointKBs = @() } } }
+        [ordered]@{ schemaVersion = 1; name = 'Windows Server 2022'; sortOrder = 50; folder = 'Windows_Server_2022'; version = '21H2'; altFolders = @()
             serviceAllIndexes = $true; editionRegex = ''; preferredIndex = 0
             lpPattern = $script:ServerLpPattern; ssuRequired = $false; defaultLanguages = @(); packageOrder = (& $noOrder)
-            endOfSupport = ''; keepArchives = 3; minFreeGB = 60; spaceCheck = 'enforce'; notes = 'Every index is serviced and recombined. English only. Support end date not yet checked. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Microsoft server operating system version 21H2'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Microsoft server operating system,? version 21H2'; checkpointKBs = @() }; NetCU = [ordered]@{ search = '.NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version 21H2'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Microsoft server operating system,? version 21H2'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Microsoft server operating system,? version 21H2'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Microsoft server operating system,? version 21H2'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+            endOfSupport = ''; keepArchives = 3; minFreeGB = 60; spaceCheck = 'enforce'; notes = 'Every index is serviced and recombined. English only. Support end date not yet checked. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Microsoft server operating system version {version}'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Microsoft server operating system,? version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = '.NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version {version}'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Microsoft server operating system,? version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Microsoft server operating system version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Microsoft server operating system,? version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Microsoft server operating system version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Microsoft server operating system,? version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
     )
 }
 function Get-ProfileValue {
@@ -261,6 +261,18 @@ function ConvertTo-OsProfile {
             $order[$canon] = @(@(Get-ProfileValue $po ([string]$k) @()) | Where-Object { $_ } | ForEach-Object { [string]$_ })
         }
     }
+    # 'version' (2026-09-30): the release the profile is for, e.g. 24H2 or 1809. {version} in the catalogSearch strings is
+    # replaced with it when the profile is read (escaped in the regular-expression fields), so a new release of an OS is a
+    # one-field change. {build} (the base image's build number) is still filled in at search time.
+    $version = ([string](Get-ProfileValue $Data 'version' '')).Trim()
+    if ($version -and $version -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$') { throw "'version' must be a short release name such as 26H2 or 1809 (letters, digits, space, dot, dash, underscore)." }
+    $expand = {
+        param([string]$Text, [string]$Where, [switch]$Regex)
+        if ($Text -notmatch '\{version\}') { return $Text }
+        if (-not $version) { throw "'$Where' uses {version}, but the profile's 'version' is empty. Set 'version' (for example 26H2)." }
+        $with = if ($Regex) { [regex]::Escape($version) } else { $version }
+        return $Text.Replace('{version}', $with)
+    }
     # catalogSearch (step 5): per package class, Microsoft Update Catalog search rules. SSU is refused here - legacy
     # servicing-stack updates always stay a manual, hand-placed file (PATCHES\SSU), never a downloader target.
     $catalogSearch = @{}
@@ -278,9 +290,9 @@ function ConvertTo-OsProfile {
             $searchRaw = Get-ProfileValue $ruleData 'search' $null
             $searchTerms = [System.Collections.Generic.List[string]]::new()
             if ($searchRaw -is [string]) {
-                $t = $searchRaw.Trim(); if ($t) { $searchTerms.Add($t) }
+                $t = (& $expand $searchRaw.Trim() "catalogSearch.$canon.search"); if ($t) { $searchTerms.Add($t) }
             } elseif ($null -ne $searchRaw) {
-                foreach ($item in @($searchRaw)) { $t = ([string]$item).Trim(); if ($t) { $searchTerms.Add($t) } }
+                foreach ($item in @($searchRaw)) { $t = (& $expand ([string]$item).Trim() "catalogSearch.$canon.search"); if ($t) { $searchTerms.Add($t) } }
             }
             if ($searchTerms.Count -eq 0) { throw "'catalogSearch.$canon.search' is required when the class is listed." }
             # The catalog returns nothing at all for a search over 100 characters (checked 2026-09-24: 106 -> 0 results, 93 -> 41).
@@ -291,9 +303,9 @@ function ConvertTo-OsProfile {
                 searches = @($searchTerms)
                 architecture = [string](Get-ProfileValue $ruleData 'architecture' 'x64')
                 excludePreview = [bool](Get-ProfileValue $ruleData 'excludePreview' $true)
-                buildFilter = [string](Get-ProfileValue $ruleData 'buildFilter' '')
-                productFilter = [string](Get-ProfileValue $ruleData 'productFilter' '')
-                productExclude = [string](Get-ProfileValue $ruleData 'productExclude' '')
+                buildFilter = (& $expand ([string](Get-ProfileValue $ruleData 'buildFilter' '')) "catalogSearch.$canon.buildFilter" -Regex)
+                productFilter = (& $expand ([string](Get-ProfileValue $ruleData 'productFilter' '')) "catalogSearch.$canon.productFilter" -Regex)
+                productExclude = (& $expand ([string](Get-ProfileValue $ruleData 'productExclude' '')) "catalogSearch.$canon.productExclude" -Regex)
                 checkpointKBs = $chainKbs
             }
             foreach ($rk in @('buildFilter', 'productFilter', 'productExclude')) {
@@ -313,7 +325,7 @@ function ConvertTo-OsProfile {
     if (@('enforce', 'warn', 'off') -notcontains $sc) { throw "'spaceCheck' must be enforce, warn or off." }
     [int]$sort = 100; [void][int]::TryParse([string](Get-ProfileValue $Data 'sortOrder' 100), [ref]$sort)
     return [pscustomobject]@{
-        Name = $name; SortOrder = $sort; Folder = $folder; AltFolders = $alt; ServiceAllIndexes = $all
+        Name = $name; SortOrder = $sort; Folder = $folder; AltFolders = $alt; ServiceAllIndexes = $all; Version = $version
         EditionRegex = $regex; PreferredIndex = $pref; LpPattern = $lp; SsuRequired = [bool](Get-ProfileValue $Data 'ssuRequired' $false)
         DefaultLanguages = $langs; PackageOrder = $order; CatalogSearch = $catalogSearch; EndOfSupport = $eos; KeepArchives = $keep; MinFreeGB = $minFree; SpaceCheck = $sc
         Notes = [string](Get-ProfileValue $Data 'notes' ''); SourceFile = $SourceFile
@@ -372,6 +384,151 @@ function Import-OsProfiles {
     $ordered = [ordered]@{}
     foreach ($p in @($table.Values | Sort-Object SortOrder, Name)) { $ordered[$p.Name] = $p }
     return $ordered
+}
+function Find-OsDefinitionByFolder {
+    # The profile whose folder (or one of its altFolders) is $Folder, any letter case; $null when none is. The folder is an
+    # OS's stable key: saved settings, the app list and the repository folder use it, so it survives a display-name change.
+    param($Definitions, [string]$Folder)
+    if (-not $Folder -or -not $Definitions) { return $null }
+    foreach ($d in @($Definitions.Values)) {
+        if ($d.Folder -ieq $Folder -or @($d.AltFolders | Where-Object { $_ -ieq $Folder }).Count -gt 0) { return $d }
+    }
+    return $null
+}
+# ---------- adding and renaming an OS without editing JSON by hand (2026-09-30) ----------
+# Tools > New OS from existing... and Tools > Rename OS...: IT can add a new release (e.g. Windows 11 26H2) or rename an
+# OS in the window. Both write ordinary profile files, so everything stays editable in Notepad (Tools > Edit OS profile...).
+function ConvertTo-OsFolderName {
+    # A folder / file name from an OS name, in the style of the built-in ones: 'Windows 11 Enterprise 26H2' -> Win11_Enterprise_26H2.
+    param([string]$Name)
+    $n = ([string]$Name).Trim() -replace '^Windows (\d+)\b', 'Win$1'
+    $n = $n -replace '[^A-Za-z0-9]+', '_'
+    return $n.Trim('_')
+}
+function Test-OsFolderName {
+    # '' when $Folder can be a profile / repository folder name, else the reason it cannot.
+    param([string]$Folder)
+    if (-not $Folder) { return 'the folder name is empty' }
+    if ($Folder -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { return "'$Folder' may only use letters, digits, dot, dash and underscore (up to 64), starting with a letter or digit" }
+    if ($Folder -match '(?i)^(CON|PRN|AUX|NUL|COM\d|LPT\d)$') { return "'$Folder' is a reserved Windows name" }
+    return ''
+}
+function Get-OsProfileData {
+    # The editable data of a loaded profile, as read from its file in $ProfilesDir (or the built-in data), as a PSCustomObject.
+    param([Parameter(Mandatory)][string]$ProfilesDir, [Parameter(Mandatory)]$Definition)
+    $file = if ($Definition.SourceFile -and $Definition.SourceFile -ne '(built-in)') { [System.IO.Path]::Combine($ProfilesDir, $Definition.SourceFile) } else { '' }
+    if ($file -and (Test-Path -LiteralPath $file)) { return ([System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop) }
+    $b = @(Get-BuiltInProfileData | Where-Object { $_.name -eq $Definition.Name }) | Select-Object -First 1
+    if (-not $b) { throw "The profile file of '$($Definition.Name)' ($($Definition.SourceFile)) was not found in $ProfilesDir." }
+    return (($b | ConvertTo-Json -Depth 8) | ConvertFrom-Json)
+}
+function Set-DataValue { param($Object, [string]$Name, $Value) $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force }
+function Update-CatalogSearchText {
+    # Replaces $From with $To (any letter case) in every catalogSearch string of profile data; returns how many strings changed.
+    param($Data, [string]$From, [string]$To)
+    if (-not $From -or $From -eq $To) { return 0 }
+    $cs = Get-ProfileValue $Data 'catalogSearch' $null
+    if ($null -eq $cs) { return 0 }
+    $changed = 0
+    $swap = { param([string]$s, [bool]$rx) $w = if ($rx) { [regex]::Escape($To) } else { $To }; [regex]::Replace($s, [regex]::Escape($From), $w.Replace('$', '$$'), 'IgnoreCase') }
+    foreach ($rule in @($cs.PSObject.Properties)) {
+        foreach ($field in 'search', 'buildFilter', 'productFilter', 'productExclude') {
+            $prop = $rule.Value.PSObject.Properties[$field]
+            if (-not $prop -or $null -eq $prop.Value) { continue }
+            if ($prop.Value -is [string]) {
+                $new = & $swap $prop.Value ($field -ne 'search'); if ($new -ne $prop.Value) { $prop.Value = $new; $changed++ }
+            } else {
+                $arr = @($prop.Value | ForEach-Object { [string]$_ }); $newArr = @($arr | ForEach-Object { & $swap $_ $false })
+                if (($newArr -join "`n") -ne ($arr -join "`n")) { $prop.Value = $newArr; $changed++ }
+            }
+        }
+    }
+    return $changed
+}
+function New-OsProfileFromBase {
+    # Tools > New OS from existing...: copies a profile to a new OS (name, folder, release), writes Profiles\<folder>.json and,
+    # with -Root, creates the OS's repository folders. The support end date is cleared and a note says what to check.
+    # Throws a plain-language message when the new OS cannot be made (name or folder taken, bad folder name, bad result).
+    param([Parameter(Mandatory)][string]$ProfilesDir, [Parameter(Mandatory)]$Base, [Parameter(Mandatory)]$Definitions,
+          [Parameter(Mandatory)][string]$Name, [string]$Folder, [string]$Version, [string]$ReplaceText, [string]$Root)
+    $Name = $Name.Trim(); if (-not $Name) { throw 'Type a name for the new OS.' }
+    if ($Definitions.Contains($Name)) { throw "An OS named '$Name' already exists." }
+    if (-not $Folder) { $Folder = ConvertTo-OsFolderName $Name }
+    $why = Test-OsFolderName $Folder; if ($why) { throw "Folder name: $why." }
+    if (Find-OsDefinitionByFolder -Definitions $Definitions -Folder $Folder) { throw "The folder name '$Folder' is already used by another OS." }
+    $file = [System.IO.Path]::Combine($ProfilesDir, "$Folder.json")
+    if ((Test-Path -LiteralPath $file) -or (Test-Path -LiteralPath "$file.disabled")) { throw "$file already exists." }
+    $data = Get-OsProfileData -ProfilesDir $ProfilesDir -Definition $Base
+    $from = if ($ReplaceText) { $ReplaceText.Trim() } else { [string]$Base.Version }
+    $Version = ([string]$Version).Trim()
+    $replaced = if ($Version) { Update-CatalogSearchText -Data $data -From $from -To $Version } else { 0 }
+    Set-DataValue $data 'name' $Name; Set-DataValue $data 'folder' $Folder; Set-DataValue $data 'altFolders' @()
+    if ($Version) { Set-DataValue $data 'version' $Version }
+    Set-DataValue $data 'sortOrder' ([int]$Base.SortOrder + 1)
+    Set-DataValue $data 'endOfSupport' ''
+    Set-DataValue $data 'notes' ("Created from '$($Base.Name)' on $(Get-Date -Format 'yyyy-MM-dd') (Tools > New OS from existing). Before the first run: set endOfSupport, check the edition with Tools > Check OS profile, and check the catalog picks with Download patches (dry run).")
+    $def = ConvertTo-OsProfile -Data $data -SourceFile (Split-Path $file -Leaf)   # the same checks a Reload does
+    Ensure-Directory $ProfilesDir
+    [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json -Depth 8) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    $repo = ''
+    if ($Root) { $repo = (Initialize-Repository -Root $Root -Definition $def).Root }
+    $usesPlaceholder = (($data.catalogSearch | ConvertTo-Json -Depth 6) -match '\{version\}')
+    return [pscustomobject]@{ File = $file; Definition = $def; Repository = $repo; Replaced = $replaced; From = $from; UsesPlaceholder = $usesPlaceholder }
+}
+function Rename-OsProfile {
+    # Tools > Rename OS...: a new display name and/or folder name. The profile file, the saved settings, the app list and the
+    # repository folder move with the folder; run configs find the OS by folder or by its old name (kept in altFolders).
+    # A renamed built-in OS leaves <old folder>.json.disabled, so Reload does not bring the old built-in back.
+    param([Parameter(Mandatory)][string]$ProfilesDir, [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)]$Definitions,
+          [Parameter(Mandatory)][string]$NewName, [string]$NewFolder, [string]$SettingsDir, [string]$Root)
+    $NewName = $NewName.Trim(); if (-not $NewName) { throw 'Type the new name.' }
+    if (-not $NewFolder) { $NewFolder = $Definition.Folder }
+    if ($NewName -ne $Definition.Name -and $Definitions.Contains($NewName)) { throw "An OS named '$NewName' already exists." }
+    $folderChanges = ($NewFolder -cne $Definition.Folder)
+    if ($folderChanges) {
+        $why = Test-OsFolderName $NewFolder; if ($why) { throw "Folder name: $why." }
+        $other = Find-OsDefinitionByFolder -Definitions $Definitions -Folder $NewFolder
+        if ($other -and $other.Name -ne $Definition.Name) { throw "The folder name '$NewFolder' is already used by '$($other.Name)'." }
+    }
+    if ($NewName -eq $Definition.Name -and -not $folderChanges) { throw 'Nothing to change: the name and folder are the same.' }
+    $moves = [System.Collections.Generic.List[string]]::new()
+    $oldFile = [System.IO.Path]::Combine($ProfilesDir, $(if ($Definition.SourceFile -and $Definition.SourceFile -ne '(built-in)') { $Definition.SourceFile } else { "$($Definition.Folder).json" }))
+    $newFile = if ($folderChanges) { [System.IO.Path]::Combine($ProfilesDir, "$NewFolder.json") } else { $oldFile }
+    if ($folderChanges -and (Test-Path -LiteralPath $newFile) -and ($newFile -ine $oldFile)) { throw "$newFile already exists." }
+    # The repository folder moves first: it is the step that can fail (open files, a mounted image).
+    if ($folderChanges -and $Root) {
+        $oldRepo = Get-OsRootPath -Root $Root -Definition $Definition
+        $newRepo = [System.IO.Path]::Combine($Root, $NewFolder)
+        if (Test-Path -LiteralPath $oldRepo) {
+            if (Test-Path -LiteralPath $newRepo) { throw "The repository folder $newRepo already exists." }
+            foreach ($m in @(Get-WindowsImage -Mounted -ErrorAction SilentlyContinue)) { if (Test-PathUnder ([string]$m.Path) $oldRepo) { throw "An image is still mounted under $oldRepo ($($m.Path)). Use Tools > Cleanup Mountpoints first." } }
+            try { Move-Item -LiteralPath $oldRepo -Destination $newRepo -ErrorAction Stop } catch { throw "The repository folder $oldRepo could not be renamed ($($_.Exception.Message)). Close any window or program using it and try again." }
+            $moves.Add("repository folder $oldRepo -> $newRepo")
+        }
+    }
+    $data = Get-OsProfileData -ProfilesDir $ProfilesDir -Definition $Definition
+    Set-DataValue $data 'name' $NewName
+    if ($folderChanges) {
+        Set-DataValue $data 'folder' $NewFolder
+        # the old folder stays an accepted name: a repository folder that was not moved (another root) and old run configs still match
+        $alts = @(@(Get-ProfileValue $data 'altFolders' @()) | Where-Object { $_ -and $_ -ine $NewFolder }) + @($Definition.Folder) | Select-Object -Unique
+        Set-DataValue $data 'altFolders' @($alts)
+    }
+    [void](ConvertTo-OsProfile -Data $data -SourceFile (Split-Path $newFile -Leaf))
+    [System.IO.File]::WriteAllText($newFile, (($data | ConvertTo-Json -Depth 8) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    if ($folderChanges -and (Test-Path -LiteralPath $oldFile) -and ($oldFile -ine $newFile)) {
+        if (@(Get-BuiltInProfileData | Where-Object { $_.folder -ieq $Definition.Folder }).Count -gt 0) {
+            Move-Item -LiteralPath $oldFile -Destination "$oldFile.disabled" -Force; $moves.Add("profile $(Split-Path $oldFile -Leaf) -> $(Split-Path $newFile -Leaf) (the old built-in file is kept as .json.disabled)")
+        } else { Remove-Item -LiteralPath $oldFile -Force; $moves.Add("profile $(Split-Path $oldFile -Leaf) -> $(Split-Path $newFile -Leaf)") }
+    }
+    if ($folderChanges) {
+        foreach ($pair in @(
+            @(([System.IO.Path]::Combine([string]$SettingsDir, "$($Definition.Folder).json")), ([System.IO.Path]::Combine([string]$SettingsDir, "$NewFolder.json")), 'saved settings'),
+            @(([System.IO.Path]::Combine($ProfilesDir, 'Apps', "$($Definition.Folder)_Appx.json")), ([System.IO.Path]::Combine($ProfilesDir, 'Apps', "${NewFolder}_Appx.json")), 'app list'))) {
+            if ($pair[0] -and (Test-Path -LiteralPath $pair[0]) -and -not (Test-Path -LiteralPath $pair[1])) { Move-Item -LiteralPath $pair[0] -Destination $pair[1]; $moves.Add("$($pair[2]) $(Split-Path $pair[0] -Leaf) -> $(Split-Path $pair[1] -Leaf)") }
+        }
+    }
+    return [pscustomobject]@{ OldName = $Definition.Name; NewName = $NewName; OldFolder = $Definition.Folder; NewFolder = $NewFolder; File = $newFile; Moves = @($moves) }
 }
 $script:OsDefinitions = Import-OsProfiles   # built-ins until a Profiles folder is loaded
 
@@ -955,7 +1112,7 @@ function Ensure-CatalogModule {
 }
 function Get-BaseWimBuild {
     # Mounts the OS ISO just long enough to read the base image's build number (Get-WindowsImage .Version), then
-    # dismounts. Used to fill {build}/{version} in catalogSearch strings. Returns $null (logs a WARN) rather than
+    # dismounts. Used to fill {build} in catalogSearch strings. Returns $null (logs a WARN) rather than
     # throwing when the build cannot be determined - the search still runs, just without that substitution.
     param([Parameter(Mandatory)][string]$IsoFolder, [Parameter(Mandatory)][pscustomobject]$Definition)
     $isoFiles = @(Get-ChildItem -LiteralPath $IsoFolder -Filter '*.iso' -File -ErrorAction SilentlyContinue)
@@ -975,11 +1132,12 @@ function Get-BaseWimBuild {
     return $null
 }
 function Resolve-CatalogSearch {
-    # Substitutes {build} (and the {version} alias) in a catalogSearch.search string with the base image's build
-    # number. Left as literal text when no build could be determined - still a usable (just less precise) search.
+    # Substitutes {build} in a catalogSearch.search string with the base image's build number. Left as literal text when
+    # no build could be determined - still a usable (just less precise) search. {version} is no longer an alias of the
+    # build (2026-09-30): it is the profile's release (e.g. 26H2), filled in when the profile is read (ConvertTo-OsProfile).
     param([string]$Search, [string]$Build)
     if (-not $Search) { return $Search }
-    if ($Build) { return ($Search -replace '\{build\}', $Build -replace '\{version\}', $Build) }
+    if ($Build) { return ($Search -replace '\{build\}', $Build) }
     return $Search
 }
 function Get-ArchFromText {
@@ -2534,6 +2692,71 @@ function Invoke-SccmImport {
 }
 
 # ---------- main run ----------
+function Invoke-ProfileCheck {
+    # Tools > Check OS profile (2026-09-30): tests a profile against reality before any long run - the repository folder,
+    # the OS ISO's editions (which one the profile picks, and its build) and, with -Options.Catalog (default on), a catalog
+    # dry run (what each search finds). Never changes an image, never downloads; problems are listed, not thrown.
+    param([Parameter(Mandatory)][pscustomobject]$Options, [Parameter(Mandatory)]$Definition)
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $found = [System.Collections.Generic.List[string]]::new()
+    Set-Phase -OsName $Definition.Name -Phase 'Checking the OS profile'
+    Write-Log "PROFILE CHECK: $($Definition.Name) - file $($Definition.SourceFile), folder $($Definition.Folder), release $(if ($Definition.Version) { $Definition.Version } else { '(not set)' })"
+    if (-not $Definition.EndOfSupport) { $problems.Add("no support end date ('endOfSupport') - the run cannot warn before support ends") }
+    foreach ($c in @($Definition.CatalogSearch.Keys | Sort-Object)) {
+        $rule = $Definition.CatalogSearch[$c]
+        Write-Log "PROFILE CHECK   catalog rule $c : search '$(@($rule.searches) -join "' + '")'$(if ($rule.buildFilter) { "; title must match '$($rule.buildFilter)'" })"
+    }
+    $root = ([string]$Options.Root).Trim()
+    $osRoot = if ($root) { Get-OsRootPath -Root $root -Definition $Definition } else { '' }
+    $isoDir = if ($osRoot) { [System.IO.Path]::Combine($osRoot, 'ISO') } else { '' }
+    $isoFiles = @(if ($isoDir -and (Test-Path -LiteralPath $isoDir)) { Get-ChildItem -LiteralPath $isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue })
+    if (-not $osRoot -or -not (Test-Path -LiteralPath $osRoot)) { $problems.Add("the repository folder $osRoot does not exist (Tools > New OS from existing creates it; so does Download patches)") }
+    elseif ($isoFiles.Count -eq 0) { $problems.Add("no ISO in $isoDir - copy the OS ISO there (and the Language Pack / FOD ISOs for languages)") }
+    $selectedBuild = ''
+    if ($isoFiles.Count -gt 0) {
+        Set-Phase 'Reading the editions on the ISO'
+        $osIsoSeen = $false
+        foreach ($f in $isoFiles) {
+            try {
+                $drive = Mount-IsoFile $f.FullName
+                $wim = Join-Chain $drive @('sources', 'install.wim'); if (-not (Test-Path -LiteralPath $wim)) { $wim = Join-Chain $drive @('sources', 'install.esd') }
+                if (-not (Test-Path -LiteralPath $wim)) { continue }
+                $osIsoSeen = $true
+                $inv = @(Get-WindowsImage -ImagePath $wim -ErrorAction Stop)
+                Write-Log "PROFILE CHECK   OS ISO $($f.Name): $(($inv | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" }) -join '; ')"
+                if ($Definition.ServiceAllIndexes) {
+                    $found.Add("all $($inv.Count) editions of $($f.Name) are serviced")
+                    $selectedBuild = [string](Get-WindowsImage -ImagePath $wim -Index 1 -ErrorAction Stop).Version
+                } else {
+                    try {
+                        $sel = Select-SourceImage -Inventory $inv -Definition $Definition -Name $Definition.Name
+                        $selectedBuild = [string](Get-WindowsImage -ImagePath $wim -Index $sel.ImageIndex -ErrorAction Stop).Version
+                        $found.Add("edition: index $($sel.ImageIndex) '$($sel.ImageName)', build $selectedBuild")
+                    } catch { $problems.Add("edition: $($_.Exception.Message) - correct 'editionRegex' or 'preferredIndex'") }
+                }
+                break
+            } catch { $problems.Add("$($f.Name) could not be read: $($_.Exception.Message)") }
+            finally { Dismount-AllIso }
+        }
+        if (-not $osIsoSeen) { $problems.Add("none of the ISOs in $isoDir holds sources\install.wim or install.esd - the OS ISO is missing") }
+    }
+    $catalog = [bool](Get-ProfileValue $Options 'Catalog' $true)
+    if ($catalog -and $Definition.CatalogSearch.Count -gt 0 -and $osRoot -and (Test-Path -LiteralPath $osRoot)) {
+        Set-Phase 'Searching the catalog (dry run)'
+        try {
+            $paths = Initialize-Repository -Root $root -Definition $Definition
+            $acq = Invoke-PatchAcquisition -Definition $Definition -Paths $paths -Options ([pscustomobject]@{ OsName = $Definition.Name; Root = $root; Mode = 'Download'; DryRun = $true; LCU = $true; NetCU = $true; SafeOS = $true; SetupDU = $true })
+            foreach ($p in @($acq.Plan)) { $found.Add("$($p.Class): $($p.Title)$(if ($p.Date) { " [$($p.Date)]" })") }
+            foreach ($s in @($acq.SkippedClasses)) { $problems.Add("catalog $s") }
+        } catch { $problems.Add("catalog search failed: $($_.Exception.Message)") }
+    } elseif ($catalog -and $Definition.CatalogSearch.Count -eq 0) { $problems.Add("no 'catalogSearch' rules - Download patches cannot find this OS's updates (fill PATCHES by hand, or add rules)") }
+    foreach ($f in $found) { Write-Log "PROFILE CHECK   found: $f" }
+    foreach ($p in $problems) { Write-Log "PROFILE CHECK   to fix: $p" 'WARN' }
+    $summary = "$($Definition.Name)`n`n" + $(if ($found.Count) { "Found:`n- " + ($found -join "`n- ") + "`n`n" } else { '' }) + $(if ($problems.Count) { "To fix or check:`n- " + ($problems -join "`n- ") } else { 'No problems found. A preflight is the last check before a run.' })
+    Write-Log "PROFILE CHECK: $(if ($problems.Count) { "$($problems.Count) thing(s) to fix or check" } else { 'no problems found' })." $(if ($problems.Count) { 'WARN' } else { 'INFO' })
+    Set-Phase 'Done'
+    return [pscustomobject]@{ Mode = 'ProfileCheck'; OsName = $Definition.Name; Found = @($found); Problems = @($problems); Summary = $summary; Build = $selectedBuild; NewWim = ''; Preflight = $false; VerifyIssues = $null; Gate = $null }
+}
 function Invoke-MediaRefresh {
     param([Parameter(Mandatory)][pscustomobject]$Options)
     $script:Cancelled = $false
@@ -2572,6 +2795,10 @@ function Invoke-MediaRefresh {
         if (-not $dry) { $script:LogFile = Join-Path $paths.Logs ("SccmImport_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss')) }
         Write-Log "WimForge v$($script:ToolVersion): SCCM import for $name$(if ($dry) { ' (check only)' })"
         $r = Invoke-SccmImport -Options $Options -Definition $definition -Paths $paths -DryRun:$dry
+        $script:LastResult = $r; return $r
+    }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'ProfileCheck') {
+        $r = Invoke-ProfileCheck -Options $Options -Definition $definition
         $script:LastResult = $r; return $r
     }
     if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Download') {
@@ -2887,13 +3114,13 @@ $script:OptionDefaults = [ordered]@{
 }
 $script:RunConfigSccmKeys = @('siteServer', 'targetType', 'target', 'contentSource', 'sourceServer', 'packageType', 'imageName')
 function Save-RunConfig {
-    param([Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][string]$OsName, [string]$Root, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @(), [hashtable]$Sccm = @{})
+    param([Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][string]$OsName, [string]$Root, [hashtable]$Options = @{}, [string[]]$Languages = @(), [string[]]$RemoveApps = @(), [hashtable]$Sccm = @{}, [string]$Folder = '')
     $opts = [ordered]@{}
     foreach ($k in $script:SettingOptionNames) { $opts[$k] = $(if ($Options.ContainsKey($k)) { [bool]$Options[$k] } else { [bool]$script:OptionDefaults[$k] }) }
     $sc = [ordered]@{}; foreach ($k in $script:RunConfigSccmKeys) { $sc[$k] = [string]$Sccm[$k] }
     $data = [ordered]@{
         schemaVersion = 1; tool = 'WimForge'; toolVersion = $script:ToolVersion; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-        os = $OsName; root = $Root; options = $opts
+        os = $OsName; folder = $Folder; root = $Root; options = $opts   # folder: the stable key, if the display name changes
         languages = @($Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
         removeApps = @($RemoveApps | Where-Object { $_ } | ForEach-Object { [string]$_ }); sccm = $sc
     }
@@ -2907,11 +3134,19 @@ function Read-RunConfig {
     if (-not (Test-Path -LiteralPath $File)) { throw "The run config $File does not exist." }
     try { $o = [System.IO.File]::ReadAllText($File) | ConvertFrom-Json -ErrorAction Stop } catch { throw "The run config $File is not valid JSON: $($_.Exception.Message)" }
     $problems = [System.Collections.Generic.List[string]]::new()
-    $known = @('schemaVersion', 'tool', 'toolVersion', 'saved', 'os', 'root', 'options', 'languages', 'removeApps', 'sccm', 'note')
+    $known = @('schemaVersion', 'tool', 'toolVersion', 'saved', 'os', 'folder', 'root', 'options', 'languages', 'removeApps', 'sccm', 'note')
     foreach ($p in @($o.PSObject.Properties.Name)) { if ($known -notcontains $p) { $problems.Add("unknown setting '$p'") } }
     $schema = [int](Get-ProfileValue $o 'schemaVersion' 1); if ($schema -gt 1) { $problems.Add("schemaVersion $schema is newer than this version of WimForge understands (1)") }
     $os = [string](Get-ProfileValue $o 'os' '')
-    if (-not $os) { $problems.Add("'os' is missing") } elseif (-not $Definitions.Contains($os)) { $problems.Add("'os' is '$os', which is not one of the profiles: $(@($Definitions.Keys) -join ', ')") }
+    $cfgFolder = [string](Get-ProfileValue $o 'folder' '')
+    # The OS by its display name, else by its folder (the stable key: a renamed OS still matches), else os given as a folder.
+    $resolvedFrom = ''
+    if (-not ($os -and $Definitions.Contains($os))) {
+        $byFolder = Find-OsDefinitionByFolder -Definitions $Definitions -Folder $(if ($cfgFolder) { $cfgFolder } else { $os })
+        if ($byFolder) { $resolvedFrom = $(if ($os) { "'$os'" } else { '(no os)' }); $os = $byFolder.Name }
+        elseif (-not $os -and -not $cfgFolder) { $problems.Add("'os' is missing") }
+        else { $problems.Add("'os' is '$os'$(if ($cfgFolder) { " (folder '$cfgFolder')" }), which is not one of the profiles: $(@($Definitions.Keys) -join ', ')") }
+    }
     $root = [string](Get-ProfileValue $o 'root' ''); if (-not $root) { $problems.Add("'root' (the repository root) is missing") }
     $opts = @{}
     foreach ($k in $script:SettingOptionNames) { $opts[$k] = [bool]$script:OptionDefaults[$k] }
@@ -2934,7 +3169,7 @@ function Read-RunConfig {
     $so = Get-ProfileValue $o 'sccm' $null
     if ($null -ne $so) { foreach ($p in @($so.PSObject.Properties)) { if ($script:RunConfigSccmKeys -notcontains $p.Name) { $problems.Add("unknown sccm setting '$($p.Name)'") } else { $sccm[$p.Name] = [string]$p.Value } } }
     if ($problems.Count -gt 0) { throw "The run config $File has $($problems.Count) problem(s): $($problems -join '; ')." }
-    return [pscustomobject]@{ File = $File; OsName = $os; Root = $root; Options = $opts; LanguagesGiven = $langsGiven; Languages = $langs
+    return [pscustomobject]@{ File = $File; OsName = $os; ResolvedFrom = $resolvedFrom; Root = $root; Options = $opts; LanguagesGiven = $langsGiven; Languages = $langs
         RemoveApps = @(@(Get-ProfileValue $o 'removeApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ }); Sccm = $sccm }
 }
 function ConvertTo-RunOptions {
@@ -2964,6 +3199,7 @@ function Invoke-CommandLineRun {
         Write-ProfileMessages
         $cfg = Read-RunConfig -File $ConfigFile -Definitions $script:OsDefinitions -LanguageList @(Import-LanguageList -Directory $ProfilesDir)
         $opts = ConvertTo-RunOptions -Config $cfg -Definition $script:OsDefinitions[$cfg.OsName] -ProfilesDir $ProfilesDir -PreflightOnly:$PreflightOnly
+        if ($cfg.ResolvedFrom) { Write-Log "The run config names the OS $($cfg.ResolvedFrom); it was found by its folder as '$($cfg.OsName)' (the OS was renamed). Save the run config again to update it." 'WARN' }
         Write-Log "Command line run from $ConfigFile$(if ($opts.PreflightOnly) { ' (preflight only)' })"
         Invoke-MediaRefresh -Options $opts | Out-Null
         $res = $script:LastResult
@@ -3003,7 +3239,7 @@ if ($Config) {
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
-    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/></ContextMenu></Button.ContextMenu>
+    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/><Separator/><MenuItem x:Name="NewOsItem" Header="New OS from existing..." ToolTip="Adds an OS to the list by copying the selected one: a new name, folder and release (for example 26H2). The catalog searches are updated for the new release and the repository folders are created."/><MenuItem x:Name="RenameOsItem" Header="Rename OS..." ToolTip="Changes the selected OS's display name and, if wanted, its folder name. Saved settings, the app list and the repository folder move with it."/><MenuItem x:Name="CheckOsItem" Header="Check OS profile" ToolTip="Tests the selected OS's profile before a long run: the repository folder, which edition it picks on the ISO (and its build), and what each catalog search finds. Changes and downloads nothing."/><MenuItem x:Name="EditOsItem" Header="Edit OS profile..." ToolTip="Opens the selected OS's profile file in Notepad. Save it, then press Reload profiles; problems are shown in the Log tab."/><MenuItem x:Name="OpenProfilesItem" Header="Open Profiles folder" ToolTip="Opens the folder holding the OS profile files in Explorer."/></ContextMenu></Button.ContextMenu>
    </Button>
    <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files, with optional refreshed media and ISO." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
@@ -3070,7 +3306,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -3674,6 +3910,14 @@ function Complete-BackgroundRun {
     try { Update-SccmLastRun } catch { }
     $resMode = if ($ok -and $res) { [string](Get-ProfileValue $res 'Mode' '') } else { '' }
 
+    # Tools > Check OS profile finished: show what was found and what to fix.
+    if ($resMode -eq 'ProfileCheck') {
+        $script:Status.Text = 'Ready'; $script:Progress.Value = 0
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        Update-HeaderIdle
+        [System.Windows.MessageBox]::Show("Check OS profile: $($res.Summary)", 'WimForge', 'OK', $(if (@($res.Problems).Count) { 'Warning' } else { 'Information' })) | Out-Null
+        return
+    }
     # SCCM tab: Connect finished - fill the distribution point / group list.
     if ($resMode -eq 'SccmConnect') {
         $script:SccmLists = $res
@@ -3964,7 +4208,8 @@ function Save-CurrentRunConfig {
     $sel = Get-SelectedSettings
     $sc = @{ siteServer = ([string]$script:SccmSiteServer.Text).Trim(); targetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); target = ([string]$script:SccmTarget.Text).Trim()
              contentSource = ([string]$script:SccmContentSource.Text).Trim(); sourceServer = $script:SccmSourceServer; packageType = (Get-SccmPackageTypeTag); imageName = (Get-SccmSelected).ImageName }
-    return (Save-RunConfig -File $File -OsName ([string]$script:OsCombo.SelectedItem) -Root ([string]$script:RootText.Text).Trim() -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps -Sccm $sc)
+    $defRc = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
+    return (Save-RunConfig -File $File -OsName ([string]$script:OsCombo.SelectedItem) -Folder $(if ($defRc) { $defRc.Folder } else { '' }) -Root ([string]$script:RootText.Text).Trim() -Options $sel.Options -Languages $sel.Languages -RemoveApps $sel.RemoveApps -Sccm $sc)
 }
 $script:SaveRunConfigItem.Add_Click({
     $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]
@@ -4000,6 +4245,106 @@ $script:CleanupMountsItem.Add_Click({
         $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         [System.Windows.MessageBox]::Show("Could not start Cleanup Mountpoints: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
     }
+})
+# ---- Tools > New OS from existing / Rename OS / Check OS profile / Edit OS profile / Open Profiles folder (2026-09-30) ----
+function Show-OsNameDialog {
+    # A small dialog for a name, a folder (filled from the name until edited by hand) and, with -WithRelease, the release and
+    # the text to replace in the catalog searches. Returns a hashtable, or $null when cancelled.
+    param([string]$Title, [string]$Intro, [string]$Name, [string]$Folder, [switch]$WithRelease, [string]$Release, [string]$Replace, [switch]$FolderFollowsName)
+    $releaseRows = if ($WithRelease) { @'
+<TextBlock Text="Release (for example 26H2)" Margin="0,10,0,2"/><TextBox x:Name="ReleaseBox" Padding="4,3"/>
+<TextBlock Text="Text to replace with the release in the catalog searches (the base OS's release)" Margin="0,10,0,2" TextWrapping="Wrap"/><TextBox x:Name="ReplaceBox" Padding="4,3"/>
+'@ } else { '' }
+    [xml]$dx = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WimForge - $([System.Security.SecurityElement]::Escape($Title))" Width="560" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="White" ShowInTaskbar="False">
+ <StackPanel Margin="16">
+  <TextBlock x:Name="IntroText" TextWrapping="Wrap" Margin="0,0,0,8"/>
+  <TextBlock Text="OS name (as shown in the list)" Margin="0,4,0,2"/><TextBox x:Name="NameBox" Padding="4,3"/>
+  <TextBlock Text="Folder name (the OS's repository folder, profile file, saved settings and app list)" Margin="0,10,0,2" TextWrapping="Wrap"/><TextBox x:Name="FolderBox" Padding="4,3"/>
+  $releaseRows
+  <TextBlock x:Name="ErrorText" Foreground="#B00020" TextWrapping="Wrap" Margin="0,10,0,0"/>
+  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+   <Button x:Name="OkButton" Content="OK" Width="90" Padding="0,4" IsDefault="True" Margin="0,0,8,0"/><Button Content="Cancel" Width="90" Padding="0,4" IsCancel="True"/>
+  </StackPanel>
+ </StackPanel>
+</Window>
+"@
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
+    try { $dlg.Owner = $window } catch { }
+    $c = @{}; foreach ($n in 'IntroText', 'NameBox', 'FolderBox', 'ReleaseBox', 'ReplaceBox', 'ErrorText', 'OkButton') { $c[$n] = $dlg.FindName($n) }
+    $c.IntroText.Text = $Intro; $c.NameBox.Text = $Name; $c.FolderBox.Text = $Folder
+    if ($WithRelease) { $c.ReleaseBox.Text = $Release; $c.ReplaceBox.Text = $Replace }
+    # Handlers use $script:OsDlg (not GetNewClosure, whose module scope cannot see this script's functions)
+    $script:OsDlg = @{ C = $c; Dlg = $dlg; FolderEdited = (-not $FolderFollowsName); Setting = $false }
+    $c.FolderBox.Add_TextChanged({ if (-not $script:OsDlg.Setting) { $script:OsDlg.FolderEdited = $true } })
+    $c.NameBox.Add_TextChanged({
+        $d = $script:OsDlg
+        if (-not $d.FolderEdited) { $d.Setting = $true; $d.C.FolderBox.Text = ConvertTo-OsFolderName $d.C.NameBox.Text; $d.Setting = $false }
+    })
+    $c.OkButton.Add_Click({
+        $d = $script:OsDlg
+        $why = if (-not $d.C.NameBox.Text.Trim()) { 'Type a name.' } else { Test-OsFolderName $d.C.FolderBox.Text.Trim() }
+        if ($why) { $d.C.ErrorText.Text = $(if ($why -like 'Type*') { $why } else { "Folder name: $why." }); return }
+        $d.Dlg.DialogResult = $true
+    })
+    $c.NameBox.Focus() | Out-Null; $c.NameBox.SelectAll()
+    if (-not $dlg.ShowDialog()) { return $null }
+    $out = @{ Name = $c.NameBox.Text.Trim(); Folder = $c.FolderBox.Text.Trim() }
+    if ($WithRelease) { $out.Release = $c.ReleaseBox.Text.Trim(); $out.Replace = $c.ReplaceBox.Text.Trim() }
+    return $out
+}
+function Select-OsInList { param([string]$Name) if ($script:OsCombo.Items.Contains($Name)) { $script:OsCombo.SelectedItem = $Name } }
+$script:NewOsItem.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { [System.Windows.MessageBox]::Show('A run is in progress. Try again once it has finished.', 'WimForge', 'OK', 'Information') | Out-Null; return }
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]; if (-not $def) { return }
+    $intro = "Copies '$($def.Name)' to a new OS: the same edition rule, languages and options, with the catalog searches changed to the new release. Pick the OS to copy in the list first (the closest one: for Windows 11 26H2, Windows 11 24H2)."
+    $in = Show-OsNameDialog -Title 'New OS from existing' -Intro $intro -Name $def.Name -Folder $def.Folder -WithRelease -Release $def.Version -Replace $def.Version -FolderFollowsName
+    if (-not $in) { return }
+    $root = ([string]$script:RootText.Text).Trim()
+    try { $r = New-OsProfileFromBase -ProfilesDir $script:ProfilesDir -Base $def -Definitions $script:OsDefinitions -Name $in.Name -Folder $in.Folder -Version $in.Release -ReplaceText $in.Replace -Root $root }
+    catch { [System.Windows.MessageBox]::Show("The new OS was not created: $($_.Exception.Message)", 'WimForge', 'OK', 'Warning') | Out-Null; return }
+    Write-Log "New OS '$($in.Name)' created from '$($def.Name)': $($r.File)$(if ($r.Repository) { "; repository folder $($r.Repository)" })"
+    $searchNote = if ($in.Release -and $r.Replaced -eq 0 -and -not $r.UsesPlaceholder) { "`n`nNo catalog search contained '$($r.From)', so the searches were not changed. Check them with Tools > Edit OS profile." } elseif ($r.Replaced -gt 0) { "`n`n$($r.Replaced) catalog search setting(s) changed from '$($r.From)' to '$($in.Release)'." } else { '' }
+    if ($r.Replaced -eq 0 -and $in.Release -and -not $r.UsesPlaceholder) { Write-Log "New OS '$($in.Name)': no catalog search contained '$($r.From)'; the searches were not changed." 'WARN' }
+    Update-ProfileList; Select-OsInList $in.Name
+    [System.Windows.MessageBox]::Show("'$($in.Name)' was added.`n`nProfile: $($r.File)$(if ($r.Repository) { "`nRepository folder: $($r.Repository)" })$searchNote`n`nNext: copy the new OS ISO into its ISO folder, then run Tools > Check OS profile. Set the support end date with Tools > Edit OS profile.", 'WimForge', 'OK', 'Information') | Out-Null
+})
+$script:RenameOsItem.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { [System.Windows.MessageBox]::Show('A run is in progress. Try again once it has finished.', 'WimForge', 'OK', 'Information') | Out-Null; return }
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]; if (-not $def) { return }
+    $intro = "Renames '$($def.Name)'. Changing only the name is safe at any time. Changing the folder name also renames the repository folder under the root, the profile file, the saved settings and the app list; the old folder name stays accepted, so older run configs still work."
+    $in = Show-OsNameDialog -Title 'Rename OS' -Intro $intro -Name $def.Name -Folder $def.Folder
+    if (-not $in) { return }
+    try { $r = Rename-OsProfile -ProfilesDir $script:ProfilesDir -Definition $def -Definitions $script:OsDefinitions -NewName $in.Name -NewFolder $in.Folder -SettingsDir $script:SettingsDir -Root ([string]$script:RootText.Text).Trim() }
+    catch { [System.Windows.MessageBox]::Show("Nothing was renamed: $($_.Exception.Message)", 'WimForge', 'OK', 'Warning') | Out-Null; return }
+    Write-Log "OS renamed: '$($r.OldName)' -> '$($r.NewName)'$(if ($r.OldFolder -cne $r.NewFolder) { ", folder $($r.OldFolder) -> $($r.NewFolder)" })"
+    foreach ($m in @($r.Moves)) { Write-Log "  moved: $m" }
+    Update-ProfileList; Select-OsInList $r.NewName
+    [System.Windows.MessageBox]::Show("Renamed to '$($r.NewName)'.$(if (@($r.Moves).Count) { "`n`nMoved:`n- " + (@($r.Moves) -join "`n- ") })`n`nSCCM image names use the OS name, so the next import gets the new name.", 'WimForge', 'OK', 'Information') | Out-Null
+})
+$script:CheckOsItem.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { [System.Windows.MessageBox]::Show('A run is in progress. Try again once it has finished.', 'WimForge', 'OK', 'Information') | Out-Null; return }
+    if (-not $script:EngineText) { [System.Windows.MessageBox]::Show('Check OS profile needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null; return }
+    $opts = [pscustomobject]@{ Mode = 'ProfileCheck'; Root = ([string]$script:RootText.Text).Trim(); OsName = [string]$script:OsCombo.SelectedItem; ProfilesDir = $script:ProfilesDir; Catalog = $true }
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start the check: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+    }
+})
+$script:EditOsItem.Add_Click({
+    $def = $script:OsDefinitions[[string]$script:OsCombo.SelectedItem]; if (-not $def) { return }
+    $file = [System.IO.Path]::Combine($script:ProfilesDir, [string]$def.SourceFile)
+    if (-not $def.SourceFile -or $def.SourceFile -eq '(built-in)' -or -not (Test-Path -LiteralPath $file)) { [System.Windows.MessageBox]::Show("'$($def.Name)' has no profile file in $($script:ProfilesDir) (it is a built-in fallback). Press Reload profiles to write the files, then try again.", 'WimForge', 'OK', 'Information') | Out-Null; return }
+    try { Start-Process -FilePath 'notepad.exe' -ArgumentList "`"$file`"" -ErrorAction Stop; Write-Log "Opened $file in Notepad. Save it, then press Reload profiles; any problem in the file is reported here." }
+    catch { [System.Windows.MessageBox]::Show("Could not open Notepad: $($_.Exception.Message)`n`nThe file is $file", 'WimForge', 'OK', 'Warning') | Out-Null }
+})
+$script:OpenProfilesItem.Add_Click({
+    try { Ensure-Directory $script:ProfilesDir; Start-Process -FilePath 'explorer.exe' -ArgumentList "`"$($script:ProfilesDir)`"" -ErrorAction Stop }
+    catch { [System.Windows.MessageBox]::Show("Could not open the folder: $($_.Exception.Message)`n`n$($script:ProfilesDir)", 'WimForge', 'OK', 'Warning') | Out-Null }
 })
 $script:CancelButton.Add_Click({
     $script:Cancelled = $true

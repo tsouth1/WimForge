@@ -187,6 +187,28 @@ if ($wpf) {
     Check 'with the ADK found, the tick stays' ([bool]$script:ChkBuildIso.IsChecked -and -not $script:IsoRefusedNote)
     Check 'a click that was refused shows "No local ADK installation found. This option is not available."' ($src -match '(?s)\$script:ChkBuildIso\.Add_Click\(\{\s*if \(\$script:IsoRefusedNote -and -not \$script:ChkBuildIso\.IsChecked\) \{ \[System\.Windows\.MessageBox\]::Show\(\$script:NoAdkMessage')
     $script:ChkBuildIso.IsChecked = $false; $script:ChkBuildMedia.IsChecked = $false
+    # Tools > New OS from existing / Rename OS / Check / Edit / Open Profiles folder (2026-09-30)
+    $tools19 = @($win.FindName('ToolsButton').ContextMenu.Items | Where-Object { $_ -is [System.Windows.Controls.MenuItem] } | ForEach-Object { [string]$_.Header })
+    Check 'the Tools menu offers New OS from existing, Rename OS, Check OS profile, Edit OS profile and Open Profiles folder' (($tools19 -join '|') -eq 'Cleanup Mountpoints...|Save run config...|New OS from existing...|Rename OS...|Check OS profile|Edit OS profile...|Open Profiles folder') ($tools19 -join '|')
+    Invoke-Expression ([regex]::Match($src, "(?s)function Show-OsNameDialog \{.*?\r?\n\}\r?\n").Value)
+    # A timer plays the operator: clears the name (OK refused), types the new name (the folder follows), and presses OK.
+    $script:Dlg19 = @{ Step = 0; Folder = ''; Error = '' }
+    $timer19 = New-Object System.Windows.Threading.DispatcherTimer; $timer19.Interval = [TimeSpan]::FromMilliseconds(150)
+    $timer19.Add_Tick({
+        $s = $script:Dlg19; $s.Step++; $d = $script:OsDlg
+        if (-not $d -or -not $d.Dlg.IsVisible) { if ($s.Step -gt 40) { $timer19.Stop() }; return }
+        $click = { $d.C.OkButton.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) }
+        switch ($s.Step) {
+            { $_ -le 2 } { $d.C.NameBox.Text = ''; & $click; $s.Error = [string]$d.C.ErrorText.Text; break }
+            3 { $d.C.NameBox.Text = 'Windows 11 Enterprise 26H2'; $d.C.ReleaseBox.Text = '26H2'; $s.Folder = [string]$d.C.FolderBox.Text; break }
+            4 { & $click; break }
+            default { if ($s.Step -gt 40) { $d.Dlg.Close() } }
+        }
+    })
+    $script:OsDlg = $null; $timer19.Start()
+    $out19 = Show-OsNameDialog -Title 'New OS from existing' -Intro 'test' -Name 'Windows 11 Enterprise 24H2' -Folder 'Win11_Enterprise_24H2' -WithRelease -Release '24H2' -Replace '24H2' -FolderFollowsName
+    $timer19.Stop()
+    Check 'WPF New OS dialog: an empty name is refused in the dialog; the folder follows the typed name; OK returns what was typed' ($script:Dlg19.Error -eq 'Type a name.' -and $script:Dlg19.Folder -eq 'Win11_Enterprise_26H2' -and $out19 -and $out19.Name -eq 'Windows 11 Enterprise 26H2' -and $out19.Folder -eq 'Win11_Enterprise_26H2' -and $out19.Release -eq '26H2' -and $out19.Replace -eq '24H2') "error '$($script:Dlg19.Error)', folder '$($script:Dlg19.Folder)', out $($out19 | ConvertTo-Json -Compress)"
     $auto14 = $win.FindName('ChkAutoDownload')
     Check 'Updates and Features: "Download the latest patches before the run" is there, off by default, and saved per OS (step 14)' ($null -ne $auto14 -and -not $script:DefaultChecks['AutoDownload'] -and $script:SettingOptionNames -contains 'AutoDownload' -and [string]$auto14.Content.Text -like 'Download the latest patches before the run (only what is missing)*use the patches already in the folders.')
 

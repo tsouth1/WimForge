@@ -64,7 +64,7 @@ Check "catalogSearch class missing 'search' throws" ($threw -and $m3 -like "*.se
 
 Write-Host "`n=== A2 Resolve-CatalogSearch / Test-CatalogCandidate / Get-CatalogDate ==="
 Check '{build} substituted' ((Resolve-CatalogSearch -Search 'Windows 10 {build} x64' -Build '19041.3636') -eq 'Windows 10 19041.3636 x64')
-Check '{version} alias substituted' ((Resolve-CatalogSearch -Search 'Windows 10 {version} x64' -Build '19041.3636') -eq 'Windows 10 19041.3636 x64')
+Check '{version} is not the build any more (it is the profile''s release, filled in when the profile is read)' ((Resolve-CatalogSearch -Search 'Windows 10 {version} x64' -Build '19041.3636') -eq 'Windows 10 {version} x64')
 Check 'no build: placeholder left as literal text' ((Resolve-CatalogSearch -Search 'Windows 10 {build} x64' -Build $null) -eq 'Windows 10 {build} x64')
 $ruleArch = [pscustomobject]@{ architecture = 'x64'; excludePreview = $true; buildFilter = '' }
 Check 'wrong architecture filtered out' (-not (Test-CatalogCandidate -Result ([pscustomobject]@{ Architecture = 'ARM64'; Title = 'Cumulative Update' }) -Rule $ruleArch))

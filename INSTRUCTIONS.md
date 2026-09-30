@@ -154,6 +154,49 @@ Imports the latest finished run of the selected OS into Configuration Manager. N
 
 Every run also does a smaller version of this for its own OS folder at the start: stray mounts are discarded and ISOs of that OS still mounted are dismounted, with a WARN in the log.
 
+- **Save run config...** - see "Running without the window" below.
+- **New OS from existing...**, **Rename OS...**, **Check OS profile**, **Edit OS profile...**, **Open Profiles folder** - see the next section.
+
+## Adding or changing an OS
+
+Every OS in the list is one JSON file in `Profiles` (its **profile**). WimForge has nothing OS-specific built into its code, so a new Windows release needs only a new profile - no new version of WimForge. Everything below can be done in the window; Notepad is only needed for the less common settings.
+
+### A new release: for example Windows 11 26H2
+
+1. Select the closest OS in the list (for Windows 11 26H2: Windows 11 Enterprise 24H2).
+2. **Tools > New OS from existing...** - type the new name (`Windows 11 Enterprise 26H2`); the folder name follows it (`Win11_Enterprise_26H2`); type the release (`26H2`). The last box is the text replaced by the release in the catalog searches - normally the base OS's release, already filled in.
+3. WimForge writes `Profiles\Win11_Enterprise_26H2.json`, creates the OS's repository folders (`ISO`, `PATCHES\LCU`, ...) and selects the new OS. The support end date is left empty on purpose.
+4. Copy the new OS ISO into its `ISO` folder (and the Language Pack / FOD ISOs if you add languages).
+5. **Tools > Check OS profile** - reads the ISO and searches the catalog without changing or downloading anything, then lists what it found (the edition it would service, its build, the update each catalog search finds) and what to fix. The same lines are in the Log tab, starting `PROFILE CHECK`.
+6. Fix what it reports (see below), then **Download patches...** and a **Preflight** as usual.
+
+What the check may report, and what to change with **Tools > Edit OS profile...**:
+
+- **No edition matched** - the ISO names or numbers its editions differently. The check lists the editions it found; set `editionRegex` to match the one you want (for example `(?i)^Windows 11 Enterprise$`) or set `preferredIndex` to its number.
+- **A catalog search found nothing** - Microsoft titles this release's updates differently. Search the Microsoft Update Catalog in a browser for the release, then copy the title wording into that class's `search` (short, at most 100 characters) and `buildFilter`. Some releases are serviced with the same updates as an earlier one (Windows 11 25H2 shares its updates with 24H2): if the catalog has no titles for the new release, keep the earlier release's wording in the searches.
+- **No support end date** - set `endOfSupport` (from Microsoft's lifecycle page), so the window and the runs warn in time.
+
+### Renaming an OS
+
+**Tools > Rename OS...** changes the name shown in the list and, if you want, the folder name.
+
+- Changing only the **name** is safe at any time: saved settings, the app list and the repository folder are found by the folder name, not the display name. Run configs made before the rename still work (they also record the folder). SCCM image names are built from the OS name, so the next import uses the new one.
+- Changing the **folder name** also renames the OS's repository folder under the root, its profile file, its saved settings and its app list. The old folder name stays accepted (in `altFolders`), so another root or an old run config still finds the OS. It is refused while an image is mounted in that folder (use Cleanup Mountpoints first).
+- Renaming a built-in OS keeps its old file as `<old folder>.json.disabled`, so Reload profiles does not bring the old one back.
+
+### Editing a profile by hand
+
+**Tools > Edit OS profile...** opens the selected OS's file in Notepad; **Tools > Open Profiles folder** opens the folder. After saving, press **Reload profiles**: a mistake is reported in the Log tab in plain words (for example "'editionRegex' is not a valid regular expression") and that file is skipped until it is fixed - the other OSes keep working. To add an OS by hand, copy a file, give it a new `name` and `folder`, and reload. To hide a built-in OS, rename its file to `<folder>.json.disabled`; deleting a built-in file and pressing Reload profiles gives a fresh copy of it.
+
+The settings in a profile file:
+
+- `name` - the name in the list. `folder` - the OS's folder under the repository root and the name of its profile, settings and app-list files. `altFolders` - older folder names that are still accepted. `sortOrder` - the position in the list.
+- `version` - the release, for example `26H2` or `1809`. Wherever `{version}` appears in the catalog searches, this value is used, so a new release is a one-field change.
+- `serviceAllIndexes` - `true` services every edition in install.wim (Windows Server); otherwise `editionRegex` picks the edition by name and `preferredIndex` is the fallback by number.
+- `lpPattern` - the language pack file name, with `{0}` where the language code goes. `defaultLanguages` - the languages ticked by default. `ssuRequired` - the OS needs a separate servicing stack update in `PATCHES\SSU` (Windows 10 LTSC).
+- `catalogSearch` - per update class (`LCU`, `NetCU`, `SafeOS`, `SetupDU`): `search` (what is typed into the catalog), `buildFilter` (a regular expression the update's title must match), and for Dynamic Updates `productFilter` / `productExclude`. `{version}` is the release; `{build}` is the build number read from the ISO.
+- `endOfSupport` - `yyyy-MM-dd`, or empty. `keepArchives`, `minFreeGB`, `spaceCheck` - how many old outputs to keep, and the free-space check (`enforce`, `warn` or `off`). `packageOrder` - rarely needed: the order of several files in one PATCHES folder. `notes` - free text shown with the profile.
+
 ## Running without the window (command line)
 
 Every choice in the window can be saved as a **run config** (a JSON file) and run later without the window - for example from Task Scheduler after Patch Tuesday.
@@ -167,7 +210,7 @@ Every choice in the window can be saved as a **run config** (a JSON file) and ru
 - The run writes the usual `LOGS` files and prints its log to the console.
 - **Exit codes:** `0` success; `1` failed (including a bad config); `2` finished, but the validation gate FAILED; `3` the run succeeded but the SCCM import the config asks for failed.
 - **SCCM:** when "Import after the run finishes" was ticked on the SCCM tab, the config imports straight after a successful run - without a confirmation - and never when the validation gate FAILED.
-- **Editing a config by hand:** option names are the same as in the window's saved settings (`Install`, `WinRE`, `NetFx3`, `AutoDownload`, ...). A missing option takes the window's default; a missing `languages` list takes the OS profile's default languages (an empty list means English only). A misspelled option, an unknown OS or language, or a value that is not `true` / `false` stops the run with a message naming every problem - a typo never quietly changes a run.
+- **Editing a config by hand:** option names are the same as in the window's saved settings (`Install`, `WinRE`, `NetFx3`, `AutoDownload`, ...). A missing option takes the window's default; a missing `languages` list takes the OS profile's default languages (an empty list means English only). The config names the OS by its display name and its folder name, so it keeps working after Tools > Rename OS (the log says so; saving the config again updates it). A misspelled option, an unknown OS or language, or a value that is not `true` / `false` stops the run with a message naming every problem - a typo never quietly changes a run.
 ## What a run produces
 
 Everything goes to `<repository root>\<OS folder>\NEWWIM`:
