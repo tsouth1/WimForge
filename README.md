@@ -17,11 +17,44 @@ and optionally build a refreshed media folder and ISO for OS Upgrade
 Packages. It can also download the current LCU, .NET CU, Safe OS and Setup
 Dynamic Updates from the Microsoft Update Catalog (via the MSCatalogLTS
 module), with a dry-run preview before anything is downloaded.
-![WimForge Screenshot](images/WimForge.png)
-![WimForge Screenshot](images/Updates.png)
-![WimForge Screenshot](images/general.png)
-![WimForge Screenshot](images/lang.png)
 
+## Screenshots
+
+**Source and Targets** - the OS, the repository root, and what to build (install.wim, WinRE, media folder, ISO, boot.wim, CA 2023 media).
+
+![Source and Targets tab](images/tab_source_and_targets.png)
+
+**Updates and Features** - which update classes to apply, .NET Framework 3.5, and "Download the latest patches before the run".
+
+![Updates and Features tab](images/tab_updates_and_features.png)
+
+**Languages** - the language packs and Features on Demand to add to install.wim.
+
+![Languages tab](images/tab_languages.png)
+
+**Apps** - the provisioned apps read from the ISO; ticked apps are removed first.
+
+![Apps tab](images/tab_apps.png)
+
+**SCCM** - import the finished image or upgrade package into Configuration Manager and distribute it.
+
+![SCCM tab](images/tab_sccm.png)
+
+**Log** - the run's log, coloured by level.
+
+![Log tab](images/tab_log.png)
+
+**Instructions** - the operator guide (`INSTRUCTIONS.md`), formatted.
+
+![Instructions tab](images/tab_instructions.png)
+
+**General Settings** - colour schemes.
+
+![General Settings tab](images/tab_general_settings.png)
+
+**Tools menu** - Cleanup Mountpoints, run configs for the command line, and adding, renaming, checking and editing OS profiles.
+
+![Tools menu](images/tools_menu.png)
 
 ## Files
 
@@ -43,7 +76,7 @@ module), with a dry-run preview before anything is downloaded.
 ## Status
 
 v2.4 is being validated (see `TODO.md` step 2). It passes the mock test kit
-(335 checks, on Windows PowerShell 5.1 and 7) and every built-in catalog
+(599 checks, on Windows PowerShell 5.1 and 7) and every built-in catalog
 rule has been checked against the live Microsoft Update Catalog. Windows 11 24H2
 (twice, English only) and LTSC 2019 (ten languages) have been serviced on
 real images, with the validation gate passing each time; LTSC 2021 and
