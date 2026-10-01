@@ -17,7 +17,7 @@ This guide covers the folders WimForge expects, every part of the window, the re
 
 ## Folder layout
 
-Everything lives under one **repository root** (until you save one, the default is the folder the script is in, on whatever drive that is; change it on the Source and Targets tab and press Save settings to keep it). Inside it there is one folder per operating system:
+Everything lives under one **repository root** (until you save one, the default is the folder the script is in, on whatever drive that is; change it on the Source and Targets tab and press Save settings to keep it). **Moving WimForge** to another server, drive or folder: copy the whole folder; when the saved root was WimForge's own folder, the root moves with it at the next start, and the Log tab says so - press Save settings to keep it. Always check the Repository root after a move.. Inside it there is one folder per operating system:
 
 - `Win10_Enterprise_LTSC_2019` - Windows 10 Enterprise LTSC 2019 (IoT)
 - `Win10_IoT_Enterprise_LTSC_2021` - Windows 10 IoT Enterprise LTSC 2021

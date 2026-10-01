@@ -409,7 +409,7 @@ Write-Host "`n=== P17 portable: no fixed drive or folder, no personal or site na
 $rootDir17 = Split-Path $PSScriptRoot -Parent
 Check 'the default repository root is the script''s own folder (a drive root keeps its backslash)' ((Get-DefaultRoot -ScriptDir 'E:\Tools\WimForge\') -eq 'E:\Tools\WimForge' -and (Get-DefaultRoot -ScriptDir 'E:\') -eq 'E:\' -and (Get-DefaultRoot -ScriptDir '') -eq (Get-Location -PSProvider FileSystem).Path)
 $main17 = [System.IO.File]::ReadAllText((Join-Path $rootDir17 'MediaRefresh_v2.4.ps1'))
-Check 'the window has no hard-coded repository root; it is filled from the saved settings or the script folder' ($main17 -match 'x:Name="RootText" Grid\.Row="0" Grid\.Column="1" Text=""' -and $main17 -match 'Get-DefaultRoot -ScriptDir \$PSScriptRoot')
+Check 'the window has no hard-coded repository root; it is filled from the saved settings or the script folder' ($main17 -match 'x:Name="RootText" Grid\.Row="0" Grid\.Column="1" Text=""' -and $main17 -match 'Resolve-SavedRoot -Directory \$script:SettingsDir -ScriptDir \$PSScriptRoot')
 $shipped17 = @('MediaRefresh_v2.4.ps1', 'INSTRUCTIONS.md', 'README.md', 'TODO.md', 'Languages.json') | ForEach-Object { Join-Path $rootDir17 $_ } | Where-Object { Test-Path $_ }
 $drive17 = @($shipped17 | ForEach-Object { Select-String -LiteralPath $_ -Pattern '(?i)\b[a-z]:\\mediarefresh' } | ForEach-Object { "$($_.Filename):$($_.LineNumber)" })
 Check 'no file names a fixed X:\mediaRefresh folder' ($drive17.Count -eq 0) ($drive17 -join ', ')
@@ -498,5 +498,40 @@ $j19.folder = ''; $j19.os = 'Win11_Enterprise_26H2'; [System.IO.File]::WriteAllT
 Check 'a run config may name the OS by a folder name (current or old)' ((Read-RunConfig -File $rc19 -Definitions $defs19).OsName -eq 'Windows 11 Enterprise 26H2')
 $j19.os = 'Windows 12'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5)); $e6 = ''; try { [void](Read-RunConfig -File $rc19 -Definitions $defs19) } catch { $e6 = $_.Exception.Message }
 Check 'an unknown OS is still refused with the list of profiles' ($e6 -like "*'os' is 'Windows 12', which is not one of the profiles:*") $e6
+
+Write-Host "`n=== P20 WimForge moved to another server / drive: the saved repository root follows it (2026-10-01) ==="
+$b20 = Join-Path $PWD 'tst_root\p20'; if (Test-Path $b20) { Remove-Item $b20 -Recurse -Force }
+$old20 = Join-Path $b20 'oldsrv\mediaRefresh'; $here20 = Join-Path $b20 'J\WimForge'; $set20 = Join-Path $here20 'Settings'; $else20 = Join-Path $b20 'elsewhere'
+New-Item -ItemType Directory -Force $old20, $set20, $else20 | Out-Null
+$f20 = @('Win11_Enterprise_24H2', 'Win10_Enterprise_LTSC_2019')
+function Set-General20($o) { [System.IO.File]::WriteAllText((Join-Path $set20 'General.json'), ($o | ConvertTo-Json)) }
+$r = Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20
+Check 'nothing saved: the script''s folder' ($r.Root -eq $here20 -and $r.Level -eq 'INFO' -and $r.Note -like '*no root saved yet*')
+Set-General20 @{ root = $old20; scriptDir = $old20 }
+$r = Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20
+Check 'moved, and the root was WimForge''s own folder: the root moves with it (WARN, says how to keep it)' ($r.Root -eq $here20 -and $r.Level -eq 'WARN' -and $r.Note -like "WimForge was moved from $old20 to $here20*Press Save settings*") $r.Note
+Set-General20 @{ root = (Join-Path $old20 'repo'); scriptDir = $old20 }
+Check 'moved, root inside WimForge''s folder: the same sub-folder under the new place' ((Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20).Root -eq (Join-Path $here20 'repo'))
+Set-General20 @{ root = $else20; scriptDir = $old20 }
+Check 'moved, but the root was somewhere else that still exists: kept' ((Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20).Root -eq $else20)
+Set-General20 @{ root = 'Q:\no\such\drive' }
+$r = Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20
+Check 'older settings, saved root missing on this machine: the script''s folder, with a WARN' ($r.Root -eq $here20 -and $r.Level -eq 'WARN' -and $r.Note -like '*does not exist on this machine*')
+# the reported case: old General.json says F:\mediaRefresh, F: exists on the new server (Download patches even created folders
+# there) but holds no ISO, while the ISOs are beside the script on J:
+New-Item -ItemType Directory -Force (Join-Path $old20 'Win10_Enterprise_LTSC_2019\PATCHES\LCU'), (Join-Path $here20 'Win11_Enterprise_24H2\ISO') | Out-Null
+Set-Content (Join-Path $here20 'Win11_Enterprise_24H2\ISO\os.iso') 'x'
+Set-General20 @{ root = $old20 }
+$r = Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20
+Check 'older settings, saved root holds no ISO but the script''s folder does: the script''s folder (the reported case)' ($r.Root -eq $here20 -and $r.Level -eq 'WARN' -and $r.Note -like "*$old20 holds no ISO, but the script's folder $here20 does*") $r.Note
+New-Item -ItemType Directory -Force (Join-Path $old20 'Win10_Enterprise_LTSC_2019\ISO') | Out-Null; Set-Content (Join-Path $old20 'Win10_Enterprise_LTSC_2019\ISO\a.iso') 'x'
+Check 'older settings, saved root with ISOs: kept' ((Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20).Root -eq $old20)
+Set-General20 @{ root = $here20 }
+$r = Resolve-SavedRoot -Directory $set20 -ScriptDir $here20 -Folders $f20
+Check 'saved root is the script''s folder: loaded as saved' ($r.Root -eq $here20 -and $r.Level -eq 'INFO' -and $r.Note -like 'Repository root loaded from saved settings*')
+Save-GeneralSettings -Directory $set20 -Root $else20; $g20 = Get-Content -Raw (Join-Path $set20 'General.json') | ConvertFrom-Json
+Save-GeneralSettings -Directory $set20 -ColorScheme 'Default'; $g20b = Get-Content -Raw (Join-Path $set20 'General.json') | ConvertFrom-Json
+Check 'Save settings records where WimForge is (scriptDir), and other saves keep it' ($g20.scriptDir -eq $here20 -and $g20.root -eq $else20 -and $g20b.scriptDir -eq $here20)
+Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

@@ -668,6 +668,8 @@ function Save-GeneralSettings {
     $data = [ordered]@{
         schemaVersion = 1; saved = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         root        = $(if ($PSBoundParameters.ContainsKey('Root')) { [string]$Root } else { [string](Get-ProfileValue $old 'root' '') })
+        # where WimForge was when the root was saved (Settings is beside the script): lets a moved copy move its root along
+        scriptDir   = $(if ($PSBoundParameters.ContainsKey('Root')) { [string](Split-Path $Directory -Parent) } else { [string](Get-ProfileValue $old 'scriptDir' '') })
         colorScheme = $(if ($PSBoundParameters.ContainsKey('ColorScheme')) { [string]$ColorScheme } else { [string](Get-ProfileValue $old 'colorScheme' '') })
         # SCCM tab (step 7): shared by every OS
         sccmSiteServer = $(if ($PSBoundParameters.ContainsKey('SccmSiteServer')) { [string]$SccmSiteServer } else { [string](Get-ProfileValue $old 'sccmSiteServer' '') })
@@ -823,6 +825,53 @@ function Read-GeneralSettings {
     if (-not (Test-Path -LiteralPath $file)) { return '' }
     try { return ([string](Get-ProfileValue ([System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop) 'root' '')).Trim() }
     catch { Write-Log "Saved settings $file could not be used ($($_.Exception.Message))." 'WARN'; return '' }
+}
+function Test-RootHasIsos {
+    # True when any OS folder (profile folder or an accepted old name) under $Root holds an ISO in its ISO folder.
+    param([string]$Root, [string[]]$Folders)
+    if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $false }
+    foreach ($f in @($Folders | Where-Object { $_ } | Select-Object -Unique)) {
+        $iso = [System.IO.Path]::Combine($Root, $f, 'ISO')
+        if ((Test-Path -LiteralPath $iso) -and @(Get-ChildItem -LiteralPath $iso -Filter '*.iso' -File -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+    }
+    return $false
+}
+function Resolve-SavedRoot {
+    # The repository root to start with (2026-10-01: WimForge copied to another server and drive kept the old drive's root from its
+    # saved settings, so it found no ISO and downloaded into F:). Returns Root plus a Note / Level for the log ('' = nothing to say).
+    #  - nothing saved: the script's folder.
+    #  - saved with the script's folder of that time (scriptDir), and WimForge has moved since: a root that was that folder (or
+    #    inside it) moves along with it; a root elsewhere is kept when it exists, else the script's folder is used.
+    #  - saved by an older version (no scriptDir): kept, unless it does not exist, or it holds no ISO while the script's folder
+    #    does - then the script's folder is used.
+    param([string]$Directory, [string]$ScriptDir, [string[]]$Folders = @())
+    $default = Get-DefaultRoot -ScriptDir $ScriptDir
+    $file = if ($Directory) { Join-Path $Directory 'General.json' } else { '' }
+    $o = $null
+    if ($file -and (Test-Path -LiteralPath $file)) {
+        try { $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop }
+        catch { return [pscustomobject]@{ Root = $default; Note = "Saved settings $file could not be used ($($_.Exception.Message)); the repository root is the script's folder."; Level = 'WARN' } }
+    }
+    $saved = ([string](Get-ProfileValue $o 'root' '')).Trim()
+    if (-not $saved) { return [pscustomobject]@{ Root = $default; Note = "Repository root: $default (the script's folder; no root saved yet)"; Level = 'INFO' } }
+    $savedScript = ([string](Get-ProfileValue $o 'scriptDir' '')).Trim().TrimEnd('\')
+    $here = $default.TrimEnd('\')
+    $keep = "Press Save settings to keep it, or change the Repository root on the Source and Targets tab."
+    if ($saved.TrimEnd('\') -ieq $here) { return [pscustomobject]@{ Root = $saved; Note = "Repository root loaded from saved settings: $saved"; Level = 'INFO' } }
+    if ($savedScript -and $savedScript -ine $here) {
+        if (Test-PathUnder $saved $savedScript) {
+            $rel = $saved.TrimEnd('\').Substring($savedScript.Length).TrimStart('\')
+            $moved = if ($rel) { [System.IO.Path]::Combine($here, $rel) } else { $here }
+            return [pscustomobject]@{ Root = $moved; Note = "WimForge was moved from $savedScript to $here, so the repository root moved with it: $moved (saved: $saved). $keep"; Level = 'WARN' }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $saved -PathType Container)) {
+        return [pscustomobject]@{ Root = $default; Note = "The saved repository root $saved does not exist on this machine; using the script's folder $default instead. $keep"; Level = 'WARN' }
+    }
+    if (-not $savedScript -and -not (Test-RootHasIsos -Root $saved -Folders $Folders) -and (Test-RootHasIsos -Root $default -Folders $Folders)) {
+        return [pscustomobject]@{ Root = $default; Note = "The saved repository root $saved holds no ISO, but the script's folder $default does (WimForge was probably moved); using $default. $keep"; Level = 'WARN' }
+    }
+    return [pscustomobject]@{ Root = $saved; Note = "Repository root loaded from saved settings: $saved"; Level = 'INFO' }
 }
 function Get-DefaultLanguageSelection {
     # A profile's defaultLanguages split into the codes that are on the Languages tab list (to pre-select) and the ones
@@ -2900,7 +2949,7 @@ function Invoke-MediaRefresh {
         Set-Phase 'Mounting ISOs'
         Set-Progress 3 'Mounting source media'
         $isoFiles = @(Get-ChildItem -LiteralPath $paths.ISO -Filter '*.iso' -File)
-        if ($isoFiles.Count -eq 0) { throw "No ISO files found in $($paths.ISO)." }
+        if ($isoFiles.Count -eq 0) { throw "No ISO files found in $($paths.ISO). Copy the OS ISO there, or - if the ISOs are elsewhere (for example after moving WimForge to another drive) - correct the Repository root on the Source and Targets tab (now $(([string]$Options.Root).Trim())) and press Save settings." }
         if ($appsOnly) {
             # Apps tab > Read apps from the ISO needs only the OS ISO (2026-09-27: "at least a few minutes"). The full
             # role detection below searches the Language Pack and FOD ISOs file by file, so here each ISO is mounted in turn
@@ -3808,9 +3857,14 @@ $script:ReloadProfilesButton.Add_Click({
     Update-ProfileList
     Write-Log "Profiles reloaded from $($script:ProfilesDir)"
 })
-$savedRoot = Read-GeneralSettings -Directory $script:SettingsDir
-if ($savedRoot) { $script:RootText.Text = $savedRoot; Write-Log "Repository root loaded from saved settings: $savedRoot" }
-else { $script:RootText.Text = Get-DefaultRoot -ScriptDir $PSScriptRoot; Write-Log "Repository root: $($script:RootText.Text) (the script's folder; no root saved yet)" }
+# The OS folder names (built-in and every profile file, with old names) tell Resolve-SavedRoot where ISOs would be.
+$rootFolders = @(Get-BuiltInProfileData | ForEach-Object { $_.folder })
+foreach ($pf in @(Get-ChildItem -LiteralPath $script:ProfilesDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+    try { $pj = [System.IO.File]::ReadAllText($pf.FullName) | ConvertFrom-Json -ErrorAction Stop; $rootFolders += @([string](Get-ProfileValue $pj 'folder' '')) + @(Get-ProfileValue $pj 'altFolders' @()) } catch { }
+}
+$rootChoice = Resolve-SavedRoot -Directory $script:SettingsDir -ScriptDir $PSScriptRoot -Folders $rootFolders
+$script:RootText.Text = $rootChoice.Root
+Write-Log $rootChoice.Note $rootChoice.Level
 $sccmSaved = Read-SccmGeneralSettings -Directory $script:SettingsDir
 $script:SccmSiteServer.Text = $sccmSaved.SiteServer; $script:SccmTarget.Text = $sccmSaved.Target
 if ($sccmSaved.TargetType -eq 'DPGroup') { $script:SccmTargetGroup.IsChecked = $true }
