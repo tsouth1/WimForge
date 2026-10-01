@@ -1667,6 +1667,51 @@ function Get-PackageFingerprint {
     param([string]$MountPath)
     return ((@(Get-WindowsPackage -Path $MountPath -ErrorAction Stop) | ForEach-Object { "$($_.PackageName)|$($_.PackageState)" } | Sort-Object) -join "`n")
 }
+function Find-InstalledUpdate {
+    # Is this update file already in the mounted image? (2026-10-01: a recent ISO already carried the .NET CU, and the log
+    # said "not applicable".) A .cab is identified by DISM itself (its package name); an .msu cannot be, so the image's
+    # installed update packages are searched for its KB number in their details - rollup packages first, as those are
+    # the ones a monthly .NET or cumulative update installs. Returns PackageName / State / InstallTime, or $null.
+    # Never throws: a failed lookup only means the log falls back to "not applicable".
+    param([Parameter(Mandatory)][string]$MountPath, [Parameter(Mandatory)][string]$PackageFile)
+    try {
+        $kb = Get-KbFromName (Split-Path $PackageFile -Leaf)
+        $all = @(Get-WindowsPackage -Path $MountPath -ErrorAction Stop)
+        if ($PackageFile -match '(?i)\.cab$') {
+            try {
+                $info = Get-WindowsPackage -Path $MountPath -PackagePath $PackageFile -ErrorAction Stop
+                $hit = @($all | Where-Object { $_.PackageName -eq $info.PackageName }) | Select-Object -First 1
+                if ($hit) { return [pscustomobject]@{ PackageName = [string]$hit.PackageName; State = [string]$hit.PackageState; InstallTime = [string](Get-ProfileValue $info 'InstallTime' '') } }
+            } catch { }
+        }
+        if (-not $kb) { return $null }
+        $digits = $kb.Substring(2)
+        $updates = @($all | Where-Object { [string]$_.PackageState -eq 'Installed' -and ([string]$_.ReleaseType -match '(?i)update|hotfix|security' -or $_.PackageName -match '(?i)rollup|KB\d') })
+        $ordered = @($updates | Where-Object { $_.PackageName -match "(?i)rollup|KB$digits" }) + @($updates | Where-Object { $_.PackageName -notmatch "(?i)rollup|KB$digits" })
+        foreach ($p in ($ordered | Select-Object -First 60)) {
+            if ($p.PackageName -match "(?i)KB$digits\b") { return [pscustomobject]@{ PackageName = [string]$p.PackageName; State = [string]$p.PackageState; InstallTime = '' } }
+            try { $d = Get-WindowsPackage -Path $MountPath -PackageName $p.PackageName -ErrorAction Stop } catch { continue }
+            $text = (@('Description', 'SupportInformation', 'DisplayName', 'InstallPackageName') | ForEach-Object { [string](Get-ProfileValue $d $_ '') }) -join ' '
+            if ($text -match "(?i)(KB|kbid=)$digits\b") { return [pscustomobject]@{ PackageName = [string]$p.PackageName; State = [string]$p.PackageState; InstallTime = [string](Get-ProfileValue $d 'InstallTime' '') } }
+        }
+    } catch { }
+    return $null
+}
+function Write-NothingInstalled {
+    # DISM installed nothing from an update file: says whether the image already has it (INFO - a recent ISO often does)
+    # or it does not apply (WARN), and records the same in the change log.
+    param([string]$Label, [string]$PackageFile, [string]$MountPath, [string]$Target, [string]$Why)
+    $pkgName = Split-Path $PackageFile -Leaf
+    $kb = Get-KbFromName $pkgName
+    $have = Find-InstalledUpdate -MountPath $MountPath -PackageFile $PackageFile
+    if ($have -and $have.State -eq 'Installed') {
+        Write-Log "Skipped $Label ${pkgName}: $Target already has it - $($have.PackageName) is Installed$(if ($have.InstallTime) { " (since $($have.InstallTime))" }), so the ISO already carries this update ($Why)."
+        Add-ChangeEvent -Category (Get-EventCategory $Label) -Item $pkgName -Target $Target -Kb $kb -Detail "$Label - already in the image ($($have.PackageName))"
+    } else {
+        Write-Log "Skipped $Label ${pkgName}: not applicable to $Target - DISM installed nothing and the image does not have $(if ($kb) { $kb } else { 'it' }) installed ($Why)." 'WARN'
+        Add-ChangeEvent -Category (Get-EventCategory $Label) -Item $pkgName -Target $Target -Kb $kb -Detail "$Label - skipped, not applicable to this image"
+    }
+}
 function Add-Packages {
     param(
         [Parameter(Mandatory)][string]$MountPath,
@@ -1690,8 +1735,7 @@ function Add-Packages {
             Add-WindowsPackage -Path $MountPath -PackagePath $pkg.FullName @dl -ErrorAction Stop | Out-Null
             $pkgName = Split-Path $pkg.FullName -Leaf
             if ($null -ne $before -and (Get-PackageFingerprint $MountPath) -eq $before) {
-                Write-Log "Skipped $Label ${pkgName}: DISM found it not applicable to $Target and installed nothing (the image's package list is unchanged)." 'WARN'
-                Add-ChangeEvent -Category (Get-EventCategory $Label) -Item $pkgName -Target $Target -Kb (Get-KbFromName $pkgName) -Detail "$Label - skipped, not applicable to this image"
+                Write-NothingInstalled -Label $Label -PackageFile $pkg.FullName -MountPath $MountPath -Target $Target -Why "the image's package list is unchanged"
                 continue
             }
             Add-ChangeEvent -Category (Get-EventCategory $Label) -Item $pkgName -Target $Target -Kb (Get-KbFromName $pkgName) -Detail $Label
@@ -1701,8 +1745,7 @@ function Add-Packages {
                 Write-Log 'Known combined-LCU error 0x8007007e encountered; continuing.' 'WARN'
             } elseif ($SkipNotApplicable -and $_.Exception.Message -match '(?i)0x800f081e|not applicable') {
                 # CBS_E_NOT_APPLICABLE: e.g. the .NET 4.8 part of a combined .NET CU on an image that only has 4.7.2.
-                Write-Log "Skipped $Label $(Split-Path $pkg.FullName -Leaf): not applicable to $Target (0x800f081e)." 'WARN'
-                Add-ChangeEvent -Category (Get-EventCategory $Label) -Item (Split-Path $pkg.FullName -Leaf) -Target $Target -Kb (Get-KbFromName $pkg.FullName) -Detail "$Label - skipped, not applicable to this image"
+                Write-NothingInstalled -Label $Label -PackageFile $pkg.FullName -MountPath $MountPath -Target $Target -Why 'DISM: 0x800f081e'
             } else { throw }
         }
     }

@@ -334,11 +334,36 @@ function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandator
 Reset-Test; $script:LogLines.Clear(); $script:ChangeEvents.Clear()
 $e14 = ''; $threw = $false; try { Add-Packages -MountPath (Join-Path $base 'mnt') -Packages $pkgs -Target 'install.wim index 1' -Label '.NET CU' -SkipNotApplicable } catch { $threw = $true; $e14 = $_.Exception.Message }
 $ev48 = @($script:ChangeEvents | Where-Object { $_.Kb -eq 'KB5126048' }); $ev472 = @($script:ChangeEvents | Where-Object { $_.Kb -eq 'KB5126043' })
-Check 'a .MSU that DISM silently skips (package list unchanged) is logged as skipped with a WARN' (-not $threw -and ($script:LogLines -match 'WARN.*Skipped \.NET CU windows10.0-kb5126048-x64-ndp48.msu: DISM found it not applicable')) $e14
+Check 'a .MSU that DISM silently skips (package list unchanged) and the image does not have is logged as not applicable with a WARN' (-not $threw -and ($script:LogLines -match 'WARN.*Skipped \.NET CU windows10.0-kb5126048-x64-ndp48.msu: not applicable to install\.wim index 1 - DISM installed nothing and the image does not have KB5126048 installed')) $e14
 Check '... and recorded as skipped in the change log, while the 4.7.2 part is recorded as added' ($ev48.Count -eq 1 -and $ev48[0].Detail -like '*skipped, not applicable*' -and $ev472.Count -eq 1 -and $ev472[0].Detail -eq '.NET CU')
 Reset-Test; $script:LogLines.Clear()
 $null = Add-Packages -MountPath (Join-Path $base 'mnt') -Packages @($pkgs[1]) -Target 'install.wim index 1' -Label 'LCU (final)'
 Check 'classes without -SkipNotApplicable are not compared (no extra package-list reads, no skip WARN)' (-not ($script:LogLines -match 'Skipped'))
+# The Windows 11 26H2 run (2026-10-01): the ISO already carried the .NET CU KB5126052. DISM installed nothing; the image's
+# Package_for_DotNetRollup_481 package names the KB in its details, so the log says the image already has it (INFO).
+$gwp14 = ${function:Get-WindowsPackage}
+$script:Details14 = @{ 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1' = [pscustomobject]@{ PackageName = 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1'; Description = 'Fix for KB5126052'; SupportInformation = 'http://support.microsoft.com/?kbid=5126052'; InstallTime = '9/9/2026 3:12:00 AM'; PackageState = 'Installed' } }
+function Get-WindowsPackage { [CmdletBinding()] param($Path, $PackageName, $PackagePath, $LogPath)
+    if ($PackageName) { return $script:Details14[$PackageName] }
+    if ($PackagePath) { if ($PackagePath -like '*.cab') { return [pscustomobject]@{ PackageName = 'Package_for_SafeOSDU~31bf3856ad364e35~amd64~~26100.5000.1.0'; InstallTime = '' } }; throw 'An error occurred. The specified package is not a valid Windows package.' }
+    return @($script:MockImagePackages) }
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath) Note ("AddPkg $(Split-Path $PackagePath -Leaf)") }   # installs nothing
+$script:MockImagePackages.Clear()
+$script:MockImagePackages.Add([pscustomobject]@{ PackageName = 'Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.9457.1.0'; PackageState = 'Installed'; ReleaseType = 'SecurityUpdate' })
+$script:MockImagePackages.Add([pscustomobject]@{ PackageName = 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1'; PackageState = 'Installed'; ReleaseType = 'Update' })
+$script:MockImagePackages.Add([pscustomobject]@{ PackageName = 'Package_for_SafeOSDU~31bf3856ad364e35~amd64~~26100.5000.1.0'; PackageState = 'Installed'; ReleaseType = 'Update' })
+$net14 = Join-Path $svcDir 'windows11.0-kb5126052-x64-ndp481.msu'; New-File $net14
+Reset-Test; $script:LogLines.Clear(); $script:ChangeEvents.Clear()
+Add-Packages -MountPath (Join-Path $base 'mnt') -Packages @((Get-Item $net14)) -Target 'install.wim index 1' -Label '.NET CU' -SkipNotApplicable
+$ev14 = @($script:ChangeEvents | Where-Object { $_.Kb -eq 'KB5126052' })
+Check 'an update the ISO already has: INFO naming the installed package (found by its KB in the package details), no WARN' ([bool]($script:LogLines -match '^\[INFO\] Skipped \.NET CU windows11\.0-kb5126052-x64-ndp481\.msu: install\.wim index 1 already has it - Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10\.0\.9347\.1 is Installed \(since 9/9/2026 3:12:00 AM\), so the ISO already carries this update') -and -not ($script:LogLines -match '^\[WARN\]')) ($script:LogLines -join ' | ')
+Check '... and the change log says "already in the image"' ($ev14.Count -eq 1 -and $ev14[0].Detail -eq '.NET CU - already in the image (Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1)')
+$found14 = Find-InstalledUpdate -MountPath 'x' -PackageFile 'C:\p\windows11.0-kb5124015-x64.cab'
+Check 'a .cab is identified by DISM itself (its package name), without searching details' ($found14 -and $found14.PackageName -eq 'Package_for_SafeOSDU~31bf3856ad364e35~amd64~~26100.5000.1.0' -and $found14.State -eq 'Installed')
+Check 'an update the image does not have is not found (the not-applicable WARN stays)' ($null -eq (Find-InstalledUpdate -MountPath 'x' -PackageFile 'C:\p\windows11.0-kb5999999-x64.msu'))
+function Get-WindowsPackage { [CmdletBinding()] param($Path, $LogPath) throw 'DISM is not available' }
+Check 'a failing lookup never stops the run: it is just "not found"' ($null -eq (Find-InstalledUpdate -MountPath 'x' -PackageFile $net14))
+Set-Item function:Get-WindowsPackage $gwp14; $script:MockImagePackages.Clear()
 
 Write-Host "`n=== A9 each KB named once in the confirm dialog / log, and each pick downloaded once (2026-09-24) ==="
 Check 'Format-CatalogPick: a title that already ends in its KB is left as it is' ((Format-CatalogPick -Title $t64 -Kb 'KB5126144') -eq $t64)
