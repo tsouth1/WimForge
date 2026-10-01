@@ -900,7 +900,10 @@ function Write-SupportStatus {
 
 function Get-TS { Get-Date -Format 'HH:mm:ss' }
 function Write-Log {
-    param([Parameter(Mandatory)][string]$Message, [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO')
+    # An empty or blank message is skipped, never an error: tools piped into the log print blank lines (oscdimg's blank
+    # lines stopped the first real ISO build, Windows 11 26H2, 2026-10-01).
+    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$Message, [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO')
+    if ([string]::IsNullOrWhiteSpace($Message)) { return }
     $line = '{0} [{1}] {2}' -f (Get-TS), $Level, $Message
     if ($script:LogFile) { Add-Content -LiteralPath $script:LogFile -Value $line -Encoding UTF8 }
     if ($script:UiQueue) { $script:UiQueue.Enqueue("L`t$line") }   # background run: the GUI thread drains this queue
@@ -1087,11 +1090,70 @@ function Test-DismHostVersion {
         $cmd = Get-Command dism.exe -ErrorAction Stop
         $hostVer = [version]$cmd.Version
         $imgVer  = [version]$ImageVersion
-        Write-Log "Host DISM $hostVer; image $imgVer"
+        $which = if ($script:DismSource -eq 'ADK') { 'ADK DISM' } else { 'Windows DISM' }
+        Write-Log "$which $hostVer ($($cmd.Source)); image $imgVer"
         if ($imgVer.Build -gt $hostVer.Build) {
-            Write-Log "Host DISM build $($hostVer.Build) is older than the image build $($imgVer.Build). Servicing may fail; use the ADK's DISM or a newer host." 'WARN'
+            Write-Log "$which build $($hostVer.Build) is older than the image build $($imgVer.Build). Servicing may fail; $(if ($script:DismSource -eq 'ADK') { 'install the ADK for this Windows release (or newer).' } else { 'install the Windows ADK for this release - WimForge then uses its DISM.' })" 'WARN'
         }
-    } catch { Write-Log "Could not compare host DISM and image versions: $($_.Exception.Message)" 'WARN' }
+    } catch { Write-Log "Could not compare the DISM and image versions: $($_.Exception.Message)" 'WARN' }
+}
+# ---------- the ADK's DISM (TODO step 4, 2026-10-01) ----------
+# When the Windows ADK (Deployment Tools) is installed, every run uses its DISM - the PowerShell module and dism.exe -
+# instead of the server's own: the ADK's DISM can be newer than the host (a 20348 host servicing 26100 images warned
+# before). Microsoft's way: the ADK's DISM folder first on the PATH, and its module imported before any DISM command.
+# Without the ADK, or if it cannot be loaded, Windows' own DISM is used as before (with a WARN in the second case).
+$script:DismSource = 'Windows'
+$script:DismFolder = ''
+function Get-AdkKitsRoots {
+    # Where the Windows Kits 10 (ADK) are installed: KitsRoot10 from the registry (any drive), then the default folder.
+    $roots = @()
+    foreach ($key in 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots') {
+        try { $v = (Get-ItemProperty -LiteralPath $key -Name KitsRoot10 -ErrorAction Stop).KitsRoot10; if ($v) { $roots += [string]$v } } catch { }
+    }
+    if (${env:ProgramFiles(x86)}) { $roots += [System.IO.Path]::Combine(${env:ProgramFiles(x86)}, 'Windows Kits', '10') }
+    return @($roots | Where-Object { $_ } | Select-Object -Unique)
+}
+function Find-AdkDism {
+    # The ADK's DISM folder for this host's architecture (it holds dism.exe and the DISM PowerShell module), or $null.
+    param([string[]]$KitsRoots)
+    if ($null -eq $KitsRoots) { $KitsRoots = Get-AdkKitsRoots }
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    foreach ($root in @($KitsRoots | Where-Object { $_ })) {
+        $dir = [System.IO.Path]::Combine($root, 'Assessment and Deployment Kit', 'Deployment Tools', $arch, 'DISM')
+        if (Test-Path -LiteralPath ([System.IO.Path]::Combine($dir, 'dism.exe')) -PathType Leaf) { return $dir }
+    }
+    return $null
+}
+function Import-DismModuleFrom {
+    # Replaces the DISM PowerShell module loaded in this session with the one in $Folder.
+    param([Parameter(Mandatory)][string]$Folder)
+    Remove-Module -Name Dism -Force -ErrorAction SilentlyContinue
+    Import-Module -Name $Folder -Force -Global -ErrorAction Stop -WarningAction SilentlyContinue
+}
+$script:DismNote = $null
+function Set-DismNote { param([string]$Text, [string]$Level = 'INFO', [switch]$Quiet) $script:DismNote = @{ Text = $Text; Level = $Level }; if (-not $Quiet) { Write-Log $Text $Level } }
+function Write-DismNote { if ($script:DismNote) { Write-Log $script:DismNote.Text $script:DismNote.Level } }
+function Use-AdkDism {
+    # Called at the start of every engine run (in its runspace). Logs which DISM this run uses.
+    param([switch]$Quiet)
+    $folder = Find-AdkDism
+    if (-not $folder) {
+        $script:DismSource = 'Windows'; $script:DismFolder = ''
+        Set-DismNote 'DISM: the Windows ADK is not installed, so Windows'' own DISM is used. Installing the ADK (Deployment Tools) for the newest Windows release you service lets WimForge use its newer DISM.' 'INFO' -Quiet:$Quiet
+        return
+    }
+    if ($script:DismSource -eq 'ADK' -and $script:DismFolder -eq $folder -and (Get-Module -Name Dism)) { return }   # already in use in this session
+    try {
+        Import-DismModuleFrom -Folder $folder
+        if (-not (($env:PATH -split ';') -contains $folder)) { $env:PATH = "$folder;$env:PATH" }
+        $script:DismSource = 'ADK'; $script:DismFolder = $folder
+        $ver = try { (Get-Item -LiteralPath ([System.IO.Path]::Combine($folder, 'dism.exe'))).VersionInfo.ProductVersion } catch { '' }
+        Set-DismNote "DISM: using the Windows ADK's DISM$(if ($ver) { " $ver" }) from $folder (PowerShell module and dism.exe)." 'INFO' -Quiet:$Quiet
+    } catch {
+        $script:DismSource = 'Windows'; $script:DismFolder = ''
+        Remove-Module -Name Dism -Force -ErrorAction SilentlyContinue
+        Set-DismNote "DISM: the Windows ADK's DISM in $folder could not be loaded ($($_.Exception.Message)); Windows' own DISM is used instead." 'WARN' -Quiet:$Quiet
+    }
 }
 
 # ---------- change log helpers ----------
@@ -2434,13 +2496,7 @@ function Find-Oscdimg {
     # Oscdimg.exe of the local Windows ADK (Deployment Tools), needed to build an ISO; $null when there is none. Looks where
     # the ADK says it is installed (KitsRoot10 in the registry, any drive), then the default folder, then the PATH.
     param([string[]]$KitsRoots)
-    if ($null -eq $KitsRoots) {
-        $KitsRoots = @()
-        foreach ($key in 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots') {
-            try { $v = (Get-ItemProperty -LiteralPath $key -Name KitsRoot10 -ErrorAction Stop).KitsRoot10; if ($v) { $KitsRoots += [string]$v } } catch { }
-        }
-        if (${env:ProgramFiles(x86)}) { $KitsRoots += [System.IO.Path]::Combine(${env:ProgramFiles(x86)}, 'Windows Kits', '10') }
-    }
+    if ($null -eq $KitsRoots) { $KitsRoots = Get-AdkKitsRoots }
     $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
     foreach ($root in @($KitsRoots | Where-Object { $_ } | Select-Object -Unique)) {
         $tools = [System.IO.Path]::Combine($root, 'Assessment and Deployment Kit', 'Deployment Tools')
@@ -2466,7 +2522,11 @@ function Build-IsoFromMedia {
     $isoOut = Join-Path $Paths.NewWim ("{0}_{1}.iso" -f $NamePrefix, (Get-Date -Format 'yyyyMMdd_HHmmss'))
     $bootData = "-bootdata:2#p0,e,b$bios#pEF,e,b$uefi"
     Write-Log "Building ISO $isoOut"
-    & $oscdimg.FullName '-m' '-o' '-u2' '-udfver102' $bootData $MediaFolder $isoOut | ForEach-Object { Write-Log $_ }
+    # oscdimg prints blank lines and progress; only lines with text go to the log
+    # (stderr lines are text here, not errors: ErrorActionPreference Stop would end the step at oscdimg's first progress line on PS 5.1)
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { & $oscdimg.FullName '-m' '-o' '-u2' '-udfver102' $bootData $MediaFolder $isoOut 2>&1 | ForEach-Object { $l = ([string]$_).Trim(); if ($l) { Write-Log "  oscdimg: $l" } } }
+    finally { $ErrorActionPreference = $eap }
     if ($LASTEXITCODE -ne 0) { throw "Oscdimg failed with exit code $LASTEXITCODE." }
     Write-Log "ISO ready: $isoOut"
     return $isoOut
@@ -2716,7 +2776,8 @@ function Get-RemoteShares {
         try { return @(Get-SmbShare -CimSession $s -ErrorAction Stop | Where-Object { -not $_.Special -and $_.Name -notmatch '\$$' } | ForEach-Object { [string]$_.Name } | Sort-Object) }
         finally { Remove-CimSession $s -ErrorAction SilentlyContinue }
     } catch { }
-    $out = @(& "$env:SystemRoot\System32\net.exe" view "\\$Server" 2>&1 | ForEach-Object { [string]$_ })
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'   # net.exe error text arrives on stderr
+    try { $out = @(& "$env:SystemRoot\System32\net.exe" view "\\$Server" 2>&1 | ForEach-Object { [string]$_ }) } finally { $ErrorActionPreference = $eap }
     if ($LASTEXITCODE -ne 0) { throw "The shares of $Server could not be listed ($((@($out) | Where-Object { $_.Trim() }) -join ' ')). Check the server name and that WimForge's account can reach it." }
     return @(ConvertFrom-NetViewOutput -Lines $out)
 }
@@ -2751,7 +2812,8 @@ function Copy-SccmContent {
     $rc = Join-Path $env:SystemRoot 'System32\robocopy.exe'
     $robo = if ($Folder) { @($Source, $Destination, '/E', '/R:3', '/W:10', '/NP', '/NFL', '/NDL', '/NJH') }
             else { @((Split-Path $Source -Parent), $Destination, (Split-Path $Source -Leaf), '/J', '/R:3', '/W:10', '/NP', '/NDL', '/NJH') }
-    $out = @(& $rc @robo 2>&1 | ForEach-Object { [string]$_ })
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = @(& $rc @robo 2>&1 | ForEach-Object { [string]$_ }) } finally { $ErrorActionPreference = $eap }
     $code = $LASTEXITCODE
     foreach ($l in $out) { if ($l.Trim()) { Write-Log "  robocopy: $($l.Trim())" } }
     if ($code -ge 8) { throw "The copy to $Destination failed (robocopy exit code $code; see the robocopy lines in the log)." }
@@ -2970,6 +3032,8 @@ function Invoke-MediaRefresh {
     $script:VerifyBuildAfter = $null
     $script:BuildBefore = $null
     if ($Options.PSObject.Properties['ProfilesDir'] -and $Options.ProfilesDir) { $script:OsDefinitions = Import-OsProfiles -Directory ([string]$Options.ProfilesDir) }
+    # TODO step 4: the ADK's DISM (module and dism.exe) when installed, loaded before any DISM command of this run; logged below.
+    if (@('SccmConnect', 'SccmImport') -notcontains [string](Get-ProfileValue $Options 'Mode' 'Service')) { Use-AdkDism -Quiet }
     if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Cleanup') {
         # Tools menu > Cleanup Mountpoints: the whole repository root, not one OS. The real pass logs to <root>\LOGS.
         $cleanRoot = ([string]$Options.Root).Trim()
@@ -3010,6 +3074,7 @@ function Invoke-MediaRefresh {
         $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
         Write-Log "Starting WimForge v$($script:ToolVersion) patch acquisition for $name"
+        Write-DismNote
         Write-ProfileMessages
         $result = Invoke-PatchAcquisition -Options $Options -Definition $definition -Paths $paths
         $script:LastResult = $result
@@ -3021,6 +3086,7 @@ function Invoke-MediaRefresh {
     $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
     $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
     Write-Log "Starting WimForge v$($script:ToolVersion) for $name"
+    Write-DismNote
     Write-ProfileMessages
     Write-Log "Profile: $($definition.SourceFile)"
     Write-SupportStatus -Definition $definition

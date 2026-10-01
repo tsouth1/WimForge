@@ -13,7 +13,7 @@ Check "every control the script looks up exists in the XAML ($($list.Count) cont
 $dups = @($names | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object Name)
 Check 'no duplicate x:Name values' ($dups.Count -eq 0) ($dups -join ',')
 $refs = [regex]::Matches($src, '\$script:(\w+)\.(?:Add_Click|Add_SelectionChanged|IsEnabled|Text|Items)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
-$unknown = @($refs | Where-Object { $list -notcontains $_ -and $_ -notin @('UiTimer','RunQueue','RunShared','RunPs','RunRs','RunHandle','RunStatus','RunStarted','LogFile','ProfileMessages') })
+$unknown = @($refs | Where-Object { $list -notcontains $_ -and $_ -notin @('UiTimer','RunQueue','RunShared','RunPs','RunRs','RunHandle','RunStatus','RunStarted','LogFile','ProfileMessages','DismNote') })
 Check 'controls used with .Add_Click/.Text/.Items are all registered' ($unknown.Count -eq 0) ($unknown -join ',')
 
 # Languages tab (TODO step 10e): the list is built from Languages.json on real WPF controls, shown as "name - code",

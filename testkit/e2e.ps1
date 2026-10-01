@@ -879,4 +879,39 @@ $x = Test-Refused29 (Opts19 @{ DryRun = $false; SccmContentSource = $unc29; Sccm
 Check 'a failed copy leaves no half-written folder and imports nothing' ($x.Ok -and -not (Test-Path (Join-Path $work29 'Half copy')) -and @($script:Cm.Calls -like 'NewImage|*').Count -eq 0) $x.Msg
 Set-Item function:Copy-SccmContent $csc29; Set-Item function:Resolve-SccmContentSource $rsc29; $script:LogFile = $null
 
+Write-Host "`n=== E30 TODO step 4: a run says which DISM it uses - the ADK's when installed (the ADK mocked) ==="
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1
+$idm30 = ${function:Import-DismModuleFrom}; $path30 = $env:PATH
+function Import-DismModuleFrom { param($Folder) }
+$logs30 = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs30.Add("[$Level] $Message") }
+Reset-Test; $script:MockAdkDism = $null; $script:DismSource = 'Windows'
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false })
+$noAdk30 = @($logs30 -match '^\[INFO\] DISM: the Windows ADK is not installed').Count; $logs30.Clear()
+Reset-Test; $script:MockAdkDism = 'C:\Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\DISM'
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false })
+$adk30 = @($logs30 -match "^\[INFO\] DISM: using the Windows ADK's DISM .*from C:\\Kits\\10\\.*\\amd64\\DISM").Count
+$start30 = [array]::IndexOf(@($logs30), @($logs30 -match '^\[INFO\] Starting WimForge v')[0])
+Set-Item function:Write-Log $wl; Set-Item function:Import-DismModuleFrom $idm30; $env:PATH = $path30; $script:MockAdkDism = $null; $script:DismSource = 'Windows'
+Check 'a preflight logs Windows'' own DISM without the ADK, and the ADK''s DISM (right after the start line) with it' ($noAdk30 -eq 1 -and $adk30 -eq 1 -and $logs30[$start30 + 1] -like "*using the Windows ADK's DISM*") "no ADK: $noAdk30, ADK: $adk30"
+
+Write-Host "`n=== E31 the ISO build survives oscdimg's blank lines and stderr progress (Windows 11 26H2 run, 2026-10-01) ==="
+# The first real ISO build stopped at 'Cannot bind argument to parameter Message because it is an empty string':
+# oscdimg prints blank lines, and on PS 5.1 its stderr progress under ErrorActionPreference Stop would stop it too.
+$d31 = Join-Path $base '_iso31'; $m31 = Join-Path $d31 'Media'; $nw31 = Join-Path $d31 'NEWWIM'
+New-File (Join-Path $m31 'boot\etfsboot.com'); New-File (Join-Path $m31 'efi\microsoft\boot\efisys.bin'); New-Item -ItemType Directory -Force $nw31 | Out-Null
+$fake31 = Join-Path $d31 'oscdimg.cmd'
+Set-Content -LiteralPath $fake31 -Encoding Ascii -Value @('@echo off', 'echo.', 'echo OSCDIMG 2.56 CD-ROM and DVD-ROM Premastering Utility', 'echo.', 'echo Scanning source tree 1>&2', 'echo 100%% complete 1>&2', 'echo.', 'set last=', 'for %%a in (%*) do set last=%%a', 'type nul > %last%', 'echo Done.', 'exit /b 0')
+$script:MockOscdimg = $fake31
+$logs31 = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param([AllowEmptyString()][string]$Message, $Level = 'INFO') if ([string]::IsNullOrWhiteSpace($Message)) { throw 'an empty line reached the log' }; $logs31.Add("[$Level] $Message") }
+$iso31 = $null; $err31 = ''
+try { $iso31 = Build-IsoFromMedia -MediaFolder $m31 -Paths @{ NewWim = $nw31 } } catch { $err31 = $_.Exception.Message }
+Set-Item function:Write-Log $wl; $script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+Check 'the ISO is built: blank lines are skipped, stdout and stderr lines with text are logged, nothing stops it' ($err31 -eq '' -and $iso31 -and (Test-Path $iso31) -and [bool]($logs31 -match '^\[INFO\]   oscdimg: OSCDIMG 2\.56') -and [bool]($logs31 -match '^\[INFO\]   oscdimg: 100% complete') -and [bool]($logs31 -match '^\[INFO\] ISO ready: ')) "$err31 | $($logs31 -join ' | ')"
+$wlReal = [regex]::Match($src, '(?s)function Write-Log \{.*?\r?\n\}\r?\n').Value.Replace('function Write-Log', 'function Write-RealLog31')
+Invoke-Expression $wlReal
+$lf31 = Join-Path $d31 'real.log'; $savedLf = $script:LogFile; $savedUi = $script:UiQueue; $savedBox = $script:LogBox; $script:LogFile = $lf31; $script:UiQueue = $null; $script:LogBox = $null
+$e31 = ''; try { Write-RealLog31 ''; Write-RealLog31 '   '; Write-RealLog31 $null; Write-RealLog31 'kept' } catch { $e31 = $_.Exception.Message }
+$script:LogFile = $savedLf; $script:UiQueue = $savedUi; $script:LogBox = $savedBox
+Check 'the real Write-Log skips an empty or blank message instead of failing' ($e31 -eq '' -and @(Get-Content $lf31).Count -eq 1 -and [string](Get-Content $lf31) -match '\[INFO\] kept$') $e31
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

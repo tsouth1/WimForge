@@ -583,6 +583,27 @@ $e = ''; try { Copy-SccmContent -Source (Join-Path $w22 'nope\install.wim') -Des
 Check 'a failed robocopy copy throws with its exit code' ($e -like 'The copy to * failed (robocopy exit code *') $e
 Invoke-Expression ([regex]::Match($src, '(?s)function Get-FreeSpaceGB \{.*?\r?\n\}\r?\n').Value.Replace('function Get-FreeSpaceGB', 'function Get-RealFreeSpaceGB'))   # mocks.ps1 replaces the real one
 Check 'free space: a local path gives a number; a UNC path that cannot be read gives nothing (no error)' ($null -ne (Get-RealFreeSpaceGB -Path $w22) -and $null -eq (Get-RealFreeSpaceGB -Path '\\no-such-server-wimforge\share'))
+Write-Host "`n=== P23 TODO step 4: the Windows ADK's DISM when installed (module and dism.exe), else Windows' own ==="
+$k23 = Join-Path $PWD 'tst_root\p23kits'; $d23 = Join-Path $k23 "Assessment and Deployment Kit\Deployment Tools\$(if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' })\DISM"
+New-Item -ItemType Directory -Force $d23 | Out-Null; Set-Content (Join-Path $d23 'dism.exe') 'x'
+Check 'Find-AdkDism finds the ADK''s DISM folder for this architecture under a Kits root, and nothing elsewhere' ((& $script:RealFindAdkDism -KitsRoots @((Join-Path $k23 'nope'), $k23)) -eq $d23 -and $null -eq (& $script:RealFindAdkDism -KitsRoots @((Join-Path $k23 'nope'))))
+$path23 = $env:PATH; $idm = ${function:Import-DismModuleFrom}
+$script:MockAdkDism = $null; Use-AdkDism -Quiet
+Check 'no ADK: Windows'' own DISM, and the log line says how to get the ADK''s' ($script:DismSource -eq 'Windows' -and $script:DismNote.Level -eq 'INFO' -and $script:DismNote.Text -like "DISM: the Windows ADK is not installed*Deployment Tools*" -and $env:PATH -eq $path23)
+$script:Imported23 = ''
+function Import-DismModuleFrom { param($Folder) $script:Imported23 = $Folder }
+$script:MockAdkDism = $d23; Use-AdkDism -Quiet
+Check 'ADK found: its module is imported, its folder goes first on the PATH, and the log line names it' ($script:DismSource -eq 'ADK' -and $script:Imported23 -eq $d23 -and ($env:PATH -split ';')[0] -eq $d23 -and $script:DismNote.Text -like "DISM: using the Windows ADK's DISM*from $d23 (PowerShell module and dism.exe).")
+$env:PATH = $path23
+function Import-DismModuleFrom { param($Folder) throw 'The module was not loaded.' }
+$script:DismSource = 'Windows'; Use-AdkDism -Quiet
+Check 'ADK found but its module cannot be loaded: Windows'' own DISM with a WARN, PATH unchanged' ($script:DismSource -eq 'Windows' -and $script:DismNote.Level -eq 'WARN' -and $script:DismNote.Text -like "*could not be loaded (The module was not loaded.); Windows' own DISM is used instead." -and $env:PATH -eq $path23)
+Set-Item function:Import-DismModuleFrom $idm; $script:MockAdkDism = $null; $script:DismSource = 'Windows'
+$e23 = ''; try { Import-DismModuleFrom -Folder $d23 } catch { $e23 = $_.Exception.Message }
+Check 'the real module import fails on a folder without the DISM module (so a broken ADK falls back)' ($e23 -ne '') $e23
+$inv23 = [regex]::Match($src, '(?s)function Invoke-MediaRefresh \{.*?\r?\n\}\r?\n').Value
+Check 'every engine run except the SCCM ones loads the ADK''s DISM before any DISM command, and the runs log it' ($inv23 -match "if \(@\('SccmConnect', 'SccmImport'\) -notcontains .*\) \{ Use-AdkDism -Quiet \}" -and $inv23.IndexOf('Use-AdkDism -Quiet') -lt $inv23.IndexOf("-eq 'Cleanup'") -and ([regex]::Matches($inv23, 'Write-DismNote')).Count -eq 2)
+Check 'Find-Oscdimg and Find-AdkDism look in the same ADK places (Get-AdkKitsRoots)' ($src -match '(?s)function Find-Oscdimg \{.*?Get-AdkKitsRoots' -and $src -match '(?s)function Find-AdkDism \{.*?Get-AdkKitsRoots')
 Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

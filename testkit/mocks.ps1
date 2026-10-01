@@ -50,6 +50,10 @@ function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination)
 $script:RealFindOscdimg = ${function:Find-Oscdimg}
 $script:MockOscdimg = 'C:\ADK\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
 function Find-Oscdimg { param([string[]]$KitsRoots) return $script:MockOscdimg }
+# the ADK's DISM (TODO step 4): none by default, so runs do not depend on whether this PC has the ADK; P23 / E30 test it
+$script:RealFindAdkDism = ${function:Find-AdkDism}
+$script:MockAdkDism = $null
+function Find-AdkDism { param([string[]]$KitsRoots) return $script:MockAdkDism }
 $script:RealExpandCombinedMsu = ${function:Expand-CombinedMsu}
 function Expand-CombinedMsu { param([string]$MsuPath, [string]$Destination)
   $leaf = Split-Path $MsuPath -Leaf; $n = $script:MsuSsu[$leaf]; if (-not $n) { return $null }
