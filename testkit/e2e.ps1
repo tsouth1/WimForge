@@ -843,4 +843,40 @@ $code28 = Invoke-CommandLineRun -ConfigFile $cfg28 -ProfilesDir (Join-Path $base
 Set-Item function:Write-Log $wl
 Check 'exit code 1, the log names the missing root, and nothing is mounted or created on the old drive' ($code28 -eq 1 -and [bool]($logs28 -match "^\[ERROR\] The run config .*old_root\.json cannot be used here: its repository root Q:\\mediaRefresh does not exist on this machine") -and @($script:Calls -match '^Mount ').Count -eq 0) (($logs28 -join ' | ') + " / exit $code28")
 
+Write-Host "`n=== E29 SCCM import to a content source share on another server (step 18; the share and the site mocked) ==="
+# WimForge on its own server: the content source is \\cm01.contoso.com\Sources\OSD\Images. The share is stood in for by a
+# local folder (Work) - the rest of the import sees the UNC path, as with a real share.
+$work29 = Join-Path $base '_cm01_share'; New-Item -ItemType Directory -Force $work29 | Out-Null
+$unc29 = '\\cm01.contoso.com\Sources\OSD\Images'
+$rsc29 = ${function:Resolve-SccmContentSource}; $tsw29 = ${function:Test-SccmShareWritable}; $csc29 = ${function:Copy-SccmContent}
+$script:ShareDir29 = $work29
+function Resolve-SccmContentSource { param($Path, $ThisServer, $Shares) [pscustomobject]@{ Work = $script:ShareDir29; Unc = $Path; Remote = $true; Server = 'cm01.contoso.com'; Note = '' } }
+[void](Save-RunResult -Paths @{ NewWim = $nw19 } -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Build '10.0.19044.6456' -Gate 'PASSED' -Install (Join-Path $nw19 'install.wim') -Media (Join-Path $nw19 'Media') -ChangeLog 'C:\x\ChangeLog_KMS.html')
+$script:Cm.Calls.Clear(); $script:LogFile = $null
+$r29 = Invoke-MediaRefresh (Opts19 @{ DryRun = $false; SccmContentSource = $unc29; SccmSourceServer = 'WIMFORGE01'; SccmImageName = 'KMS on cm01' })
+Check 'a share on another server is accepted (no "must be on this server"): copied there, imported from its UNC path' ((Test-Path (Join-Path $work29 'KMS on cm01\install.wim')) -and ($script:Cm.Calls | Where-Object { $_ -like 'NewImage|*' }) -eq "NewImage|KMS on cm01|$unc29\KMS on cm01\install.wim|10.0.19044.6456" -and $r29.Remote) ($script:Cm.Calls -join ' / ')
+$script:LogFile = $null
+function Test-Refused29($o, $like) { $t = $false; $m = ''; try { [void](Invoke-MediaRefresh $o) } catch { $t = $true; $m = $_.Exception.Message }; return [pscustomobject]@{ Ok = ($t -and $m -like $like); Msg = $m } }
+# the share cannot be reached: refused in the check, before anything else
+$script:ShareDir29 = Join-Path $base '_no_such_share'; $script:Cm.Calls.Clear()
+$x = Test-Refused29 (Opts19 @{ SccmContentSource = $unc29 }) "The content source $unc29 cannot be reached*account running WimForge*"
+Check 'a share that cannot be reached is refused in the check-only pass, with what to check' ($x.Ok -and $script:Cm.Calls.Count -eq 0) $x.Msg
+$script:ShareDir29 = $work29
+# no write access: refused before any copy
+function Test-SccmShareWritable { param($Path) "WimForge cannot write to $Path (Access is denied). The account running WimForge needs Modify permission on that share and folder." }
+$x = Test-Refused29 (Opts19 @{ DryRun = $false; SccmContentSource = $unc29; SccmImageName = 'No write' }) '*cannot write to*Modify permission*'
+Check 'a share WimForge cannot write to is refused before anything is copied or imported' ($x.Ok -and -not (Test-Path (Join-Path $work29 'No write')) -and $script:Cm.Calls.Count -eq 0) $x.Msg
+Set-Item function:Test-SccmShareWritable $tsw29
+# too little room on the share
+$script:FreeGB = 0.1
+$x = Test-Refused29 (Opts19 @{ SccmContentSource = $unc29 }) 'Not enough free space for the copy*'
+$script:FreeGB = 500.0
+Check 'too little free space on the share is refused' $x.Ok $x.Msg
+# the copy fails half-way: its folder is removed and nothing is imported
+function Copy-SccmContent { param($Source, $Destination, [switch]$Folder) Set-Content (Join-Path $Destination 'install.wim') 'half'; throw 'The copy to x failed (robocopy exit code 16; see the robocopy lines in the log).' }
+$script:Cm.Calls.Clear()
+$x = Test-Refused29 (Opts19 @{ DryRun = $false; SccmContentSource = $unc29; SccmImageName = 'Half copy' }) '*robocopy exit code 16*'
+Check 'a failed copy leaves no half-written folder and imports nothing' ($x.Ok -and -not (Test-Path (Join-Path $work29 'Half copy')) -and @($script:Cm.Calls -like 'NewImage|*').Count -eq 0) $x.Msg
+Set-Item function:Copy-SccmContent $csc29; Set-Item function:Resolve-SccmContentSource $rsc29; $script:LogFile = $null
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

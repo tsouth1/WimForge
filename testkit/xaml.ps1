@@ -56,7 +56,7 @@ if ($wpf) {
     Check 'the Save settings and Reset to defaults buttons are in the window' ($null -ne $win.FindName('SaveSettingsButton') -and $null -ne $win.FindName('ResetSettingsButton'))
     foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource', 'SccmSiteServer', 'SccmSiteInfo', 'SccmTargetDP', 'SccmTargetGroup', 'SccmTargetList', 'SccmTarget', 'SccmContentSource', 'SccmUncPreview', 'SccmImageName', 'SccmPackageType', 'SccmLastRun') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
     $script:SccmLists = $null; $script:SccmSourceServer = 'BUILD01'
-    $script:ServerShares = @([pscustomobject]@{ Name = 'Sources'; Path = 'F:\Sources' })   # not this PC's real shares
+    $script:ServerShares = @([pscustomobject]@{ Name = 'Sources'; Path = "$env:SystemDrive\Sources" })   # not this PC's real shares (on a drive every PC has)
     foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings', 'Get-TickedApps', 'Update-AppList',
                     'Get-SccmAutoName', 'Get-SccmPackageTypeTag', 'Set-SccmPackageType', 'Update-SccmTargetList', 'Update-SccmUncPreview', 'Update-SccmLastRun', 'Set-SccmOsValues', 'Get-SccmSelected') {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
@@ -120,21 +120,26 @@ if ($wpf) {
     $auto = { param($os) "$os $((Get-Date).ToString('yyyyMM'))" }
     $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
     Check 'WPF SCCM tab: the image name follows the selected OS (name + yyyyMM); Full OS image by default' ($script:SccmImageName.Text -eq (& $auto 'Windows 10 Enterprise LTSC 2021 (KMS)') -and (Get-SccmPackageTypeTag) -eq 'Image')
-    $script:SccmImageName.Text = 'KMS gold image'; Set-SccmPackageType 'Upgrade'; $script:SccmContentSource.Text = 'F:\Sources\OSD'
+    $script:SccmImageName.Text = 'KMS gold image'; Set-SccmPackageType 'Upgrade'; $script:SccmContentSource.Text = "$env:SystemDrive\Sources\OSD"
     $script:SccmSiteServer.Text = 'cm01.contoso.com'; $script:SccmTargetGroup.IsChecked = $true; $script:SccmTarget.Text = 'All DPs'
     $saved12 = Save-CurrentOsSettings
     $script:OsCombo.SelectedItem = 'Windows 11 Enterprise 24H2'; Set-OsSettings
     $w11Name = $script:SccmImageName.Text; $w11Type = Get-SccmPackageTypeTag
     $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
-    Check 'WPF SCCM tab: a typed name, the package type and the content folder are saved per OS; another OS keeps its own' ($w11Name -eq (& $auto 'Windows 11 Enterprise 24H2') -and $w11Type -eq 'Image' -and $script:SccmImageName.Text -eq 'KMS gold image' -and (Get-SccmPackageTypeTag) -eq 'Upgrade' -and $script:SccmContentSource.Text -eq 'F:\Sources\OSD')
+    Check 'WPF SCCM tab: a typed name, the package type and the content folder are saved per OS; another OS keeps its own' ($w11Name -eq (& $auto 'Windows 11 Enterprise 24H2') -and $w11Type -eq 'Image' -and $script:SccmImageName.Text -eq 'KMS gold image' -and (Get-SccmPackageTypeTag) -eq 'Upgrade' -and $script:SccmContentSource.Text -eq "$env:SystemDrive\Sources\OSD")
     $sg12 = Read-SccmGeneralSettings -Directory $script:SettingsDir
     Check 'WPF SCCM tab: site server and distribution target are saved once for every OS' ($sg12.SiteServer -eq 'cm01.contoso.com' -and $sg12.TargetType -eq 'DPGroup' -and $sg12.Target -eq 'All DPs')
     $script:SccmImageName.Text = (Get-SccmAutoName)
     Check 'WPF SCCM tab: back to the automatic name, nothing typed is saved' ((Get-SccmSelected).ImageName -eq '')
     Update-SccmUncPreview
     $okPreview = $script:SccmUncPreview.Text
-    $script:SccmContentSource.Text = 'G:\Elsewhere'; Update-SccmUncPreview
+    $script:SccmContentSource.Text = "$env:SystemDrive\Elsewhere"; Update-SccmUncPreview
     Check 'WPF SCCM tab: the UNC preview shows the import path, or why the folder cannot be used' ($okPreview -eq 'Configuration Manager imports from \\BUILD01\Sources\OSD\<image name>' -and $script:SccmUncPreview.Text -like '*not inside a shared folder*')
+    $script:SccmContentSource.Text = '\\cm01.contoso.com\Sources\OSD\Images'; Update-SccmUncPreview; $uncPreview = $script:SccmUncPreview.Text
+    $script:SccmContentSource.Text = '\\cm01'; Update-SccmUncPreview; $badUnc = $script:SccmUncPreview.Text
+    $freeLetter = @([char[]](68..90) | Where-Object { -not (Test-Path "$($_):\") })[0]; $script:SccmContentSource.Text = "$($freeLetter):\OSD"; Update-SccmUncPreview; $noDrive = $script:SccmUncPreview.Text
+    Check 'WPF SCCM tab (step 18): a network folder on another server is accepted and explained; an incomplete UNC path and a missing drive letter are refused with what to do' ($uncPreview -like 'WimForge copies each image over the network to \\cm01.contoso.com\Sources\OSD\Images\<image name>, and Configuration Manager imports it from there.*write access*' -and $badUnc -like '*is not a complete network path*' -and $noDrive -like "Drive $($freeLetter): is not available to WimForge*type the network path instead*") "$uncPreview | $badUnc | $noDrive"
+    Check 'WPF SCCM tab (step 18): the Shares... button sits beside Browse...' ($null -ne $win.FindName('SccmSharesButton') -and [string]$win.FindName('SccmSharesButton').Content -eq 'Shares...' -and $src -match '\$script:SccmSharesButton\.Add_Click')
     $script:SccmLists = [pscustomobject]@{ DPs = @('dp01.contoso.com', 'dp02.contoso.com'); Groups = @('All DPs') }
     $script:SccmTargetDP.IsChecked = $true; Update-SccmTargetList; $dps = @($script:SccmTargetList.Items) -join ','
     $script:SccmTargetGroup.IsChecked = $true; Update-SccmTargetList; $grps = @($script:SccmTargetList.Items) -join ','
@@ -209,6 +214,27 @@ if ($wpf) {
     $out19 = Show-OsNameDialog -Title 'New OS from existing' -Intro 'test' -Name 'Windows 11 Enterprise 24H2' -Folder 'Win11_Enterprise_24H2' -WithRelease -Release '24H2' -Replace '24H2' -FolderFollowsName
     $timer19.Stop()
     Check 'WPF New OS dialog: an empty name is refused in the dialog; the folder follows the typed name; OK returns what was typed' ($script:Dlg19.Error -eq 'Type a name.' -and $script:Dlg19.Folder -eq 'Win11_Enterprise_26H2' -and $out19 -and $out19.Name -eq 'Windows 11 Enterprise 26H2' -and $out19.Folder -eq 'Win11_Enterprise_26H2' -and $out19.Release -eq '26H2' -and $out19.Replace -eq '24H2') "error '$($script:Dlg19.Error)', folder '$($script:Dlg19.Folder)', out $($out19 | ConvertTo-Json -Compress)"
+    # Step 18: the Shares... dialog on real WPF - the server is filled in, List shows its shares, Use this share returns \\server\share
+    Invoke-Expression ([regex]::Match($src, "(?s)function Show-ShareDialog \{.*?\r?\n\}\r?\n").Value)
+    function Get-RemoteShares { param($Server) if ($Server -eq 'cm01.contoso.com') { @('SMS_PS1', 'Sources') } else { throw "The shares of $Server could not be listed." } }
+    $script:Sh18 = @{ Step = 0; Server = ''; Info = '' }
+    $timer18 = New-Object System.Windows.Threading.DispatcherTimer; $timer18.Interval = [TimeSpan]::FromMilliseconds(150)
+    $timer18.Add_Tick({
+        $s = $script:Sh18; $s.Step++; $d = $script:ShareDlg
+        if (-not $d -or -not $d.Dlg.IsVisible) { if ($s.Step -gt 40) { $timer18.Stop() }; return }
+        $list = $d.Dlg.FindName('ListButton')
+        $press = { param($b) $b.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) }
+        switch ($s.Step) {
+            2 { $s.Server = [string]$d.Server.Text; & $press $list; break }
+            3 { $s.Info = [string]$d.Info.Text; $d.List.SelectedIndex = 1; break }
+            4 { & $press $d.Use; break }
+            default { if ($s.Step -gt 40) { $d.Dlg.Close() } }
+        }
+    })
+    $script:ShareDlg = $null; $timer18.Start()
+    $pick18 = Show-ShareDialog -Server 'cm01.contoso.com'
+    $timer18.Stop()
+    Check 'WPF Shares... dialog: starts with the site server, lists its shares, and returns \\server\share' ($script:Sh18.Server -eq 'cm01.contoso.com' -and $script:Sh18.Info -eq '2 shared folder(s) on cm01.contoso.com.' -and $pick18 -eq '\\cm01.contoso.com\Sources') "server '$($script:Sh18.Server)', info '$($script:Sh18.Info)', pick '$pick18'"
     $auto14 = $win.FindName('ChkAutoDownload')
     Check 'Updates and Features: "Download the latest patches before the run" is there, off by default, and saved per OS (step 14)' ($null -ne $auto14 -and -not $script:DefaultChecks['AutoDownload'] -and $script:SettingOptionNames -contains 'AutoDownload' -and [string]$auto14.Content.Text -like 'Download the latest patches before the run (only what is missing)*use the patches already in the folders.')
 

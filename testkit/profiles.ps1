@@ -551,6 +551,38 @@ Check 'run config root exists but holds no ISO for this OS while WimForge''s fol
 Check 'run config root that is fine (or WimForge''s own folder, or no ISO anywhere yet): no problem' ((Test-RunConfigRoot -Root $here20 -Definition $d21 -ScriptDir $here20) -eq '' -and (Test-RunConfigRoot -Root $else20 -Definition $d21 -ScriptDir $else20) -eq '' -and (Test-RunConfigRoot -Root $old20 -Definition $bi19['Windows 10 Enterprise LTSC 2019 (IoT)'] -ScriptDir $here20) -eq '')
 $cl21 = [regex]::Match($src, '(?s)function Invoke-CommandLineRun \{.*?\r?\n\}\r?\n').Value
 Check 'the command line run checks the config''s root before running (exit code 1 via the error)' ($cl21 -match 'Test-RunConfigRoot -Root \$cfg\.Root' -and $cl21 -match 'throw "The run config \$ConfigFile cannot be used here: \$rootProblem"')
+Write-Host "`n=== P22 step 18: the SCCM content source on another server - path rules, share list, write test, robocopy ==="
+$rs = Resolve-SccmContentSource -Path '\\cm01.contoso.com\Sources\OSD\Images\' -ThisServer 'WIMFORGE01'
+Check 'a UNC path on another server: written and imported there, marked remote' ($rs.Work -eq '\\cm01.contoso.com\Sources\OSD\Images' -and $rs.Unc -eq $rs.Work -and $rs.Remote -and $rs.Server -eq 'cm01.contoso.com')
+Check 'a UNC path on this server (short or full name) is not remote' (-not (Resolve-SccmContentSource -Path '\\WIMFORGE01\Sources' -ThisServer 'WIMFORGE01').Remote -and -not (Resolve-SccmContentSource -Path '\\wimforge01.contoso.com\Sources' -ThisServer 'WIMFORGE01').Remote)
+$e = ''; try { [void](Resolve-SccmContentSource -Path '\\cm01' -ThisServer 'X') } catch { $e = $_.Exception.Message }
+Check 'a UNC path without a share is refused with the expected form' ($e -like '*is not a complete network path. Use \\server\share*') $e
+$gmd = ${function:Get-MappedDriveUnc}
+function Get-MappedDriveUnc { param($Letter) if ($Letter -eq 'Z') { '\\fs01\deploy' } else { $null } }
+$rz = Resolve-SccmContentSource -Path 'Z:\OSD\Images' -ThisServer 'X'
+Check 'a mapped drive letter is replaced by its network path (the site server cannot use drive letters), with a note' ($rz.Unc -eq '\\fs01\deploy\OSD\Images' -and $rz.Work -eq $rz.Unc -and $rz.Remote -and $rz.Note -like 'Z: is a mapped network drive*')
+$free22 = @([char[]](68..89) | Where-Object { -not (Test-Path "$($_):\") })[0]
+$e = ''; try { [void](Resolve-SccmContentSource -Path "$($free22):\OSD" -ThisServer 'X') } catch { $e = $_.Exception.Message }
+Check 'a drive letter WimForge cannot see is refused, saying why (Explorer mappings are not visible elevated)' ($e -like "Drive $($free22): is not available to WimForge*running as administrator*") $e
+$rl = Resolve-SccmContentSource -Path "$env:SystemDrive\Shares\OSD" -ThisServer 'CMSRV' -Shares @([pscustomobject]@{ Name = 'OSD$'; Path = "$env:SystemDrive\Shares" }, [pscustomobject]@{ Name = 'Sources'; Path = "$env:SystemDrive\Shares\OSD" })
+Check 'a local folder on this server still works: the most specific share gives the UNC path' ($rl.Work -eq "$env:SystemDrive\Shares\OSD" -and $rl.Unc -eq '\\CMSRV\Sources' -and -not $rl.Remote)
+Set-Item function:Get-MappedDriveUnc $gmd
+$nv = @('Shared resources at \\cm01', '', 'Share name  Type  Used as  Comment', '', '-------------------------------------------------------------------------------', 'Sources     Disk           CM content', 'SMS_PS1     Disk', 'Print$      Disk', 'HPLaser     Print          Office', 'The command completed successfully.')
+Check 'net view output: the disk shares, without admin shares or printers' ((@(ConvertFrom-NetViewOutput -Lines $nv) -join ',') -eq 'SMS_PS1,Sources')
+$w22 = Join-Path $PWD 'tst_root\p22'; if (Test-Path $w22) { Remove-Item $w22 -Recurse -Force }; New-Item -ItemType Directory -Force $w22 | Out-Null
+Check 'the write test passes on a writable folder and leaves nothing behind' ((Test-SccmShareWritable -Path $w22) -eq '' -and @(Get-ChildItem $w22 -Force).Count -eq 0)
+Check 'the write test never creates a missing folder: it says the folder does not exist' ((Test-SccmShareWritable -Path (Join-Path $w22 'missing\deeper')) -like 'The folder * does not exist or cannot be reached.' -and -not (Test-Path (Join-Path $w22 'missing')))
+New-Item -ItemType Directory -Force (Join-Path $w22 'src\media\sources') | Out-Null
+Set-Content (Join-Path $w22 'src\install.wim') 'wim'; Set-Content (Join-Path $w22 'src\custom.wim') 'wim2'; Set-Content (Join-Path $w22 'src\media\setup.exe') 'setup'; Set-Content (Join-Path $w22 'src\media\sources\boot.wim') 'boot'
+New-Item -ItemType Directory -Force (Join-Path $w22 'd1'), (Join-Path $w22 'd2'), (Join-Path $w22 'd3') | Out-Null
+Copy-SccmContent -Source (Join-Path $w22 'src\install.wim') -Destination (Join-Path $w22 'd1')
+Copy-SccmContent -Source (Join-Path $w22 'src\custom.wim') -Destination (Join-Path $w22 'd2')
+Copy-SccmContent -Source (Join-Path $w22 'src\media') -Destination (Join-Path $w22 'd3') -Folder
+Check 'robocopy copies install.wim, renames another file name to install.wim, and copies a media folder with its sub-folders' ((Get-Content -Raw (Join-Path $w22 'd1\install.wim')).Trim() -eq 'wim' -and (Get-Content -Raw (Join-Path $w22 'd2\install.wim')).Trim() -eq 'wim2' -and (Test-Path (Join-Path $w22 'd3\setup.exe')) -and (Test-Path (Join-Path $w22 'd3\sources\boot.wim')))
+$e = ''; try { Copy-SccmContent -Source (Join-Path $w22 'nope\install.wim') -Destination (Join-Path $w22 'd4') } catch { $e = $_.Exception.Message }
+Check 'a failed robocopy copy throws with its exit code' ($e -like 'The copy to * failed (robocopy exit code *') $e
+Invoke-Expression ([regex]::Match($src, '(?s)function Get-FreeSpaceGB \{.*?\r?\n\}\r?\n').Value.Replace('function Get-FreeSpaceGB', 'function Get-RealFreeSpaceGB'))   # mocks.ps1 replaces the real one
+Check 'free space: a local path gives a number; a UNC path that cannot be read gives nothing (no error)' ($null -ne (Get-RealFreeSpaceGB -Path $w22) -and $null -eq (Get-RealFreeSpaceGB -Path '\\no-such-server-wimforge\share'))
 Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

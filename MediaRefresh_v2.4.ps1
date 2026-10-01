@@ -2497,7 +2497,20 @@ function Backup-PreviousOutput {
     }
 }
 function Get-FreeSpaceGB {
+    # Free space for the account running WimForge, in GB (one decimal), or $null when it cannot be read. A UNC path
+    # (\\server\share\...) is read with GetDiskFreeSpaceEx, which DriveInfo cannot do (step 18: the SCCM content source share).
     param([Parameter(Mandatory)][string]$Path)
+    if ($Path.StartsWith('\\')) {
+        try {
+            if (-not ('WimForge.DiskSpace' -as [type])) {
+                Add-Type -Namespace WimForge -Name DiskSpace -ErrorAction Stop -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool GetDiskFreeSpaceEx(string lpDirectoryName, out ulong lpFreeBytesAvailable, out ulong lpTotalNumberOfBytes, out ulong lpTotalNumberOfFreeBytes);'
+            }
+            $avail = [uint64]0; $total = [uint64]0; $freeAll = [uint64]0
+            $dir = if ($Path.EndsWith('\')) { $Path } else { $Path + '\' }
+            if ([WimForge.DiskSpace]::GetDiskFreeSpaceEx($dir, [ref]$avail, [ref]$total, [ref]$freeAll)) { return [Math]::Round($avail / 1GB, 1) }
+        } catch { }
+        return $null
+    }
     try {
         $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Path))
         return [Math]::Round(([System.IO.DriveInfo]::new($root)).AvailableFreeSpace / 1GB, 1)
@@ -2651,6 +2664,101 @@ function ConvertTo-SccmUncPath {
     $rest = $p.Substring(([string]$best.Path).TrimEnd('\').Length).TrimStart('\')
     return ('\\' + $Server + '\' + $best.Name + $(if ($rest) { '\' + $rest } else { '' }))
 }
+# ---- step 18 (2026-10-01): the content source on another server ----
+# WimForge moved off the content source server, so the content source is now usually \\server\share\folder. WimForge writes
+# there over the network; Configuration Manager imports from the same UNC path. A local folder still works when WimForge
+# does run on the content source server (it is turned into \\<this server>\<share>\... as before).
+function Get-MappedDriveUnc {
+    # The network path behind a mapped drive letter ('Z' -> \\fs01\deploy), or $null when the letter is not a network drive.
+    param([Parameter(Mandatory)][string]$Letter)
+    try {
+        $d = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$($Letter.TrimEnd(':')):'" -ErrorAction Stop
+        if ($d -and [int]$d.DriveType -eq 4 -and $d.ProviderName) { return ([string]$d.ProviderName).TrimEnd('\') }
+    } catch { }
+    return $null
+}
+function Resolve-SccmContentSource {
+    # Where WimForge writes the content (Work) and the UNC path Configuration Manager imports from (Unc), for what was typed
+    # on the SCCM tab. Remote = on another server. Note = something worth a WARN. Throws a plain message for an unusable path.
+    param([Parameter(Mandatory)][string]$Path, [string]$ThisServer = $env:COMPUTERNAME, [object[]]$Shares = $null)
+    $p = $Path.Trim().Trim('"')
+    if ($p.Length -gt 3) { $p = $p.TrimEnd('\') }
+    if ($p.StartsWith('\\')) {
+        $m = [regex]::Match($p, '^\\\\([^\\]+)\\[^\\]+')
+        if (-not $m.Success) { throw "The content source $p is not a complete network path. Use \\server\share or \\server\share\folder." }
+        $srv = $m.Groups[1].Value
+        $remote = -not ($srv -ieq $ThisServer -or $srv -ieq 'localhost' -or $srv -ieq '127.0.0.1' -or $srv -like "$ThisServer.*")
+        return [pscustomobject]@{ Work = $p; Unc = $p; Remote = $remote; Server = $srv; Note = '' }
+    }
+    if ($p -match '^([A-Za-z]):(\\.*)?$') {
+        $letter = $Matches[1]; $rest = ([string]$Matches[2]).TrimStart('\')
+        $mapped = Get-MappedDriveUnc -Letter $letter
+        if ($mapped) {
+            $unc = if ($rest) { "$mapped\$rest" } else { $mapped }
+            $srvM = [regex]::Match($unc, '^\\\\([^\\]+)\\')
+            return [pscustomobject]@{ Work = $unc; Unc = $unc; Remote = $true; Server = $srvM.Groups[1].Value; Note = "$($letter.ToUpper()): is a mapped network drive; the site server cannot use a drive letter, so its network path $unc is used." }
+        }
+        if (-not (Test-Path -LiteralPath "$($letter):\")) {
+            throw "Drive $($letter.ToUpper()): is not available to WimForge. A drive mapped in Explorer is not visible to WimForge running as administrator; type the network path instead (\\server\share\folder) or use Shares... on the SCCM tab."
+        }
+        $sh = if ($null -ne $Shares) { @($Shares) } else { @(Get-ServerShares) }
+        $unc = ConvertTo-SccmUncPath -LocalPath $p -Server $ThisServer -Shares $sh
+        return [pscustomobject]@{ Work = $p; Unc = $unc; Remote = $false; Server = $ThisServer; Note = '' }
+    }
+    throw "The content source $p must be a network path (\\server\share\folder) or a folder on this server."
+}
+function Get-RemoteShares {
+    # A server's ordinary file shares (no admin shares like C$), by name: through CIM (WinRM), else 'net view' (SMB only).
+    param([Parameter(Mandatory)][string]$Server)
+    $Server = $Server.Trim().TrimStart('\')
+    try {
+        $s = New-CimSession -ComputerName $Server -OperationTimeoutSec 15 -ErrorAction Stop
+        try { return @(Get-SmbShare -CimSession $s -ErrorAction Stop | Where-Object { -not $_.Special -and $_.Name -notmatch '\$$' } | ForEach-Object { [string]$_.Name } | Sort-Object) }
+        finally { Remove-CimSession $s -ErrorAction SilentlyContinue }
+    } catch { }
+    $out = @(& "$env:SystemRoot\System32\net.exe" view "\\$Server" 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw "The shares of $Server could not be listed ($((@($out) | Where-Object { $_.Trim() }) -join ' ')). Check the server name and that WimForge's account can reach it." }
+    return @(ConvertFrom-NetViewOutput -Lines $out)
+}
+function ConvertFrom-NetViewOutput {
+    # Share names from 'net view \\server' output: the lines between the dashes and the closing line whose type is Disk.
+    param([string[]]$Lines)
+    $in = $false
+    $names = foreach ($l in @($Lines)) {
+        if ($l -match '^-{5,}') { $in = $true; continue }
+        if (-not $in -or -not $l.Trim()) { continue }
+        if ($l -match '^(?<name>.+?)\s{2,}(?<type>Disk)\b') { $n = $Matches['name'].Trim(); if ($n -notmatch '\$$') { $n } }
+    }
+    return @($names | Sort-Object -Unique)
+}
+function Test-SccmShareWritable {
+    # '' when WimForge can create a folder and a file in $Path (removed again at once), else why not.
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return "The folder $Path does not exist or cannot be reached." }   # New-Item would create it
+    $t = [System.IO.Path]::Combine($Path, ".wimforge_write_test_$([guid]::NewGuid().ToString('N').Substring(0, 8))")
+    try {
+        New-Item -ItemType Directory -Path $t -ErrorAction Stop | Out-Null
+        [System.IO.File]::WriteAllText([System.IO.Path]::Combine($t, 'test.txt'), 'WimForge write test')
+        return ''
+    } catch {
+        return "WimForge cannot write to $Path ($($_.Exception.Message)). The account running WimForge needs Modify permission on that share and folder."
+    } finally { Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue }
+}
+function Copy-SccmContent {
+    # Copies install.wim (or, with -Folder, the whole media folder) to $Destination with robocopy: restartable (/J for the
+    # large file), retries on a network hiccup, a summary in the log. Throws on a failed copy (robocopy exit code 8 or more).
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination, [switch]$Folder)
+    $rc = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+    $robo = if ($Folder) { @($Source, $Destination, '/E', '/R:3', '/W:10', '/NP', '/NFL', '/NDL', '/NJH') }
+            else { @((Split-Path $Source -Parent), $Destination, (Split-Path $Source -Leaf), '/J', '/R:3', '/W:10', '/NP', '/NDL', '/NJH') }
+    $out = @(& $rc @robo 2>&1 | ForEach-Object { [string]$_ })
+    $code = $LASTEXITCODE
+    foreach ($l in $out) { if ($l.Trim()) { Write-Log "  robocopy: $($l.Trim())" } }
+    if ($code -ge 8) { throw "The copy to $Destination failed (robocopy exit code $code; see the robocopy lines in the log)." }
+    if (-not $Folder -and (Split-Path $Source -Leaf) -ine 'install.wim') {
+        Move-Item -LiteralPath (Join-Path $Destination (Split-Path $Source -Leaf)) -Destination (Join-Path $Destination 'install.wim') -Force
+    }
+}
 function Get-SccmSafeFolderName { param([string]$Name) return (($Name -replace '[\\/:*?"<>|]', '') -replace '\s+', ' ').Trim() }
 function Import-SccmModule {
     # The Configuration Manager console's PowerShell module (installed with the console).
@@ -2720,12 +2828,20 @@ function Invoke-SccmImport {
         throw $(if ($isUpgrade) { "An upgrade package needs the refreshed media folder, and the last run did not build one (or it is gone). Tick 'Create refreshed media folder' and run again, or import a Full OS image." } else { "The last run's install.wim ($content) is not there any more. Run again." })
     }
     $sizeGB = if ($isUpgrade) { (@(Get-ChildItem -LiteralPath $content -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum) / 1GB } else { (Get-Item -LiteralPath $content).Length / 1GB }
-    # 2. The content source folder: local on this server, reachable by UNC under \\<this server>\.
-    if (-not (Test-Path -LiteralPath $sourceLocal)) { throw "The content source folder $sourceLocal does not exist." }
-    $sourceUnc = ConvertTo-SccmUncPath -LocalPath $sourceLocal -Server $sourceServer -Shares $(if ($sourceLocal.StartsWith('\\')) { @() } else { @(Get-ServerShares) })
-    if (-not $sourceUnc.StartsWith("\\$sourceServer\", [System.StringComparison]::OrdinalIgnoreCase)) { throw "The content source $sourceUnc must be on this server (\\$sourceServer\)." }
-    $free = Get-FreeSpaceGB -Path $sourceLocal
-    if ($null -ne $free -and $free -lt ($sizeGB * 1.1 + 1)) { throw ("Not enough free space for the copy: {0:N1} GB free in {1}, about {2:N1} GB needed." -f $free, $sourceLocal, ($sizeGB * 1.1 + 1)) }
+    # 2. The content source (step 18): a UNC path on any server, a mapped drive (its UNC path), or a shared folder on this
+    #    server. Reachable, writable and with room - checked here, in the check-only pass too, before anything is copied.
+    $src = Resolve-SccmContentSource -Path $sourceLocal -ThisServer $sourceServer
+    if ($src.Note) { Write-Log $src.Note 'WARN' }
+    if (-not (Test-Path -LiteralPath $src.Work)) {
+        throw $(if ($src.Remote) { "The content source $($src.Unc) cannot be reached: check the server and share name, that the folder exists, and that the account running WimForge can open it." } else { "The content source folder $($src.Work) does not exist." })
+    }
+    $notWritable = Test-SccmShareWritable -Path $src.Work
+    if ($notWritable) { throw $notWritable }
+    $sourceUnc = $src.Unc
+    $free = Get-FreeSpaceGB -Path $src.Work
+    if ($null -ne $free -and $free -lt ($sizeGB * 1.1 + 1)) { throw ("Not enough free space for the copy: {0:N1} GB free in {1}, about {2:N1} GB needed." -f $free, $src.Work, ($sizeGB * 1.1 + 1)) }
+    if ($null -eq $free) { Write-Log "The free space in $($src.Work) could not be read; the copy is tried anyway." 'WARN' }
+    Write-Log "Content source: $($src.Unc)$(if ($src.Remote) { " on $($src.Server) (copied over the network)" })$(if ($null -ne $free) { (', {0:N1} GB free' -f $free) })"
     # 3. The site: module, site code, existing names, distribution target.
     Import-SccmModule
     $siteCode = Get-SccmSiteCode -SiteServer $siteServer
@@ -2734,24 +2850,30 @@ function Invoke-SccmImport {
     $name = Get-SccmUniqueName -Name $wantedName -Existing @($existing)
     if ($name -ne $wantedName) { Write-Log "A $kind named '$wantedName' already exists; this one is imported as '$name' (the existing one is not changed)." 'WARN' }
     $folderName = Get-SccmSafeFolderName $name
-    $destLocal = Join-Path $sourceLocal $folderName; $n = 1
-    while (Test-Path -LiteralPath $destLocal) { $n++; $destLocal = Join-Path $sourceLocal "$folderName ($n)" }
+    $destLocal = Join-Path $src.Work $folderName; $n = 1
+    while (Test-Path -LiteralPath $destLocal) { $n++; $destLocal = Join-Path $src.Work "$folderName ($n)" }
     $destUnc = $sourceUnc + '\' + (Split-Path $destLocal -Leaf)
     $importPath = if ($isUpgrade) { $destUnc } else { $destUnc + '\install.wim' }
     $description = ("WimForge $($script:ToolVersion); build $($run.Build); gate $($run.Gate); change log $(Split-Path $run.ChangeLog -Leaf)")
     if ($description.Length -gt 127) { $description = $description.Substring(0, 127) }
     $plan = [pscustomobject]@{ Mode = 'SccmImport'; DryRun = [bool]$DryRun; Kind = $kind; Name = $name; RequestedName = $wantedName; Build = $run.Build; Gate = $run.Gate; Finished = $run.Finished
         Content = $content; SizeGB = [Math]::Round($sizeGB, 1); DestinationLocal = $destLocal; ImportPath = $importPath; SiteServer = $siteServer; SiteCode = $siteCode
-        Target = $target; TargetIsGroup = $targetIsGroup; PackageId = $null; Description = $description }
+        Target = $target; TargetIsGroup = $targetIsGroup; PackageId = $null; Description = $description; Remote = [bool]$src.Remote; FreeGB = $free }
     Write-Log "SCCM import plan: $kind '$name' from $importPath (copy of $content, $($plan.SizeGB) GB), site $siteCode on $siteServer, distribute to $(if ($targetIsGroup) { 'distribution point group' } else { 'distribution point' }) $target."
     if ($DryRun) { Set-Phase 'Done'; return $plan }
-    # 4. Copy (local), import (UNC), distribute.
-    Set-Phase 'Copying to the content source'; Set-Progress 20 'Copying to the content source'
+    # 4. Copy (robocopy, local or over the network), import (UNC), distribute. A failed or cancelled copy removes its
+    #    half-written folder, so nothing incomplete is ever imported.
+    Set-Phase 'Copying to the content source'; Set-Progress 20 $(if ($src.Remote) { "Copying $($plan.SizeGB) GB to $($src.Server) over the network" } else { 'Copying to the content source' })
     Ensure-Directory $destLocal
-    if ($isUpgrade) { Copy-Item -Path (Join-Path $content '*') -Destination $destLocal -Recurse -Force -ErrorAction Stop }
-    else { Copy-Item -LiteralPath $content -Destination (Join-Path $destLocal 'install.wim') -Force -ErrorAction Stop }
+    try {
+        Copy-SccmContent -Source $content -Destination $destLocal -Folder:$isUpgrade
+        Assert-NotCancelled
+    } catch {
+        Remove-Item -LiteralPath $destLocal -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Log "The copy did not complete, so its folder $destLocal was removed and nothing was imported." 'WARN'
+        throw
+    }
     Write-Log "Copied $content to $destLocal"
-    Assert-NotCancelled
     Set-Phase "Importing the $kind"; Set-Progress 70 "Importing the $kind"
     $pkgId = Invoke-InSccmSite -SiteCode $siteCode -SiteServer $siteServer -Script {
         $obj = if ($isUpgrade) { New-CMOperatingSystemInstaller -Name $name -Path $importPath -Description $description -Version $run.Build -ErrorAction Stop }
@@ -3371,7 +3493,7 @@ if ($Config) {
     <StackPanel Grid.Row="3" Grid.Column="1"><StackPanel Orientation="Horizontal"><RadioButton x:Name="SccmTargetDP" Content="Distribution point" IsChecked="True" Margin="0,0,18,0"/><RadioButton x:Name="SccmTargetGroup" Content="Distribution point group"/></StackPanel>
      <DockPanel Margin="0,6,0,0"><ComboBox x:Name="SccmTargetList" DockPanel.Dock="Right" Width="230" Height="28" Margin="8,0,0,0" ToolTip="Filled by Connect; picking one copies it into the box"/><TextBox x:Name="SccmTarget" Height="28" Padding="4" ToolTip="Distribution point server name (FQDN) or distribution point group name"/></DockPanel></StackPanel>
     <TextBlock Grid.Row="4" Text="Content source folder" VerticalAlignment="Center" Margin="0,14,0,0"/>
-    <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,14,0,0"><Button x:Name="SccmBrowseButton" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0" Padding="14,3"/><TextBox x:Name="SccmContentSource" Height="28" Padding="4" ToolTip="A folder on this server inside a shared folder; each import creates a sub-folder named after the image"/></DockPanel>
+    <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,14,0,0"><Button x:Name="SccmBrowseButton" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0" Padding="14,3" ToolTip="Pick a folder: inside the network share typed or chosen with Shares..., or on this server"/><Button x:Name="SccmSharesButton" DockPanel.Dock="Right" Content="Shares..." Margin="8,0,0,0" Padding="14,3" ToolTip="Lists the shared folders of a server (the site server by default), to pick the content source share"/><TextBox x:Name="SccmContentSource" Height="28" Padding="4" ToolTip="A network folder such as \\cm01\Sources\OSD\Images (WimForge copies each image there over the network), or a shared folder on this server. Each import creates a sub-folder named after the image."/></DockPanel>
     <TextBlock x:Name="SccmUncPreview" Grid.Row="5" Grid.Column="1" Margin="0,4,0,10" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}"/>
     <TextBlock Grid.Row="6" Text="Image name" VerticalAlignment="Center"/>
     <DockPanel Grid.Row="6" Grid.Column="1"><Button x:Name="SccmNameResetButton" DockPanel.Dock="Right" Content="Reset" Margin="8,0,0,0" Padding="14,3" ToolTip="Back to the OS name with the month (yyyyMM)"/><TextBox x:Name="SccmImageName" Height="28" Padding="4" MaxLength="50"/></DockPanel>
@@ -3404,7 +3526,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -3769,12 +3891,15 @@ function Update-SccmTargetList {
 function Update-SccmUncPreview {
     $p = ([string]$script:SccmContentSource.Text).Trim()
     $warn = $false
-    $script:SccmUncPreview.Text = if (-not $p) { 'Choose a folder on this server inside a shared folder; each import creates a sub-folder named after the image.' }
+    $script:SccmUncPreview.Text = if (-not $p) { 'Choose a network folder such as \\cm01\Sources\OSD\Images (Shares... lists a server''s shares), or a shared folder on this server. Each import creates a sub-folder named after the image.' }
     else {
         try {
-            if (-not $p.StartsWith('\\') -and $null -eq $script:ServerShares) { $script:ServerShares = @(Get-ServerShares) }
-            $unc = ConvertTo-SccmUncPath -LocalPath $p -Server $script:SccmSourceServer -Shares $(if ($p.StartsWith('\\')) { @() } else { @($script:ServerShares) })
-            "Configuration Manager imports from $unc\<image name>"
+            $isLocal = ($p -match '^[A-Za-z]:') -and -not (Get-MappedDriveUnc -Letter $p.Substring(0, 1))
+            if ($isLocal -and $null -eq $script:ServerShares) { $script:ServerShares = @(Get-ServerShares) }
+            $r = Resolve-SccmContentSource -Path $p -ThisServer $script:SccmSourceServer -Shares $(if ($isLocal) { @($script:ServerShares) } else { @() })
+            $txt = if ($r.Remote) { "WimForge copies each image over the network to $($r.Unc)\<image name>, and Configuration Manager imports it from there. The account running WimForge needs write access to that share; the site server needs read access." }
+                   else { "Configuration Manager imports from $($r.Unc)\<image name>" }
+            if ($r.Note) { $warn = $true; "$($r.Note) $txt" } else { $txt }
         } catch { $warn = $true; $_.Exception.Message }
     }
     $script:SccmUncPreview.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, $(if ($warn) { 'WF.WarnText' } else { 'WF.SubtleText' }))
@@ -4284,9 +4409,59 @@ $script:SccmNameResetButton.Add_Click({ $script:SccmImageName.Text = Get-SccmAut
 $script:SccmBrowseButton.Add_Click({
     Add-Type -AssemblyName System.Windows.Forms
     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg.Description = 'Content source folder for the SCCM import (a folder on this server inside a shared folder)'
-    if ($script:SccmContentSource.Text -and (Test-Path -LiteralPath $script:SccmContentSource.Text)) { $dlg.SelectedPath = $script:SccmContentSource.Text }
+    $dlg.Description = 'Content source folder for the SCCM import: a folder in a network share (\\server\share - use Shares... to pick the share first), or a shared folder on this server'
+    $cur = ([string]$script:SccmContentSource.Text).Trim()
+    # Started inside the typed / chosen share, so a network folder can be browsed; Network is also in the tree.
+    if ($cur) { try { if (Test-Path -LiteralPath $cur) { $dlg.SelectedPath = $cur } } catch { } }
     if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:SccmContentSource.Text = $dlg.SelectedPath; Update-SccmUncPreview }
+})
+function Show-ShareDialog {
+    # Lists a server's shared folders (the site server by default) and returns \\server\share for the one picked, or $null.
+    param([string]$Server)
+    Add-Type -AssemblyName System.Windows.Forms   # Application.DoEvents while the shares are listed
+    [xml]$sx = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WimForge - content source share" Width="480" Height="440" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="White" ShowInTaskbar="False">
+ <DockPanel Margin="16">
+  <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8" Text="The server that holds the content source share (usually the site server). List shows its shared folders; pick one, then use Browse... to choose a folder inside it, or type the rest of the path."/>
+  <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8"><Button x:Name="ListButton" DockPanel.Dock="Right" Content="List" Width="80" Margin="8,0,0,0" IsDefault="True"/><TextBox x:Name="ServerBox" Padding="4,3"/></DockPanel>
+  <TextBlock x:Name="ShareInfo" DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="#555555"/>
+  <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+   <Button x:Name="UseButton" Content="Use this share" Width="120" Padding="0,4" Margin="0,0,8,0" IsEnabled="False"/><Button Content="Cancel" Width="90" Padding="0,4" IsCancel="True"/>
+  </StackPanel>
+  <ListBox x:Name="ShareList"/>
+ </DockPanel>
+</Window>
+'@
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $sx))
+    try { $dlg.Owner = $window } catch { }
+    $script:ShareDlg = @{ Dlg = $dlg; Server = $dlg.FindName('ServerBox'); List = $dlg.FindName('ShareList'); Info = $dlg.FindName('ShareInfo'); Use = $dlg.FindName('UseButton'); Result = $null }
+    $script:ShareDlg.Server.Text = $Server
+    $dlg.FindName('ListButton').Add_Click({
+        $d = $script:ShareDlg; $srv = ([string]$d.Server.Text).Trim().TrimStart('\')
+        $d.List.Items.Clear(); $d.Use.IsEnabled = $false
+        if (-not $srv) { $d.Info.Text = 'Type a server name.'; return }
+        $d.Info.Text = "Listing the shares of $srv ..."; $d.Dlg.Cursor = [System.Windows.Input.Cursors]::Wait
+        [System.Windows.Forms.Application]::DoEvents()
+        try {
+            $names = @(Get-RemoteShares -Server $srv)
+            foreach ($n in $names) { [void]$d.List.Items.Add("\\$srv\$n") }
+            $d.Info.Text = if ($names.Count) { "$($names.Count) shared folder(s) on $srv." } else { "$srv has no shared folders WimForge can see (admin shares such as C$ are not listed)." }
+        } catch { $d.Info.Text = $_.Exception.Message }
+        finally { $d.Dlg.Cursor = $null }
+    })
+    $script:ShareDlg.List.Add_SelectionChanged({ $script:ShareDlg.Use.IsEnabled = ($null -ne $script:ShareDlg.List.SelectedItem) })
+    $script:ShareDlg.List.Add_MouseDoubleClick({ if ($script:ShareDlg.List.SelectedItem) { $script:ShareDlg.Result = [string]$script:ShareDlg.List.SelectedItem; $script:ShareDlg.Dlg.DialogResult = $true } })
+    $script:ShareDlg.Use.Add_Click({ $script:ShareDlg.Result = [string]$script:ShareDlg.List.SelectedItem; $script:ShareDlg.Dlg.DialogResult = $true })
+    if ($dlg.ShowDialog()) { return $script:ShareDlg.Result }
+    return $null
+}
+$script:SccmSharesButton.Add_Click({
+    Add-Type -AssemblyName System.Windows.Forms
+    $cur = ([string]$script:SccmContentSource.Text).Trim()
+    $srv = if ($cur -match '^\\\\([^\\]+)') { $Matches[1] } else { ([string]$script:SccmSiteServer.Text).Trim() }
+    $pick = Show-ShareDialog -Server $srv
+    if ($pick) { $script:SccmContentSource.Text = $pick; Update-SccmUncPreview; Write-Log "SCCM content source share chosen: $pick (Browse... picks a folder inside it)." }
 })
 $script:ReadAppsButton.Add_Click({
     # Apps tab: read the selected edition's provisioned apps from the OS ISO on the background runspace (read-only).

@@ -113,15 +113,18 @@ Press "Save settings" once the ticks and languages for an OS are how you want th
 
 ### SCCM tab
 
-Imports the latest finished run of the selected OS into Configuration Manager. Needs the Configuration Manager console on the build machine and rights on the site.
+Imports the latest finished run of the selected OS into Configuration Manager. Needs the Configuration Manager console on the build machine and rights on the site. WimForge does not have to run on the site server or the content source server.
 
 - **Site server** - the site server's name (FQDN). **Connect** checks the console module and the site, reads the site code, and fills the pick list with the site's distribution points and groups. It usually takes up to a minute (loading the console's PowerShell module is the slow part); the status line shows each step.
 - **Distribute to** - a distribution point or a distribution point group; type the name, or pick it from the list after Connect.
-- **Content source folder** - a folder on this server inside a shared folder (**Browse...** to pick it). The line under it shows the UNC path Configuration Manager imports from. Each import creates a new sub-folder named after the image; nothing already there is overwritten.
+- **Content source folder** - where the image is copied for Configuration Manager. Usually a network folder on the site server or a file server, for example `\\cm01\Sources\OSD\Images`: type it, or press **Shares...** (it lists the shared folders of a server - the site server by default - and fills in the one you pick), then **Browse...** to choose a folder inside that share. When WimForge runs on the content source server itself, a local folder inside a shared folder works too. The line under it shows the UNC path Configuration Manager imports from. Each import creates a new sub-folder named after the image; nothing already there is overwritten.
+  - Use the network path, not a mapped drive letter: the site server cannot use drive letters (a mapped letter is turned into its network path), and drives mapped in Explorer are not visible to WimForge running as administrator.
+  - Permissions: the account running WimForge needs **Modify** on the share and folder (it copies the image there); the site server - its computer account, or the account Configuration Manager uses for content - needs **Read** on it.
+  - The copy goes over the network with robocopy (it retries short network drops); a copy that fails is removed again, so nothing incomplete is ever imported.
 - **Image name** - the OS name with the month (`yyyyMM`), following the selected OS; type another name if wanted (50 characters at most), **Reset** to go back. If an image of that name already exists, the new one gets " (2)", " (3)", ...; the existing one is never changed.
 - **Package type** - **Full OS image** (the `install.wim`, for task sequences) or **Upgrade package** (the whole refreshed media folder, for in-place upgrades; the run must have built the media folder).
 - **Import after the run finishes** - starts the import straight after a successful run, without a confirmation. An image whose validation gate FAILED is not imported.
-- **Import into SCCM...** - checks everything first (the run, the gate, the folder and share, free space, the site and the name) and shows exactly what it will do; nothing changes until you confirm. It then copies the image, creates the OS image or upgrade package, and starts the content distribution (follow it in the console under Monitoring > Distribution Status).
+- **Import into SCCM...** - checks everything first (the run, the gate, that the share can be reached and written to, free space on it, the site and the name) and shows exactly what it will do; nothing changes until you confirm. It then copies the image, creates the OS image or upgrade package, and starts the content distribution (follow it in the console under Monitoring > Distribution Status).
 - The line under the button shows the latest run for this OS: build, validation gate and time. **A run whose validation gate FAILED is never imported.**
 - Save settings keeps the site server and target (for every OS), and the content folder, package type and a typed image name (per OS).
 

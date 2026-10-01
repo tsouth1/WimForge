@@ -8,7 +8,7 @@ Where v2.4 stands:
 
 - **Media / ISO testing scope (decision, 2026-09-28):** real testing of the refreshed media folder, the ISO, Patch boot.wim and the CA 2023 media is **paused for every OS except Windows 11 and Windows Server 2022 or later**. The Windows 10 LTSC profiles (2019, 2021 KMS, 2021 IoT) are tested for install.wim (and WinRE) only: untick the media folder for them. The code for Win10 media stays as it is (including the 1809 boot.wim fallback of 2026-09-28, which stays mock-tested only), but no real run is needed to close a step.
 
-- **Mock test kit:** 7 suites, 616 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-28).
+- **Mock test kit:** 7 suites, 636 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-09-28).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). LTSC 2021 KMS / IoT and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -30,7 +30,9 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [13](#s13) | Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025 | Claude + operator | Not started |
 | [15](#s15) | Run configs and the command line: `-Config <file> [-Preflight]` runs without the window | Claude | Built (mock-tested + command line smoke-tested); confirm with a real elevated run |
 | [14](#s14) | Download patches: download only what is missing; an option to use the patches already in the folders | Claude | Built (mock-tested); confirm with a real Download patches and a real run |
-| [17](#s17) | Adding or changing an OS without a new WimForge: release placeholder, stable folder key, Tools > New OS from existing / Rename OS / Check OS profile / Edit OS profile | Claude | Built (mock-tested, dialog tested on real WPF); confirm with a real 26H2 profile | Media-only run: build the media / ISO around the existing NEWWIM\install.wim, without servicing install.wim again | Claude | Not started (asked 2026-09-28) |
+| [17](#s17) | Adding or changing an OS without a new WimForge: release placeholder, stable folder key, Tools > New OS from existing / Rename OS / Check OS profile / Edit OS profile | Claude | Built (mock-tested, dialog tested on real WPF); confirm with a real 26H2 profile |
+| [16](#s16) | Media-only run: build the media / ISO around the existing NEWWIM\install.wim, without servicing install.wim again | Claude | Not started (asked 2026-09-28) |
+| [18](#s18) | SCCM import from a WimForge server that is not the content source server: browse / connect to a UNC network path, copy over the network | Claude | Built (mock-tested; Shares dialog tested on real WPF; robocopy tested for real); confirm with a real import from the new server |
 
 Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
@@ -461,6 +463,33 @@ Add these three OSes to the set the tool services, alongside the existing five (
 - **Tests:** 19 in `profiles.ps1` (P19), 5 in `e2e.ps1` (E27), 2 in `xaml.ps1` (the menu; the New OS dialog driven on real WPF: empty name refused, folder follows the name, OK returns the values).
 - **To confirm on the build machine:** New OS from existing for Windows 11 26H2 with its ISO, then Check OS profile - does the catalog title 26H2 updates under their own release name? If not, the searches keep the 24H2 / 25H2 wording (as for 25H2 today).
 - **Not built (idea 8):** a full profile editor tab - hold until the tools above prove not to be enough.
+
+---
+
+<a id="s18"></a>
+## 18. SCCM import when WimForge does not run on the content source server - built; confirm with a real import
+
+**Owner:** Claude. **Asked 2026-10-01.** **Status:** built 2026-10-01 (mock-tested); confirm with a real import from the new server.
+
+**Built:** `Resolve-SccmContentSource` (a UNC path on any server: written and imported there; a mapped drive letter: its network path, with a WARN; a drive letter WimForge cannot see: refused, saying Explorer mappings are not visible elevated; a local folder on this server: through its share as before) - the "must be on this server" rule is gone. Before any copy, also in the check-only pass: the share can be reached, `Test-SccmShareWritable` (a test folder and file, removed at once; a missing folder is never created), free space on the share (`Get-FreeSpaceGB` reads UNC paths with GetDiskFreeSpaceEx). `Copy-SccmContent`: robocopy (`/J` for the install.wim, `/E` for the media folder, `/R:3 /W:10`, summary in the log); a failed copy removes its folder and nothing is imported. SCCM tab: **Shares...** (`Show-ShareDialog`, `Get-RemoteShares`: CIM / WinRM, else `net view`) lists a server's shares - the site server by default - and fills in `\\server\share`; Browse starts inside it; the preview explains a network copy and the permissions. INSTRUCTIONS.md: content source, mapped drives, permissions. Tests: 12 in `profiles.ps1` (P22, robocopy and the write test for real), 5 in `e2e.ps1` (E29), 3 in `xaml.ps1` (preview messages, the button, the Shares dialog on real WPF).
+
+**Original request and design notes:**
+
+**Why:** WimForge now runs on a separate server (moved to a new server and the J: drive, 2026-10-01). The SCCM tab was built for WimForge running *on* the content source server: Browse picks a local folder, `ConvertTo-SccmUncPath` turns it into `\\<this server>\<share>\...` from this server's own shares, and `Invoke-SccmImport` refuses any content source that is not under `\\<this server>\` ("The content source ... must be on this server"). A local folder is no longer possible, so the import cannot be used at all from the new server.
+
+**Wanted:**
+- **Content source as a UNC path on another server.** Accept `\\server\share\folder` (the site server or a file server) as typed; drop the "must be on this server" rule; keep local folders working when WimForge does run on that server.
+- **Browse / connect for network paths.** Today's Browse (a Windows folder picker) shows local drives. Options to settle when building:
+  - a "Server" box plus **List shares**, which lists that server's shares (`Get-SmbShare -CimSession`, or `net view \\server` without WinRM) and lets the user pick one, then Browse inside it (the folder picker started at `\\server\share`);
+  - default the server to the SCCM site server from the same tab;
+  - and/or a picker that starts in Network, with typing a UNC path into its folder box allowed.
+- **Checks before any copy** (in the dry-run plan): the share is reachable; WimForge's account can create a folder and write there (a small test file, removed again); free space on the remote share (`GetDiskFreeSpaceEx` works on UNC paths) is enough for the image or media folder; the path is a UNC path the site server can read (not a mapped drive letter - mapped drives are per user and the site server cannot use them; resolve one to its UNC path or refuse it with the reason).
+- **Copy over the network** to `\\server\share\...\<image name>`: robocopy (restartable, logs per file, retries) instead of Copy-Item for a multi-GB install.wim or media folder; progress in the status line; a failed or cancelled copy leaves no half-imported image (import only after a complete copy).
+- **Permissions note** in INSTRUCTIONS.md: WimForge's account needs write on the share; the site server's computer account (or the network access / content library account in use) needs read on it, as Configuration Manager reads the content from the UNC path.
+- Saved settings, run configs and the command line carry the UNC path unchanged; the dry-run plan and the SCCM tab preview show it as the import path.
+- **Tests:** a UNC on another server accepted (no "must be on this server"); a mapped drive letter refused or resolved; an unreachable or read-only share refused in the plan before any copy; free space checked on the share; robocopy failure stops before the import; a local path on the source server still works as before.
+
+**Done when:** from a WimForge server that is not the content source server, the SCCM tab can pick a folder on the site server's share by browsing, the plan shows the UNC path and its checks, and a real import copies the image over the network, imports it from that UNC path and distributes it.
 <a id="built"></a>
 ## Built into v2.4 (reference)
 
@@ -529,6 +558,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 - 2026-09-26: WinRE and boot.wim language steps removed (languages go into install.wim only). Test kit 297 checks.
 - 2026-09-26: step 10e built - the Languages tab lists `Profiles\Languages.json` (created from the built-in copy of the repo list when missing) as "full name - code", runs use the codes. Test kit 317 checks.
 - 2026-09-27: 10d "Clear Settings" dropped (Reset to defaults per OS already covers it); the 10d menu keeps Cleanup Mountpoints and Image Inventory.
+- 2026-10-01: step 18 built - the SCCM content source can be a share on another server (WimForge now runs on its own server): UNC paths, mapped drives resolved, Shares... to pick a server's share, write / reach / free-space checks before the copy, robocopy over the network, a failed copy removed. Test kit 636 checks.
 - 2026-10-01: after a move, two more saved paths: (1) `NEWWIM\RunResult.json` stores the full paths of install.wim, the media and the change log, so SCCM import of a run made before the move said install.wim was gone - `Read-RunResult` now finds a missing file under this OS folder by its `\NEWWIM\` / `\LOGS\` part (logged); (2) a run config keeps its saved `root` - a command line run whose root is gone, or holds no ISO for the OS while WimForge's own folder does, now stops (exit 1) naming both paths (`Test-RunConfigRoot`); it never switches roots by itself. Checked: per-OS settings, app lists, profiles and download records hold no drive paths (the SCCM content source is whatever was typed). Test kit 616 checks.
 - 2026-10-01: WimForge moved to another server and the J: drive kept the old saved root on F: from `Settings\General.json` (the saved root always won over the script's folder): no ISO found, and Download patches - F: exists there too - created the folders on F: and downloaded into them. Fixed (`Resolve-SavedRoot`): General.json now records `scriptDir` (where WimForge was when the root was saved); a moved WimForge whose root was its own folder (or inside it) takes the root along; a saved root that does not exist, or (older settings without scriptDir) holds no ISO while the script's folder does, gives way to the script's folder. Every case is logged with a WARN saying Save settings keeps it. The "No ISO files found" error now names the Repository root to check. Test kit 609 checks.
 - 2026-09-30: step 17 built - adding or changing an OS without a new WimForge (release placeholder `{version}`, folder as the stable key in run configs, Tools > New OS from existing / Rename OS / Check OS profile / Edit OS profile / Open Profiles folder, INSTRUCTIONS.md section). Test kit 599 checks.
