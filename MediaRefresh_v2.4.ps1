@@ -2599,14 +2599,37 @@ function Save-RunResult {
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
     return $file
 }
+function Resolve-MovedRunPath {
+    # A path from a run record that is gone (the repository was moved to another drive, folder or server): the same file
+    # under this OS folder, found by the part from \NEWWIM\ or \LOGS\ on. Returns the path as recorded when it exists, the
+    # moved path when that exists, else the path as recorded (the caller reports it missing).
+    param([string]$Path, [Parameter(Mandatory)][string]$OsRoot)
+    if (-not $Path -or (Test-Path -LiteralPath $Path)) { return $Path }
+    foreach ($seg in '\NEWWIM\', '\LOGS\') {
+        $i = $Path.LastIndexOf($seg, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($i -lt 0) { continue }
+        $moved = [System.IO.Path]::Combine($OsRoot, $Path.Substring($i + 1))
+        if (Test-Path -LiteralPath $moved) { return $moved }
+    }
+    return $Path
+}
 function Read-RunResult {
+    # The last finished run of this OS folder. Paths recorded on another drive or server (a moved repository) are looked
+    # up again under this OS folder (2026-10-01), so a run made before the move can still be imported; Moved says so.
     param([string]$NewWim)
     $file = [System.IO.Path]::Combine($NewWim, $script:RunResultFileName)
     if (-not (Test-Path -LiteralPath $file)) { return $null }
     try {
         $o = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json -ErrorAction Stop
+        $osRoot = Split-Path $NewWim -Parent
+        $paths = @{}; $moved = [System.Collections.Generic.List[string]]::new()
+        foreach ($k in 'install', 'media', 'changeLog') {
+            $was = [string](Get-ProfileValue $o $k '')
+            $paths[$k] = Resolve-MovedRunPath -Path $was -OsRoot $osRoot
+            if ($paths[$k] -ne $was) { $moved.Add("$was -> $($paths[$k])") }
+        }
         return [pscustomobject]@{ File = $file; Finished = [string](Get-ProfileValue $o 'finished' ''); Os = [string](Get-ProfileValue $o 'os' ''); Build = [string](Get-ProfileValue $o 'build' '')
-            Gate = [string](Get-ProfileValue $o 'gate' ''); Install = [string](Get-ProfileValue $o 'install' ''); Media = [string](Get-ProfileValue $o 'media' ''); ChangeLog = [string](Get-ProfileValue $o 'changeLog' '') }
+            Gate = [string](Get-ProfileValue $o 'gate' ''); Install = $paths['install']; Media = $paths['media']; ChangeLog = $paths['changeLog']; Moved = @($moved) }
     } catch { Write-Log "Run record $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
 }
 function Get-ServerShares {
@@ -2689,6 +2712,7 @@ function Invoke-SccmImport {
     # 1. The finished run to import: it must exist and must not have FAILED its validation gate.
     $run = Read-RunResult -NewWim $Paths.NewWim
     if (-not $run) { throw "There is no finished run to import in $($Paths.NewWim). Run a servicing run for $($Definition.Name) first." }
+    foreach ($m in @($run.Moved)) { Write-Log "The run record's path is from before WimForge was moved; using the same file here: $m" }
     if ($run.Gate -eq 'FAILED') { throw "Refused: the image in $($Paths.NewWim) (build $($run.Build), finished $($run.Finished)) FAILED its validation gate. Fix the cause and run again; a failed image is never imported." }
     if ($run.Gate -ne 'PASSED') { Write-Log "The image in $($Paths.NewWim) was not verified (validation gate: $($run.Gate)); importing it anyway." 'WARN' }
     $content = if ($isUpgrade) { $run.Media } else { $run.Install }
@@ -3228,6 +3252,22 @@ function Read-RunConfig {
     return [pscustomobject]@{ File = $File; OsName = $os; ResolvedFrom = $resolvedFrom; Root = $root; Options = $opts; LanguagesGiven = $langsGiven; Languages = $langs
         RemoveApps = @(@(Get-ProfileValue $o 'removeApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ }); Sccm = $sccm }
 }
+function Test-RunConfigRoot {
+    # '' when a run config's repository root can be used on this machine, else why not (2026-10-01: a config saved before
+    # WimForge moved to another server still named the old drive). A command line run never switches roots on its own - a
+    # scheduled task must not quietly service another folder than its config names - so this stops it with both paths named.
+    param([string]$Root, [Parameter(Mandatory)]$Definition, [string]$ScriptDir)
+    $folders = @($Definition.Folder) + @($Definition.AltFolders)
+    $fix = "Save the run config again from the window (Tools > Save run config...) or correct its `"root`"."
+    if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+        $here = if ($ScriptDir -and (Test-RootHasIsos -Root $ScriptDir -Folders $folders)) { " WimForge's own folder $ScriptDir holds this OS's ISO - was WimForge moved?" } else { '' }
+        return "its repository root $Root does not exist on this machine.$here $fix"
+    }
+    if ($ScriptDir -and $Root.TrimEnd('\') -ine $ScriptDir.TrimEnd('\') -and -not (Test-RootHasIsos -Root $Root -Folders $folders) -and (Test-RootHasIsos -Root $ScriptDir -Folders $folders)) {
+        return "its repository root $Root holds no ISO for $($Definition.Name), but WimForge's own folder $ScriptDir does (WimForge was probably moved). $fix"
+    }
+    return ''
+}
 function ConvertTo-RunOptions {
     # A read run config -> the options object a run takes (the same shape the window builds in Get-UiOptions).
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Definition, [string]$ProfilesDir, [switch]$PreflightOnly)
@@ -3256,6 +3296,8 @@ function Invoke-CommandLineRun {
         $cfg = Read-RunConfig -File $ConfigFile -Definitions $script:OsDefinitions -LanguageList @(Import-LanguageList -Directory $ProfilesDir)
         $opts = ConvertTo-RunOptions -Config $cfg -Definition $script:OsDefinitions[$cfg.OsName] -ProfilesDir $ProfilesDir -PreflightOnly:$PreflightOnly
         if ($cfg.ResolvedFrom) { Write-Log "The run config names the OS $($cfg.ResolvedFrom); it was found by its folder as '$($cfg.OsName)' (the OS was renamed). Save the run config again to update it." 'WARN' }
+        $rootProblem = Test-RunConfigRoot -Root $cfg.Root -Definition $script:OsDefinitions[$cfg.OsName] -ScriptDir (Split-Path $ProfilesDir -Parent)
+        if ($rootProblem) { throw "The run config $ConfigFile cannot be used here: $rootProblem" }
         Write-Log "Command line run from $ConfigFile$(if ($opts.PreflightOnly) { ' (preflight only)' })"
         Invoke-MediaRefresh -Options $opts | Out-Null
         $res = $script:LastResult

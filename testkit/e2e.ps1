@@ -835,4 +835,12 @@ Check 'a new OS without its repository folder (and without catalog rules): both 
 Check 'E24''s case (every boot.wim package fails) is retried once without the LCU, then stops' ($e24retries -eq 1 -and $e24mounts -eq 2) "retries $e24retries, mounts $e24mounts"
 $script:MsuSsu = @{}
 
+Write-Host "`n=== E28 a run config saved before WimForge moved: the old root stops the command line run (2026-10-01) ==="
+$cfg28 = Join-Path $base '_cfg28\old_root.json'
+[void](Save-RunConfig -File $cfg28 -OsName 'Windows 11 Enterprise 24H2' -Folder 'Win11_Enterprise_24H2' -Root 'Q:\mediaRefresh' -Options @{ NetFx3 = $false })
+Reset-Test; $logs28 = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs28.Add("[$Level] $Message") }
+$code28 = Invoke-CommandLineRun -ConfigFile $cfg28 -ProfilesDir (Join-Path $base '_profiles22')
+Set-Item function:Write-Log $wl
+Check 'exit code 1, the log names the missing root, and nothing is mounted or created on the old drive' ($code28 -eq 1 -and [bool]($logs28 -match "^\[ERROR\] The run config .*old_root\.json cannot be used here: its repository root Q:\\mediaRefresh does not exist on this machine") -and @($script:Calls -match '^Mount ').Count -eq 0) (($logs28 -join ' | ') + " / exit $code28")
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

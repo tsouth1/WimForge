@@ -532,6 +532,25 @@ Check 'saved root is the script''s folder: loaded as saved' ($r.Root -eq $here20
 Save-GeneralSettings -Directory $set20 -Root $else20; $g20 = Get-Content -Raw (Join-Path $set20 'General.json') | ConvertFrom-Json
 Save-GeneralSettings -Directory $set20 -ColorScheme 'Default'; $g20b = Get-Content -Raw (Join-Path $set20 'General.json') | ConvertFrom-Json
 Check 'Save settings records where WimForge is (scriptDir), and other saves keep it' ($g20.scriptDir -eq $here20 -and $g20.root -eq $else20 -and $g20b.scriptDir -eq $here20)
+Write-Host "`n=== P21 after a move: the run record finds its files here; a run config with the old root stops (2026-10-01) ==="
+$os21 = Join-Path $here20 'Win11_Enterprise_24H2'; $nw21 = Join-Path $os21 'NEWWIM'
+New-Item -ItemType Directory -Force (Join-Path $nw21 'Media'), (Join-Path $os21 'LOGS') | Out-Null
+Set-Content (Join-Path $nw21 'install.wim') 'x'; Set-Content (Join-Path $os21 'LOGS\ChangeLog_x.html') 'x'
+$gone21 = 'Q:\mediaRefresh\Win11_Enterprise_24H2'
+[void](Save-RunResult -Paths @{ NewWim = $nw21 } -OsName 'Windows 11 Enterprise 24H2' -Build '10.0.26100.9457' -Gate 'PASSED' -Install "$gone21\NEWWIM\install.wim" -Media "$gone21\NEWWIM\Media" -ChangeLog "$gone21\LOGS\ChangeLog_x.html")
+$rr21 = Read-RunResult -NewWim $nw21
+Check 'a run record from before the move: install.wim, media and change log are found under this OS folder' ($rr21.Install -eq (Join-Path $nw21 'install.wim') -and $rr21.Media -eq (Join-Path $nw21 'Media') -and $rr21.ChangeLog -eq (Join-Path $os21 'LOGS\ChangeLog_x.html') -and @($rr21.Moved).Count -eq 3) (@($rr21.Moved) -join ' | ')
+[void](Save-RunResult -Paths @{ NewWim = $nw21 } -OsName 'W' -Build 'b' -Gate 'PASSED' -Install (Join-Path $nw21 'install.wim') -Media '' -ChangeLog "$gone21\LOGS\gone.html")
+$rr21b = Read-RunResult -NewWim $nw21
+Check 'paths that exist are kept as recorded; a file gone everywhere stays as recorded (reported missing later)' ($rr21b.Install -eq (Join-Path $nw21 'install.wim') -and $rr21b.Media -eq '' -and $rr21b.ChangeLog -eq "$gone21\LOGS\gone.html" -and @($rr21b.Moved).Count -eq 0)
+$d21 = $bi19['Windows 11 Enterprise 24H2']
+$p1 = Test-RunConfigRoot -Root 'Q:\mediaRefresh' -Definition $d21 -ScriptDir $here20
+Check 'run config root gone: stops, names it, and points at WimForge''s folder that holds the ISO' ($p1 -like 'its repository root Q:\mediaRefresh does not exist on this machine. WimForge''s own folder * holds this OS''s ISO - was WimForge moved?*Save the run config again*') $p1
+$p2 = Test-RunConfigRoot -Root $old20 -Definition $d21 -ScriptDir $here20
+Check 'run config root exists but holds no ISO for this OS while WimForge''s folder does: stops (never switches by itself)' ($p2 -like "its repository root $old20 holds no ISO for Windows 11 Enterprise 24H2, but WimForge's own folder $here20 does*") $p2
+Check 'run config root that is fine (or WimForge''s own folder, or no ISO anywhere yet): no problem' ((Test-RunConfigRoot -Root $here20 -Definition $d21 -ScriptDir $here20) -eq '' -and (Test-RunConfigRoot -Root $else20 -Definition $d21 -ScriptDir $else20) -eq '' -and (Test-RunConfigRoot -Root $old20 -Definition $bi19['Windows 10 Enterprise LTSC 2019 (IoT)'] -ScriptDir $here20) -eq '')
+$cl21 = [regex]::Match($src, '(?s)function Invoke-CommandLineRun \{.*?\r?\n\}\r?\n').Value
+Check 'the command line run checks the config''s root before running (exit code 1 via the error)' ($cl21 -match 'Test-RunConfigRoot -Root \$cfg\.Root' -and $cl21 -match 'throw "The run config \$ConfigFile cannot be used here: \$rootProblem"')
 Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"
