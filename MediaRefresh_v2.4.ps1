@@ -599,7 +599,7 @@ function Import-LanguageList {
 # ---------- saved GUI settings per OS (TODO step 10c) ----------
 # Settings\<profile folder>.json holds one OS's checkboxes and ticked languages; Settings\General.json the repository
 # root. Kept apart from Profiles\ on purpose: profile files get regenerated, which must not wipe saved choices.
-$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval', 'SccmAutoImport', 'AutoDownload')
+$script:SettingOptionNames = @('Preflight', 'Install', 'Boot', 'WinRE', 'Verify', 'BuildMedia', 'BuildIso', 'Media2023', 'SSU', 'LCU', 'SafeOS', 'NetCU', 'SetupDU', 'NetFx3', 'AppRemoval', 'SccmAutoImport', 'AutoDownload', 'ReuseInstall')
 function Get-OsSettingsFile {
     param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)][pscustomobject]$Definition)
     return (Join-Path $Directory ($Definition.Folder + '.json'))
@@ -2579,10 +2579,11 @@ function Build-IsoFromMedia {
 function Backup-PreviousOutput {
     # Moves whatever is in NEWWIM (previous install.wim, boot.wim, Media, ISO, change logs) into NEWWIM\Archive\<stamp> the first time
     # this run is about to write output, so a run never silently overwrites the last good result. Runs once per run.
-    param([Parameter(Mandatory)][hashtable]$Paths, [Parameter(Mandatory)][string]$Stamp, [int]$Keep = 3)
+    # -Except: names left in place (step 16: a media-only run keeps the install.wim it builds the media around, and its record).
+    param([Parameter(Mandatory)][hashtable]$Paths, [Parameter(Mandatory)][string]$Stamp, [int]$Keep = 3, [string[]]$Except = @())
     if ($script:OutputArchived) { return }
     $script:OutputArchived = $true
-    $items = @(Get-ChildItem -LiteralPath $Paths.NewWim -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'Archive' })
+    $items = @(Get-ChildItem -LiteralPath $Paths.NewWim -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'Archive' -and @($Except) -notcontains $_.Name })
     if ($items.Count -eq 0) { return }
     $archiveRoot = Join-Path $Paths.NewWim 'Archive'
     $dest = Join-Path $archiveRoot $Stamp
@@ -2710,10 +2711,33 @@ function Get-SccmUniqueName {
 function Save-RunResult {
     # The record of a finished run that the SCCM import works from (and refuses when its gate FAILED).
     param([hashtable]$Paths, [string]$OsName, [string]$Build, [string]$Gate, [string]$Install, [string]$Media, [string]$ChangeLog)
-    $data = [ordered]@{ schemaVersion = 1; finished = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); os = $OsName; build = $Build; gate = $Gate; install = $Install; media = $Media; changeLog = $ChangeLog; toolVersion = $script:ToolVersion }
+    # installSize / installTicks (step 16): a media-only run reuses this install.wim only while it is unchanged.
+    $iSize = ''; $iTicks = ''
+    if ($Install -and (Test-Path -LiteralPath $Install -PathType Leaf)) { $fi = Get-Item -LiteralPath $Install; $iSize = [string]$fi.Length; $iTicks = [string]$fi.LastWriteTimeUtc.Ticks }
+    $data = [ordered]@{ schemaVersion = 1; finished = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); os = $OsName; build = $Build; gate = $Gate; install = $Install; installSize = $iSize; installTicks = $iTicks; media = $Media; changeLog = $ChangeLog; toolVersion = $script:ToolVersion }
     $file = [System.IO.Path]::Combine($Paths.NewWim, $script:RunResultFileName)
     [System.IO.File]::WriteAllText($file, (($data | ConvertTo-Json) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
     return $file
+}
+function Get-ReusableInstall {
+    # Step 16 (2026-10-01): the install.wim a media-only run builds the media around - the one NEWWIM\RunResult.json names.
+    # Throws a plain message when it must not be reused: no finished run, a FAILED gate, the file gone or changed since
+    # that run, or another Windows build than the OS ISO's image ($IsoBuild, e.g. 10.0.26300.9457 - compared by build).
+    param([Parameter(Mandatory)][string]$NewWim, [string]$IsoBuild)
+    $run = Read-RunResult -NewWim $NewWim
+    $again = 'Tick Create updated install.wim for a full run instead.'
+    if (-not $run -or -not $run.Install) { throw "Use the existing install.wim: there is no finished run with an install.wim in $NewWim. $again" }
+    if ($run.Gate -eq 'FAILED') { throw "Use the existing install.wim: the install.wim of the run finished $($run.Finished) FAILED its validation gate, so no media is built around it. $again" }
+    if (-not (Test-Path -LiteralPath $run.Install -PathType Leaf)) { throw "Use the existing install.wim: $($run.Install) (the run finished $($run.Finished)) is not there any more. $again" }
+    $fi = Get-Item -LiteralPath $run.Install
+    if (($run.InstallSize -and $run.InstallSize -ne [string]$fi.Length) -or ($run.InstallTicks -and $run.InstallTicks -ne [string]$fi.LastWriteTimeUtc.Ticks)) {
+        throw "Use the existing install.wim: $($run.Install) has changed since the run finished $($run.Finished) (size or date), so it is not the image that run checked. $again"
+    }
+    if ($IsoBuild -and $run.Build) {
+        try { $a = ([version]$run.Build).Build; $b = ([version]$IsoBuild).Build } catch { $a = $null; $b = $null }
+        if ($null -ne $a -and $null -ne $b -and $a -ne $b) { throw "Use the existing install.wim: it is build $($run.Build), but the OS ISO's image is build $IsoBuild - another Windows release, and the media's boot.wim, setup and Setup DU come from that ISO. $again" }
+    }
+    return $run
 }
 function Resolve-MovedRunPath {
     # A path from a run record that is gone (the repository was moved to another drive, folder or server): the same file
@@ -2745,7 +2769,8 @@ function Read-RunResult {
             if ($paths[$k] -ne $was) { $moved.Add("$was -> $($paths[$k])") }
         }
         return [pscustomobject]@{ File = $file; Finished = [string](Get-ProfileValue $o 'finished' ''); Os = [string](Get-ProfileValue $o 'os' ''); Build = [string](Get-ProfileValue $o 'build' '')
-            Gate = [string](Get-ProfileValue $o 'gate' ''); Install = $paths['install']; Media = $paths['media']; ChangeLog = $paths['changeLog']; Moved = @($moved) }
+            Gate = [string](Get-ProfileValue $o 'gate' ''); Install = $paths['install']; Media = $paths['media']; ChangeLog = $paths['changeLog']; Moved = @($moved)
+            InstallSize = [string](Get-ProfileValue $o 'installSize' ''); InstallTicks = [string](Get-ProfileValue $o 'installTicks' '') }
     } catch { Write-Log "Run record $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
 }
 function Get-ServerShares {
@@ -3159,6 +3184,13 @@ function Invoke-MediaRefresh {
         $doBoot = [bool]$Options.Boot -and $doMedia
         if ([bool]$Options.Boot -and -not $doMedia) { Write-Log 'Patch boot.wim is ticked, but no media folder or ISO is being built; boot.wim is patched only for the media, so it is skipped.' }
         elseif ($doMedia) { Write-Log $(if ($doBoot) { 'Media: boot.wim (WinPE and Setup) is patched, and setup.exe and the boot manager files on the media are refreshed from it.' } else { 'Media: boot.wim is left as on the ISO (Patch boot.wim is not ticked).' }) }
+        # Step 16 (2026-10-01): media-only run - the media / ISO are built around the existing NEWWIM\install.wim.
+        $reuse = $false; $prior = $null
+        if ([bool](Get-ProfileValue $Options 'ReuseInstall' $false) -and -not $appsOnly) {
+            if ([bool]$Options.Install) { Write-Log 'Use the existing install.wim is ticked, but so is Create updated install.wim; this run makes a new install.wim (the option is ignored).' 'WARN' }
+            elseif (-not $doMedia) { Write-Log 'Use the existing install.wim is ticked, but no media folder or ISO is built, so there is nothing to build around it (the option is ignored).' 'WARN' }
+            else { $reuse = $true; Write-Log 'Media-only run: install.wim is not serviced again; the media is built around the existing NEWWIM\install.wim.' }
+        }
         $want2023 = [bool](Get-ProfileValue $Options 'Media2023' $false)
         $do2023 = $want2023 -and $doBoot
         if ($want2023 -and -not $doBoot) { Write-Log 'CA 2023 media is ticked, but it needs the media and Patch boot.wim (its boot files come from the patched boot.wim); it is skipped.' 'WARN' }
@@ -3267,6 +3299,12 @@ function Invoke-MediaRefresh {
         $osIsoPath = @($mounted | Where-Object { $_.Drive -eq $osDrive } | Select-Object -First 1 | ForEach-Object { $_.Path })[0]
         $osIsoFile = $driveToFile[$osDrive]
         Test-FreeSpace -Definition $definition -Paths $paths -SourceWim $sourceWim -OsIsoPath $osIsoPath -Options $Options
+        if ($reuse) {
+            # Checked before any image is mounted for servicing, in a preflight too.
+            $isoImageBuild = [string](Get-WindowsImage -ImagePath $sourceWim -Index $(if ($selected) { $selected.ImageIndex } else { 1 })).Version
+            $prior = Get-ReusableInstall -NewWim $paths.NewWim -IsoBuild $isoImageBuild
+            Write-Log "Media-only run: using $($prior.Install) from the run finished $($prior.Finished) (build $($prior.Build), validation gate $($prior.Gate))."
+        }
         if ($selected) {
             # The Apps tab's list (11b): one scan per OS. A preflight reads it when there is none yet, or when the OS ISO is not
             # the one it was read from (name, size or date: a new ISO may add or remove apps) or the index differs. A real run
@@ -3300,20 +3338,28 @@ function Invoke-MediaRefresh {
             $script:LastResult = [pscustomobject]@{ NewWim = $paths.NewWim; Install = $null; Boot = $null; Media = $null; VerifyIssues = $null; Preflight = $true; Gate = 'Skipped'; ChangeLogHtml = $null; ChangeLogCsv = $null }
             return
         }
-        Set-Phase 'Exporting image'
-        $old = Join-Path $paths.OldWim 'install.wim'; Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
-        if ($definition.ServiceAllIndexes) {
-            foreach ($img in $inventory) { Export-WindowsImage -SourceImagePath $sourceWim -SourceIndex $img.ImageIndex -DestinationImagePath $old -DestinationName $img.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null }
+        if (-not $reuse) {
+            Set-Phase 'Exporting image'
+            $old = Join-Path $paths.OldWim 'install.wim'; Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+            if ($definition.ServiceAllIndexes) {
+                foreach ($img in $inventory) { Export-WindowsImage -SourceImagePath $sourceWim -SourceIndex $img.ImageIndex -DestinationImagePath $old -DestinationName $img.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null }
+            } else {
+                Export-WindowsImage -SourceImagePath $sourceWim -SourceIndex $selected.ImageIndex -DestinationImagePath $old -DestinationName $selected.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null
+            }
+            $first = Get-WindowsImage -ImagePath $old -Index (@(Get-WindowsImage -ImagePath $old)[0].ImageIndex)
+            Test-DismHostVersion -ImageVersion $first.Version
+            $script:BuildBefore = [string]$first.Version
+            $workingInstall = Join-Path $paths.Working 'install.working.wim'; Copy-Item -LiteralPath $old -Destination $workingInstall -Force
         } else {
-            Export-WindowsImage -SourceImagePath $sourceWim -SourceIndex $selected.ImageIndex -DestinationImagePath $old -DestinationName $selected.ImageName -CompressionType Max -CheckIntegrity @dl -ErrorAction Stop | Out-Null
+            Test-DismHostVersion -ImageVersion $isoImageBuild   # boot.wim is still serviced
+            $script:BuildBefore = $isoImageBuild
         }
-        $first = Get-WindowsImage -ImagePath $old -Index (@(Get-WindowsImage -ImagePath $old)[0].ImageIndex)
-        Test-DismHostVersion -ImageVersion $first.Version
-        $script:BuildBefore = [string]$first.Version
-
-        $workingInstall = Join-Path $paths.Working 'install.working.wim'; Copy-Item -LiteralPath $old -Destination $workingInstall -Force
         $finalInstall = $null; $finalBoot = $null; $verifyIssues = $null; $mediaFolder = $null; $gate = 'Skipped'
         $iso = $null; $media2023 = $null; $iso2023 = $null; $media2023Error = $null
+        if ($reuse) {
+            $finalInstall = $prior.Install; $gate = $(if ($prior.Gate) { $prior.Gate } else { 'Skipped' }); $script:VerifyBuildAfter = $prior.Build
+            Add-ChangeEvent -Category 'Media' -Item 'install.wim' -Target 'Media\sources' -Detail "reused from the run finished $($prior.Finished) (build $($prior.Build), validation gate $($prior.Gate)) - not serviced again"
+        }
         if ($Options.Install) {
             $workImages = @(Get-WindowsImage -ImagePath $workingInstall)
             $n = 0
@@ -3365,7 +3411,9 @@ function Invoke-MediaRefresh {
         if ($doMedia) {
             Set-Phase 'Building refreshed media folder'
             Set-Progress 88 'Building refreshed media folder'
-            Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives
+            # A media-only run keeps the install.wim it builds around (and its run record) in NEWWIM; the rest is archived.
+            $keepNames = if ($reuse -and ((Split-Path $finalInstall -Parent).TrimEnd('\') -ieq $paths.NewWim.TrimEnd('\'))) { @((Split-Path $finalInstall -Leaf), $script:RunResultFileName) } else { @() }
+            Backup-PreviousOutput -Paths $paths -Stamp $stamp -Keep $definition.KeepArchives -Except $keepNames
             $mediaFolder = New-RefreshedMedia -OsDrive $osDrive -Paths $paths -InstallWim $finalInstall -BootWim $finalBoot -SetupDu $packages.SetupDU -BootFiles $bootFiles
             if ($doBoot) { $finalBoot = Join-Chain $mediaFolder @('sources', 'boot.wim') }
             if ($do2023) {
@@ -3388,7 +3436,7 @@ function Invoke-MediaRefresh {
             Write-Log "install.wim is complete and kept ($finalInstall, validation gate $gate); the change log and run record are still written. No media or ISO was built." 'WARN'
         }
         $changeLogPaths = $null
-        if ($Options.Install) {
+        if ($Options.Install -or $reuse) {
             Set-Phase 'Writing change log'
             $changeLogPaths = Write-ChangeLog -OsName $name -Paths $paths -Stamp $stamp -ToolVersion $script:ToolVersion -BuildBefore $script:BuildBefore -BuildAfter $script:VerifyBuildAfter `
                 -Languages $languages -ServiceAllIndexes $definition.ServiceAllIndexes -Selected $selected -IsoSources @($script:IsoSources) -Events @($script:ChangeEvents) `
@@ -3421,7 +3469,7 @@ function Invoke-MediaRefresh {
 # option is an error, so a misspelling never quietly changes a run. Foundation for the scheduled run (TODO step 8).
 $script:OptionDefaults = [ordered]@{
     Preflight = $false; Install = $true; Boot = $true; WinRE = $true; Verify = $true; BuildMedia = $false; BuildIso = $false; Media2023 = $false
-    SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; AppRemoval = $true; SccmAutoImport = $false; AutoDownload = $false
+    SSU = $true; LCU = $true; SafeOS = $true; NetCU = $true; SetupDU = $true; NetFx3 = $false; AppRemoval = $true; SccmAutoImport = $false; AutoDownload = $false; ReuseInstall = $false
 }
 $script:RunConfigSccmKeys = @('siteServer', 'targetType', 'target', 'contentSource', 'sourceServer', 'packageType', 'imageName')
 function Save-RunConfig {
@@ -3508,7 +3556,7 @@ function ConvertTo-RunOptions {
     return [pscustomobject]@{
         OsName = $Config.OsName; Root = $Config.Root; PreflightOnly = ([bool]$PreflightOnly -or [bool]$o.Preflight)
         Install = [bool]$o.Install; Boot = [bool]$o.Boot; WinRE = [bool]$o.WinRE; Verify = [bool]$o.Verify
-        BuildMedia = [bool]$o.BuildMedia; BuildIso = ([bool]$o.BuildIso -and [bool]$o.BuildMedia); Media2023 = [bool]$o.Media2023
+        BuildMedia = [bool]$o.BuildMedia; BuildIso = ([bool]$o.BuildIso -and [bool]$o.BuildMedia); Media2023 = [bool]$o.Media2023; ReuseInstall = [bool]$o.ReuseInstall
         SSU = [bool]$o.SSU; LCU = [bool]$o.LCU; SafeOS = [bool]$o.SafeOS; NetCU = [bool]$o.NetCU; SetupDU = [bool]$o.SetupDU; NetFx3 = [bool]$o.NetFx3; AutoDownload = [bool]$o.AutoDownload
         Languages = $langs; RemoveApps = $(if ([bool]$o.AppRemoval) { @($Config.RemoveApps) } else { @() })
         SccmSiteServer = [string]$s['siteServer']; SccmTargetType = $(if ([string]$s['targetType']) { [string]$s['targetType'] } else { 'DP' }); SccmTarget = [string]$s['target']
@@ -3577,7 +3625,7 @@ if ($Config) {
    <TabItem Header="Source and Targets"><Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <TextBlock Grid.Row="0" Grid.Column="0" Text="Repository root" Margin="0,8"/><TextBox x:Name="RootText" Grid.Row="0" Grid.Column="1" Text="" Height="30" Padding="6"/>
     <TextBlock Grid.Row="1" Grid.Column="0" Text="Operating system" Margin="0,14,0,8"/><StackPanel Grid.Row="1" Grid.Column="1" Margin="0,8"><DockPanel><Button x:Name="ReloadProfilesButton" DockPanel.Dock="Right" Content="Reload profiles" Margin="8,0,0,0" Padding="12,0" ToolTip="Re-read the JSON files in the Profiles folder"/><Button x:Name="AcquirePatchesButton" DockPanel.Dock="Right" Content="Download patches..." Margin="8,0,0,0" Padding="12,0" ToolTip="Search the Microsoft Update Catalog (MSCatalogLTS) for the selected OS. Shows a dry-run preview first and requires confirmation; never touches PATCHES\SSU."/><ComboBox x:Name="OsCombo" Height="32"/></DockPanel><TextBlock x:Name="ProfileInfo" Margin="2,6,0,0" Foreground="{DynamicResource WF.SubtleText}" TextWrapping="Wrap"/></StackPanel>
-    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" IsEnabled="False" Margin="22,3,0,3" ToolTip="Available when the media folder is created"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder is created."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/></StackPanel></GroupBox>
+    <GroupBox Grid.Row="2" Grid.ColumnSpan="2" Header="Outputs" Margin="0,14,0,0"><StackPanel Margin="12"><CheckBox x:Name="ChkPreflight" Content="Preflight check only (about a minute: checks ISOs, patch folders, language packs and edition; changes nothing)" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkInstall" Content="Create updated install.wim" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkReuseInstall" Content="Use the existing NEWWIM\install.wim instead (media-only run: builds the media / ISO around it in minutes)" IsChecked="False" IsEnabled="False" Margin="22,3,0,3" ToolTip="Available when Create updated install.wim is unticked and the media folder is ticked. Uses the install.wim of the last finished run (refused if its validation gate FAILED, it is missing or changed, or it is from another Windows build than the ISO); boot.wim, the media and the ISO are built as usual."/><CheckBox x:Name="ChkWinRE" Content="Service embedded WinRE (once, reused for every index)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkVerify" Content="Verify the final install.wim (read-only mount, logs RollupFix, language packs, fonts)" IsChecked="True" Margin="0,3"/><CheckBox x:Name="ChkBuildMedia" Content="Create refreshed media folder (NEWWIM\Media) for an OS Upgrade Package, a bootable USB or the ISO" IsChecked="False" Margin="0,3"/><CheckBox x:Name="ChkBuildIso" Content="Also build an ISO from that media (requires Windows ADK Oscdimg)" IsChecked="False" IsEnabled="False" Margin="22,3,0,3" ToolTip="Available when the media folder is created"/><CheckBox x:Name="ChkBoot" Content="Patch boot.wim (WinPE and Setup) for booting the media / ISO / USB directly - not used by SCCM task sequences or upgrade packages" IsChecked="True" IsEnabled="False" Margin="22,3,0,3" ToolTip="Adds the SSU and LCU to both boot.wim images on the media and copies setup.exe, setuphost.exe and the boot manager files from the patched Setup image onto the media, as Microsoft's media steps require. Available when the media folder is created."/><CheckBox x:Name="ChkMedia2023" Content="Also build CA 2023 media alongside it (NEWWIM\Media_CA2023 and a _CA2023 ISO): boot manager signed by 'Windows UEFI CA 2023'" IsChecked="False" IsEnabled="False" Margin="44,3,0,3" ToolTip="A second copy of the media whose boot files (boot manager, UEFI boot image, boot fonts) are the 'Windows UEFI CA 2023' signed ones from the patched boot.wim, as Microsoft's Make2023BootableMedia.ps1 does. It boots only on PCs whose firmware trusts Windows UEFI CA 2023; the standard media is still built for the others. Needs Patch boot.wim and a 2024-04 or later LCU."/></StackPanel></GroupBox>
     <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Margin="0,18" TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Text="ISO roles (OS, Language Pack, Features on Demand) are detected from ISO content, so file names do not matter. Keep one ISO per role in the ISO folder. Client operating systems export a single index; Windows Server 2022 preserves and services every index."/>
    </Grid></TabItem>
    <TabItem Header="Updates and Features"><Grid Margin="18"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -3635,7 +3683,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkReuseInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -4080,7 +4128,7 @@ function Get-UiOptions {
     return [pscustomobject]@{
         OsName = [string]$script:OsCombo.SelectedItem; Root = [string]$script:RootText.Text
         PreflightOnly = [bool]$script:ChkPreflight.IsChecked; Install = [bool]$script:ChkInstall.IsChecked; Boot = [bool]$script:ChkBoot.IsChecked; WinRE = [bool]$script:ChkWinRE.IsChecked
-        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = ([bool]$script:ChkBuildIso.IsChecked -and [bool]$script:ChkBuildMedia.IsChecked); Media2023 = [bool]$script:ChkMedia2023.IsChecked
+        Verify = [bool]$script:ChkVerify.IsChecked; BuildMedia = [bool]$script:ChkBuildMedia.IsChecked; BuildIso = ([bool]$script:ChkBuildIso.IsChecked -and [bool]$script:ChkBuildMedia.IsChecked); Media2023 = [bool]$script:ChkMedia2023.IsChecked; ReuseInstall = ([bool]$script:ChkReuseInstall.IsChecked -and [bool]$script:ChkReuseInstall.IsEnabled)
         RemoveApps = $(if ([bool]$script:ChkAppRemoval.IsChecked) { @(Get-TickedApps) } else { @() })
         SccmSiteServer = ([string]$script:SccmSiteServer.Text).Trim(); SccmTargetType = $(if ([bool]$script:SccmTargetGroup.IsChecked) { 'DPGroup' } else { 'DP' }); SccmTarget = ([string]$script:SccmTarget.Text).Trim()
         SccmContentSource = ([string]$script:SccmContentSource.Text).Trim(); SccmSourceServer = $script:SccmSourceServer; SccmPackageType = (Get-SccmPackageTypeTag); SccmImageName = ([string]$script:SccmImageName.Text).Trim()
@@ -4097,8 +4145,11 @@ function Update-BootOption {
     $script:ChkBoot.IsEnabled = [bool]$script:ChkBuildMedia.IsChecked
     # The CA 2023 media takes its boot files from the patched boot.wim, so it also needs Patch boot.wim ticked.
     $script:ChkMedia2023.IsEnabled = $script:ChkBoot.IsEnabled -and [bool]$script:ChkBoot.IsChecked
+    # Step 16 (2026-10-01): a media-only run reuses the last install.wim, so it is offered only without a new install.wim
+    # and with the media folder.
+    $script:ChkReuseInstall.IsEnabled = (-not [bool]$script:ChkInstall.IsChecked) -and [bool]$script:ChkBuildMedia.IsChecked
 }
-foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso, $script:ChkBoot)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
+foreach ($chk in @($script:ChkBuildMedia, $script:ChkBuildIso, $script:ChkBoot, $script:ChkInstall)) { $chk.Add_Checked({ Update-BootOption }); $chk.Add_Unchecked({ Update-BootOption }) }
 # Build an ISO needs Oscdimg from the local ADK (2026-09-29): ticking it checks for the ADK; without one the box is unticked
 # again. A click shows the message; saved settings ticking it are unticked with a WARN in the log only. A found Oscdimg is
 # remembered for the session; "not found" is checked again on the next tick (the ADK may have been installed meanwhile).

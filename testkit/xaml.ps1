@@ -167,7 +167,7 @@ if ($wpf) {
 
     # Patch boot.wim is tied to the media (2026-09-27): the real window's checkbox, the real handler wiring
     Invoke-Expression ([regex]::Match($src, "(?s)function Update-BootOption \{.*?\r?\n\}\r?\n").Value)
-    Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot\)\)[^\r\n]*').Value)
+    Invoke-Expression ([regex]::Match($src, 'foreach \(\$chk in @\(\$script:ChkBuildMedia, \$script:ChkBuildIso, \$script:ChkBoot, \$script:ChkInstall\)\)[^\r\n]*').Value)
     $script:ChkBuildMedia.IsChecked = $false; $script:ChkBuildIso.IsChecked = $false; Update-BootOption
     $kids = $script:ChkBoot.Parent.Children
     Check 'under the media option: the ISO, then Patch boot.wim (ticked by default); both unavailable without media' ([string]$script:ChkBoot.Content -like 'Patch boot.wim (WinPE and Setup)*not used by SCCM*' -and $script:DefaultChecks['Boot'] -and -not $script:ChkBoot.IsEnabled -and -not $script:ChkBuildIso.IsEnabled -and $kids.IndexOf($script:ChkBuildIso) -eq $kids.IndexOf($script:ChkBuildMedia) + 1 -and $kids.IndexOf($script:ChkBoot) -eq $kids.IndexOf($script:ChkBuildMedia) + 2 -and $script:ChkBuildIso.Margin.Left -eq $script:ChkBoot.Margin.Left -and $script:ChkBoot.Margin.Left -gt 0)
@@ -235,6 +235,13 @@ if ($wpf) {
     $pick18 = Show-ShareDialog -Server 'cm01.contoso.com'
     $timer18.Stop()
     Check 'WPF Shares... dialog: starts with the site server, lists its shares, and returns \\server\share' ($script:Sh18.Server -eq 'cm01.contoso.com' -and $script:Sh18.Info -eq '2 shared folder(s) on cm01.contoso.com.' -and $pick18 -eq '\\cm01.contoso.com\Sources') "server '$($script:Sh18.Server)', info '$($script:Sh18.Info)', pick '$pick18'"
+    # Step 16: Use the existing install.wim - only without a new install.wim and with the media folder; ignored when greyed out
+    $script:ChkInstall.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $true; $r1 = $script:ChkReuseInstall.IsEnabled
+    $script:ChkInstall.IsChecked = $false; $r2 = $script:ChkReuseInstall.IsEnabled
+    $script:ChkBuildMedia.IsChecked = $false; $r3 = $script:ChkReuseInstall.IsEnabled
+    $kidsR = $script:ChkReuseInstall.Parent.Children
+    Check 'WPF: "Use the existing install.wim" sits under Create updated install.wim, unticked, available only with install.wim unticked and the media folder ticked' (-not $r1 -and $r2 -and -not $r3 -and $kidsR.IndexOf($script:ChkReuseInstall) -eq $kidsR.IndexOf($script:ChkInstall) + 1 -and -not $script:DefaultChecks['ReuseInstall'] -and $script:SettingOptionNames -contains 'ReuseInstall' -and [string]$script:ChkReuseInstall.Content -like 'Use the existing NEWWIM\install.wim instead (media-only run*')
+    $script:ChkInstall.IsChecked = $true; $script:ChkBuildMedia.IsChecked = $false; $script:ChkReuseInstall.IsChecked = $false
     $auto14 = $win.FindName('ChkAutoDownload')
     Check 'Updates and Features: "Download the latest patches before the run" is there, off by default, and saved per OS (step 14)' ($null -ne $auto14 -and -not $script:DefaultChecks['AutoDownload'] -and $script:SettingOptionNames -contains 'AutoDownload' -and [string]$auto14.Content.Text -like 'Download the latest patches before the run (only what is missing)*use the patches already in the folders.')
 

@@ -914,4 +914,55 @@ $e31 = ''; try { Write-RealLog31 ''; Write-RealLog31 '   '; Write-RealLog31 $nul
 $script:LogFile = $savedLf; $script:UiQueue = $savedUi; $script:LogBox = $savedBox
 Check 'the real Write-Log skips an empty or blank message instead of failing' ($e31 -eq '' -and @(Get-Content $lf31).Count -eq 1 -and [string](Get-Content $lf31) -match '\[INFO\] kept$') $e31
 
+Write-Host "`n=== E32 step 16: media-only run around the existing NEWWIM\install.wim (2026-10-01) ==="
+$script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise'); $script:ImageCount = 1; $script:MsuSsu = @{}
+$nw32 = Join-Path $base 'Win11Enterprise_24H2\NEWWIM'
+# 1. a full run (install.wim only) writes NEWWIM\install.wim and its record
+Reset-Test
+Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; SetupDU = $false; Verify = $false; BuildMedia = $false })
+$rr32 = Read-RunResult -NewWim $nw32
+Set-Content -LiteralPath $rr32.Install 'the image of the full run'
+[void](Save-RunResult -Paths @{ NewWim = $nw32 } -OsName 'Windows 11 Enterprise 24H2' -Build $rr32.Build -Gate 'PASSED' -Install $rr32.Install -Media '' -ChangeLog $rr32.ChangeLog)
+$wimTime32 = (Get-Item $rr32.Install).LastWriteTimeUtc
+Check 'the run record now stores install.wim''s size and date (for a later media-only run)' ((Read-RunResult -NewWim $nw32).InstallSize -eq [string](Get-Item $rr32.Install).Length -and (Read-RunResult -NewWim $nw32).InstallTicks -eq [string]$wimTime32.Ticks)
+New-File (Join-Path $nw32 'UpdatedMedia_old.iso') 'old iso'   # older output that is archived as usual
+# 2. the media-only run
+$m32 = @{ Install = $false; ReuseInstall = $true; BuildMedia = $true; Boot = $true; NetFx3 = $false; SetupDU = $false; Verify = $false }
+$logs32 = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs32.Add("[$Level] $Message") }
+Reset-Test; $script:ChangeEvents.Clear()
+$o32 = Opts 'Windows 11 Enterprise 24H2' @() $m32; $o32 | Add-Member -NotePropertyName ReuseInstall -NotePropertyValue $true -Force
+Invoke-MediaRefresh $o32
+Set-Item function:Write-Log $wl
+$res32 = $script:LastResult; $rrAfter = Read-RunResult -NewWim $nw32
+Check 'media-only: install.wim is not exported, mounted or serviced; boot.wim is' (@($script:Calls -match '^Mount install\.(working\.)?wim').Count -eq 0 -and @($script:Calls -match '^Export -> install\.wim').Count -eq 0 -and @($script:Calls -match '^Mount boot\.working\.wim').Count -ge 1) ($script:Calls -join ' | ')
+Check 'media-only: the media is built around the same install.wim, which stays in NEWWIM unchanged' ((Get-Content -Raw $rr32.Install).Trim() -eq 'the image of the full run' -and (Get-Item $rr32.Install).LastWriteTimeUtc -eq $wimTime32 -and (Test-Path (Join-Path $nw32 'Media\sources\install.wim')) -and $res32.Install -eq $rr32.Install)
+$arch32 = @(Get-ChildItem (Join-Path $nw32 'Archive') -Directory | Sort-Object Name -Descending)[0]
+Check 'media-only: other old output is archived as usual, but not install.wim or its record' ((Test-Path (Join-Path $arch32.FullName 'UpdatedMedia_old.iso')) -and -not (Test-Path (Join-Path $arch32.FullName 'install.wim')) -and -not (Test-Path (Join-Path $arch32.FullName 'RunResult.json')))
+Check 'media-only: the run record keeps install.wim, build and gate, and adds the new media folder' ($rrAfter.Install -eq $rr32.Install -and $rrAfter.Gate -eq 'PASSED' -and $rrAfter.Build -eq $rr32.Build -and $rrAfter.Media -eq (Join-Path $nw32 'Media'))
+Check 'media-only: the log and the change log name the reused install.wim' ([bool]($logs32 -match "^\[INFO\] Media-only run: using .*install\.wim from the run finished .* \(build .*, validation gate PASSED\)\.") -and @($script:ChangeEvents | Where-Object { $_.Detail -like 'reused from the run finished*not serviced again' }).Count -eq 1)
+# 3. refusals, all before any image is mounted for servicing
+function Test-Refused32($o, $like) { Reset-Test; $t = $false; $m = ''; try { [void](Invoke-MediaRefresh $o) } catch { $t = $true; $m = $_.Exception.Message }; return [pscustomobject]@{ Ok = ($t -and $m -like $like -and @($script:Calls -match '^Mount (install|boot)').Count -eq 0); Msg = $m } }
+[void](Save-RunResult -Paths @{ NewWim = $nw32 } -OsName 'W' -Build $rr32.Build -Gate 'FAILED' -Install $rr32.Install -Media '' -ChangeLog '')
+$x = Test-Refused32 $o32 '*FAILED its validation gate, so no media is built around it*'
+Check 'refused: the last install.wim FAILED its validation gate' $x.Ok $x.Msg
+[void](Save-RunResult -Paths @{ NewWim = $nw32 } -OsName 'W' -Build $rr32.Build -Gate 'PASSED' -Install $rr32.Install -Media '' -ChangeLog '')
+Add-Content -LiteralPath $rr32.Install 'changed afterwards'
+$x = Test-Refused32 $o32 '*has changed since the run finished*'
+Check 'refused: install.wim changed since its run (size or date)' $x.Ok $x.Msg
+$p32 = Opts 'Windows 11 Enterprise 24H2' @() ($m32 + @{ Preflight = $true }); $p32 | Add-Member -NotePropertyName ReuseInstall -NotePropertyValue $true -Force
+$x = Test-Refused32 $p32 '*has changed since the run finished*'
+Check 'a preflight checks the same' $x.Ok $x.Msg
+[void](Save-RunResult -Paths @{ NewWim = $nw32 } -OsName 'W' -Build '10.0.26100.9457' -Gate 'PASSED' -Install $rr32.Install -Media '' -ChangeLog '')
+$x = Test-Refused32 $o32 '*it is build 10.0.26100.9457, but the OS ISO''s image is build 10.0.17763.9121 - another Windows release*'
+Check 'refused: install.wim is from another Windows build than the OS ISO' $x.Ok $x.Msg
+Remove-Item (Join-Path $nw32 'RunResult.json') -Force
+$x = Test-Refused32 $o32 '*there is no finished run with an install.wim*'
+Check 'refused: no finished run to reuse' $x.Ok $x.Msg
+# ignored when a new install.wim is made anyway
+$logs32.Clear(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs32.Add("[$Level] $Message") }
+Reset-Test; $i32 = Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false; BuildMedia = $true }; $i32 | Add-Member -NotePropertyName ReuseInstall -NotePropertyValue $true -Force
+Invoke-MediaRefresh $i32
+Set-Item function:Write-Log $wl
+Check 'with Create updated install.wim ticked the option is ignored, with a WARN' ([bool]($logs32 -match '^\[WARN\] Use the existing install\.wim is ticked, but so is Create updated install\.wim'))
+
 Write-Host "`nRESULT: $pass passed, $fail failed"
