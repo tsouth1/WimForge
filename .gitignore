@@ -1,6 +1,6 @@
 # Run artifacts and logs -- never belong in source control
 *.log
-*.zip
+# *.zip
 *.7z
 MediaRefresh_2*.txt
 DISM_2*.txt
@@ -8,7 +8,7 @@ DISM_2*.txt
 # The tool's own working folders, if this repo root is ever pointed at a
 # real MediaRefresh working directory instead of just holding the scripts
 ISO/
-LOGS/
+# LOGS/
 MOUNT/
 OLDWIM/
 NEWWIM/
