@@ -3337,6 +3337,12 @@ function Invoke-MediaRefresh {
             }
         }
         if ($Options.PreflightOnly) {
+            # The run compares the DISM in use with the image only after its export; a preflight does it from the ISO's
+            # image (2026-10-06), so a DISM older than the image shows up before a run. Never stops the preflight.
+            try {
+                $pfIndex = if ($selected) { $selected.ImageIndex } else { @($inventory)[0].ImageIndex }
+                Test-DismHostVersion -ImageVersion ([string](Get-WindowsImage -ImagePath $sourceWim -Index $pfIndex).Version)
+            } catch { Write-Log "Could not read the image version to compare with DISM: $($_.Exception.Message)" 'WARN' }
             Set-Progress 100 'Preflight passed'
             Set-Phase 'Done'
             Write-Log 'PREFLIGHT OK: ISO roles, patch folders, language packs, edition selection and free space all check out. No image was changed.'

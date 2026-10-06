@@ -8,7 +8,7 @@ Where v2.4 stands:
 
 - **Media / ISO testing scope (decision, 2026-09-28):** real testing of the refreshed media folder, the ISO, Patch boot.wim and the CA 2023 media is **paused for every OS except Windows 11 and Windows Server 2022 or later**. The Windows 10 LTSC profiles (2019, 2021 KMS, 2021 IoT) are tested for install.wim (and WinRE) only: untick the media folder for them. The code for Win10 media stays as it is (including the 1809 boot.wim fallback of 2026-09-28, which stays mock-tested only), but no real run is needed to close a step.
 
-- **Mock test kit:** 7 suites, 666 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-10-06).
+- **Mock test kit:** 7 suites, 668 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-10-06).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
 - **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). **LTSC 2021 KMS with four languages (de-de, ja-jp, zh-cn, zh-tw) on 2026-10-05 12:42-14:54, gate PASSED** (build 10.0.19044.7727, WinRE on; see TODO_DONE.md 2B). IoT LTSC 2021 and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
@@ -110,7 +110,7 @@ The script only logs a warning when the host DISM is older than the image. Servi
 
 **Second data point (2026-09-25):** the same host DISM serviced Win11 24H2 again, this time with the LCU checkpoint in the folder, Safe OS DU into WinRE and the Setup DU into the media - no failure, gate PASSED. Still no run with languages.
 
-**Not yet confirmed (2026-10-05 KMS run):** the server still ran a copy from before the step-4 commit - the log has the old `Host DISM 10.0.20348.2849; image ...` line and no `DISM: ...` line, so Windows' own DISM was used. **Action for the operator:** copy the current `MediaRefresh_v2.4.ps1` from `main` to the server (`J:\WimForge`) before the next run; the run log should then start with `DISM: using the Windows ADK's DISM ...`.
+**Not yet confirmed (2026-10-05 KMS run):** the server still ran a copy from before the step-4 commit - the log has the old `Host DISM 10.0.20348.2849; image ...` line and no `DISM: ...` line, so Windows' own DISM was used. **Action for the operator:** copy the current `MediaRefresh_v2.4.ps1` from `main` to the server (`J:\WimForge`) before the next run; the run log should then start with `DISM: using the Windows ADK's DISM ...`. Since 2026-10-06 a **preflight** also compares the DISM in use with the OS ISO's image (`ADK DISM <version> (...); image <version>`, WARN when older), so a preflight on the server is enough to confirm the ADK DISM is picked up.
 
 **Third data point (2026-09-25):** the same host DISM serviced LTSC 2019 (17763) with ten languages and their FODs - no failure. That is an older image than the host, so it says nothing about the 26100 case; Win11 with languages is still the missing test.
 

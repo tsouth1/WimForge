@@ -893,6 +893,21 @@ $adk30 = @($logs30 -match "^\[INFO\] DISM: using the Windows ADK's DISM .*from C
 $start30 = [array]::IndexOf(@($logs30), @($logs30 -match '^\[INFO\] Starting WimForge v')[0])
 Set-Item function:Write-Log $wl; Set-Item function:Import-DismModuleFrom $idm30; $env:PATH = $path30; $script:MockAdkDism = $null; $script:DismSource = 'Windows'
 Check 'a preflight logs Windows'' own DISM without the ADK, and the ADK''s DISM (right after the start line) with it' ($noAdk30 -eq 1 -and $adk30 -eq 1 -and $logs30[$start30 + 1] -like "*using the Windows ADK's DISM*") "no ADK: $noAdk30, ADK: $adk30"
+# 2026-10-06: a preflight also compares the DISM in use with the ISO's image (a run did it only after its export).
+$logs30b = [System.Collections.Generic.List[string]]::new(); $wl = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs30b.Add("[$Level] $Message") }
+Reset-Test; Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false })
+$ver30 = @($logs30b -match '^\[INFO\] Windows DISM [\d.]+ \(.*\); image 10\.0\.17763\.9121$').Count
+$order30 = ([array]::IndexOf(@($logs30b), @($logs30b -match 'Windows DISM [\d.]+ \(')[0]) -lt [array]::IndexOf(@($logs30b), @($logs30b -match 'PREFLIGHT OK')[0]))
+$gwi30 = ${function:Get-WindowsImage}
+function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
+    if ($Index -and -not $Mounted) { return [pscustomobject]@{ ImageIndex = $Index; ImageName = "Img$Index"; Version = '10.0.99999.1' } }
+    & $gwi30 @PSBoundParameters }
+$logs30b.Clear(); Reset-Test; Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ Preflight = $true; NetFx3 = $false; SetupDU = $false })
+$warn30 = @($logs30b -match '^\[WARN\] Windows DISM build \d+ is older than the image build 99999\. Servicing may fail; install the Windows ADK').Count
+$ok30 = @($logs30b -match 'PREFLIGHT OK').Count
+Set-Item function:Get-WindowsImage $gwi30; Set-Item function:Write-Log $wl
+Check 'a preflight compares the DISM in use with the ISO''s image version, before PREFLIGHT OK' ($ver30 -eq 1 -and $order30) ($logs30b -join ' | ')
+Check 'a preflight WARNs when the DISM in use is older than the image, and still passes' ($warn30 -eq 1 -and $ok30 -eq 1) "warn: $warn30, ok: $ok30"
 
 Write-Host "`n=== E31 the ISO build survives oscdimg's blank lines and stderr progress (Windows 11 26H2 run, 2026-10-01) ==="
 # The first real ISO build stopped at 'Cannot bind argument to parameter Message because it is an empty string':

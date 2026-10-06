@@ -400,6 +400,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 <a id="history"></a>
 ## History
 
+- 2026-10-06: a preflight now compares the DISM in use with the OS ISO's image version (`Test-DismHostVersion`, WARN when the DISM is older; never stops the preflight) - before, only a real run did, after its export. INSTRUCTIONS.md updated. Test kit 668 checks (E30, 5.1 and 7).
 - 2026-10-06: the operator's first LTSC 2021 KMS run on v2.4 (2026-10-05, de-de / ja-jp / zh-cn / zh-tw, WinRE on): gate PASSED, 10.0.19044.7727, 0 verify issues (2B run 2). dism.exe progress-bar lines are no longer written to the run log. The server's script predated the ADK DISM change (step 4 still to confirm). Test kit 666 checks.
 
 - Recommendation: refactor MediaRefresh_v2 rather than start over or fork WimWizard (`MediaRefresh_Review_and_Roadmap.md`).
