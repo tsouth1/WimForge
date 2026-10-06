@@ -14,14 +14,13 @@ Where v2.4 stands:
 
 ## Index
 
-Step numbers are kept from earlier versions of this list because the script, the logs and older notes refer to them. **Done:** steps 1, 3, 5 (built into v2.4), 11 (app removal, confirmed 2026-09-29) and 14 (download only what is missing, confirmed 2026-09-29) - see `TODO_DONE.md`.
+Step numbers are kept from earlier versions of this list because the script, the logs and older notes refer to them. **Done:** steps 1, 3, 5 (built into v2.4), 2 (validation, closed 2026-10-06; its open runs moved to step 6), 11 (app removal, confirmed 2026-09-29) and 14 (download only what is missing, confirmed 2026-09-29) - see `TODO_DONE.md`.
 
 | # | Step | Owner | Status |
 |---|------|-------|--------|
-| [2](#s2) | **Validate v2.4:** real catalog, real servicing runs, feature checks | Claude (catalog) + Operator (servicing) | **Now** (2A catalog done; 2B-2D open) |
 | [4](#s4) | Host DISM vs image build (ADK DISM decision) | Claude + operator | **Confirmed 2026-10-06:** a full Win11 24H2 run with es-mx on the ADK's DISM 10.0.26100.9457, gate PASSED |
-| [6](#s6) | Upgrade-package media readiness and validation round 2 | Claude + operator | After 2 |
-| [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | Built (mock-tested); needs a first real import against the site |
+| [6](#s6) | Upgrade-package media readiness and validation round 2 (incl. the runs carried over from step 2) | Claude + operator | **Now** |
+| [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | OS image import confirmed on the real site 2026-10-06; upgrade package and console checks open |
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
 | [9](#s9) | Housekeeping and final documentation | Claude | Ongoing |
 | [10](#s10) | Operator UX: INSTRUCTIONS.md + Instructions tab, saved settings, utility menu, Languages tab from Languages.json, colour schemes | Claude (+ operator for the inventory script) | 10c, 10e, 10f and 10d Cleanup Mountpoints built (confirm in the real GUI); 10a INSTRUCTIONS.md written and 10b Instructions tab built; 10d Image Inventory waits for the operator's script |
@@ -30,75 +29,16 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [15](#s15) | Run configs and the command line: `-Config <file> [-Preflight]` runs without the window | Claude | Built (mock-tested + command line smoke-tested); confirm with a real elevated run |
 | [17](#s17) | Adding or changing an OS without a new WimForge: release placeholder, stable folder key, Tools > New OS from existing / Rename OS / Check OS profile / Edit OS profile | Claude | Built (mock-tested, dialog tested on real WPF); confirm with a real 26H2 profile |
 | [16](#s16) | Media-only run: build the media / ISO around the existing NEWWIM\install.wim, without servicing install.wim again | Claude | Built 2026-10-01 (mock-tested); confirm with a real media-only run (Win11 / Server 2022) |
-| [18](#s18) | SCCM import from a WimForge server that is not the content source server: browse / connect to a UNC network path, copy over the network | Claude | Built (mock-tested; Shares dialog tested on real WPF; robocopy tested for real); confirm with a real import from the new server |
+| [18](#s18) | SCCM import from a WimForge server that is not the content source server: browse / connect to a UNC network path, copy over the network | Claude | Network copy, import and distribution confirmed 2026-10-06; picking the folder by browsing still to confirm |
 
-Order of work: validate v2.4 first (2), settle the DISM question (4), then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
+Order of work: step 2 is closed and step 4 confirmed (2026-10-06); finish the real runs in 6, then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
 ---
-
-<a id="s2"></a>
-## 2. Validate v2.4: real catalog, real servicing runs, feature checks
-
-**Owner:** Claude for 2A, the operator for 2B (Claude reads the logs), both for 2C. **Done when:** 2A, 2B and 2C are all ticked off, and any fixes found along the way are made in v2.4 with a test added for each.
-
-### 2A. Real catalog - done 2026-09-24 (details in TODO_DONE.md)
-
-**Still open**
-
-- [ ] **1809 Setup DU:** the newest one is from 2025-11. Setup DUs for 1809 are released less often than Safe OS DUs, so this is expected, but worth a glance at the catalog before relying on it.
-
-### 2B. Real servicing runs (the operator, on the build machine)
-
-**Inputs still needed**
-
-| OS folder | Needed | Why |
-|---|---|---|
-| Win11 24H2, Server 2022 | Fresh Microsoft ISOs each cycle | English only, no LP/FOD ISOs needed. |
-
-**Questions to answer**
-
-- Build host: OS version and ADK version (drives step 4).
-- Settled already: SCCM content sources are on `<SCCM-SOURCE-SERVER>` (this server); the LTSC 2019 SSU is KB5005112 (x64); the LTSC 2021 IoT and KMS SSU is `ssu-19041.3562-x64.msu`; the IoT 2021 edition selection works (v2.2 run, 2026-09-21).
-
-**Before any run**
-
-- `Unblock-File` the script and run it from elevated Windows PowerShell 5.1.
-- **Antivirus exclusion: check it is really in place.** The v2.2 IoT 2021 run took about 3h53m. A few steps took far longer than the rest (LCU pass 1 ~46 min, LCU final ~38 min, one .NET CU ~29 min, cleanup ~24 min, against ~5-7 min per language pack). Its DISM log has 30,000+ benign `Error CSI ... Matching binary ... missing for component ... dualModeDriver` entries (Hyper-V driver components). Both point to real-time scanning fighting DISM. Confirm the exclusion covers the MediaRefresh folder including each OS's `MOUNT` subfolder, then compare the timings on the next run. **Update 2026-09-25:** the LTSC 2019 ten-language run spent 1 h 40 min in component cleanup alone - check the exclusion covers `<repository root>\<OS>\MOUNT` before the Server 2022 runs (four indexes).
-- Tens of GB free. v2.4 checks this itself and archives the previous `NEWWIM` output, so nothing needs renaming by hand.
-- Fill `PATCHES` with "Download patches..." (after 2A) or by hand; the SSU always goes into `PATCHES\SSU` by hand.
-
-**Runs, in order** (full test plan in `MediaRefresh_Review_and_Roadmap.md`, section 0)
-
-1. [ ] Preflight only, on every OS folder. Check the ISO role lines, patch counts, the language pack check and the `Detected indexes` / `Selected client image index` lines. Done so far: Win11 24H2 (2026-09-25), LTSC 2019 (2026-09-25, all 10 language packs located), LTSC 2021 KMS and IoT (2026-09-27: all ISO roles identified, FOD recognised). Server 2022 still to do.
-   - **Index selection, confirmed 2026-09-27:** LTSC 2019 has one index; KMS [1] Enterprise LTSC / [2] Enterprise N LTSC - build **index 1**; IoT [1] Enterprise LTSC / [2] IoT Enterprise LTSC - build **index 2, always**; Win11 24H2 has 10 indexes - build **index 3** (Enterprise) only; Server 2022 has 4 indexes - **all** serviced. The built-in IoT profile had `preferredIndex = 1` (used only when no image name matches, but then it would have fallen back to the non-IoT edition) - **fixed to 2**. A run also WARNs now when the edition name matches an index other than the profile's `preferredIndex`. 4 new checks on the real layouts (test kit 339).
-   - **Action for the operator:** the build machine's `Profiles\Win10_IoT_Enterprise_LTSC_2021.json` still has `"preferredIndex": 1` - set it to 2, or delete the file and press Reload profiles to regenerate it.
-3. [ ] LTSC 2021 KMS with all ten languages.
-4. [ ] Server 2022 (English only, four indexes). Confirm WinRE is serviced once and the same winre.wim is reused for every index.
-6. [ ] IoT LTSC 2021 (repeat on v2.4).
-
-- On a real console, confirm that clicking in the console no longer pauses the run (Quick Edit fix) and that the window stays responsive during mount and patch.
-- After each run, send `MediaRefresh_*.log`, `DISM_*.log` and the `ChangeLog_*` files from `LOGS`. The `VERIFY` lines are the evidence that the LCU and languages are really in the image.
-
-**Done when:** each OS produces an install.wim whose VERIFY lines show the expected RollupFix, languages and fonts, the validation gate says PASSED, and there is no crash or hang.
-
-### 2C. v2.4 feature checks (tick off during the 2B runs)
-
-These are the "Try it" checks from steps 1, 3 and 5. They were only ever confirmed in mock tests.
-
-- [ ] A `Profiles` folder with five JSON files appears beside the script on first start; the OS list, the support-date line under it and "Reload profiles" work. An edited file applies to the next run, and a broken file is reported and skipped.
-- [ ] The preflight log shows the `Profile:`, `Support ends`, `... order:` and `Free space on ...` lines, and packages are applied in the logged order.
-- [ ] The free-space estimate is neither too strict nor too loose (otherwise tune `minFreeGB`, or set `spaceCheck` to `warn`).
-- [ ] The header shows the OS and a phase that matches the log throughout a run ("Servicing install.wim (index N of M)" on Server), then Done, Failed or Cancelled.
-- [ ] Section B (derived dates, hotfix list, appx inventory) is worth reading on real data, or needs trimming. **Partly done 2026-09-25:** the staged-appx list included `Deleted` and `Merged`, which are Windows' housekeeping folders under WindowsApps, not packages; only folders named like packages (`<Name>_<Version>_...`) are listed now (`Test-AppxPackageFolder`). Still to judge: whether the rest of Section B is worth reading.
-
-### 2D. Profile data (the operator)
-
-- [ ] (Still open 2026-10-06: the Win11 run logs `Support end date not set in the profile.`) Fill in the Win11 24H2 and Server 2022 end-of-support dates from the Microsoft lifecycle pages (the `endOfSupport` key in the JSON files; the built-in profiles in the script can be updated at the same time).
 
 <a id="s4"></a>
 ## 4. Host DISM vs image build (ADK DISM decision) - built 2026-10-01; confirmed on a real run 2026-10-06
 
-**Owner:** Claude + operator. **Depends on:** 2 (the build-host answer and the Win11 24H2 run).
+**Owner:** Claude + operator. **Depends on:** 2 (closed 2026-10-06). Build host answered: Server 2022 with the ADK's DISM 10.0.26100.9457.
 
 **Built 2026-10-01** (details in TODO_DONE.md): runs use the Windows ADK's DISM (module and dism.exe) when the ADK is installed, else Windows' own; the log says which.
 
@@ -118,12 +58,50 @@ The script only logs a warning when the host DISM is older than the image. Servi
 <a id="s6"></a>
 ## 6. Upgrade-package media readiness and validation round 2
 
-**Owner:** Claude + operator. **Depends on:** 2 (a validated v2.4, including the Setup DU download).
+**Owner:** Claude + operator. **Depends on:** 2 (closed 2026-10-06; its open runs and checks are below).
 
 - **Built 2026-09-27** (details in TODO_DONE.md): setup.exe and the boot manager files on the media come from the patched boot.wim; boot.wim is patched only for the media. Partly confirmed on the 2026-09-29 Win11 run (files replaced on the media).
 - [ ] **To confirm:** boot the ISO or a USB stick made from `NEWWIM\Media` on a test machine (UEFI with Secure Boot) and start Setup. (The 2026-10-06 Win11 run built `NEWWIM\Media` with the patched boot.wim again; no ISO was ticked.)
 - The engine follows Microsoft's order (LCU, cleanup, then NetFx3 and .NET CU). If a real run shows the .NET CU or the LCU missing after deployment, test the alternative order and let the validation gate (step 3) decide.
 - The operator runs the second round: an OS with the downloader-fed patch set, media folder built, change log and gate checked.
+
+### Carried over from step 2 (closed 2026-10-06)
+
+Step 2 was closed on 2026-10-06: the catalog layer (2A) and five real servicing runs with gate PASSED - Win11 24H2 on 2026-09-23, 2026-09-25, 2026-09-29 and 2026-10-06 (with es-mx, on the ADK's DISM), LTSC 2019 with ten languages on 2026-09-25 and LTSC 2021 KMS with four languages on 2026-10-05. The record is in `TODO_DONE.md`, step 2. The items below were still open and belong to this round.
+
+**Before any run**
+
+- `Unblock-File` the script and run it from elevated Windows PowerShell 5.1, with the current `MediaRefresh_v2.4.ps1` from `main` copied to the server.
+- **Antivirus exclusion: check it is really in place.** The v2.2 IoT 2021 run took about 3h53m. A few steps took far longer than the rest (LCU pass 1 ~46 min, LCU final ~38 min, one .NET CU ~29 min, cleanup ~24 min, against ~5-7 min per language pack). Its DISM log has 30,000+ benign `Error CSI ... Matching binary ... missing for component ... dualModeDriver` entries (Hyper-V driver components). Both point to real-time scanning fighting DISM. Confirm the exclusion covers the MediaRefresh folder including each OS's `MOUNT` subfolder, then compare the timings on the next run. **Update 2026-09-25:** the LTSC 2019 ten-language run spent 1 h 40 min in component cleanup alone - check the exclusion covers `<repository root>\<OS>\MOUNT` before the Server 2022 runs (four indexes).
+- Tens of GB free. v2.4 checks this itself and archives the previous `NEWWIM` output, so nothing needs renaming by hand.
+- Fill `PATCHES` with "Download patches..." (after 2A) or by hand; the SSU always goes into `PATCHES\SSU` by hand.
+
+**Runs, in order** (full test plan in `MediaRefresh_Review_and_Roadmap.md`, section 0)
+
+1. [ ] Preflight on Server 2022 (Win11 24H2, LTSC 2019, LTSC 2021 KMS and IoT passed preflight on 2026-09-25 / 27). Check the ISO role lines, patch counts and the `Detected indexes` line (all four indexes serviced).
+   - **Index selection, confirmed 2026-09-27:** LTSC 2019 has one index; KMS [1] Enterprise LTSC / [2] Enterprise N LTSC - build **index 1**; IoT [1] Enterprise LTSC / [2] IoT Enterprise LTSC - build **index 2, always**; Win11 24H2 has 10 indexes - build **index 3** (Enterprise) only; Server 2022 has 4 indexes - **all** serviced. The built-in IoT profile had `preferredIndex = 1` (used only when no image name matches, but then it would have fallen back to the non-IoT edition) - **fixed to 2**. A run also WARNs now when the edition name matches an index other than the profile's `preferredIndex`. 4 new checks on the real layouts (test kit 339).
+   - **Action for the operator:** the build machine's `Profiles\Win10_IoT_Enterprise_LTSC_2021.json` still has `"preferredIndex": 1` - set it to 2, or delete the file and press Reload profiles to regenerate it.
+2. [ ] LTSC 2021 KMS with all ten languages.
+3. [ ] Server 2022 (English only, four indexes). Confirm WinRE is serviced once and the same winre.wim is reused for every index.
+4. [ ] IoT LTSC 2021 (repeat on v2.4).
+
+- On a real console, confirm that clicking in the console no longer pauses the run (Quick Edit fix) and that the window stays responsive during mount and patch.
+- After each run, put `MediaRefresh_*.log`, `DISM_*.log` and the `ChangeLog_*` files from `LOGS` into `C:\MEDIAPATCHING\LOGS\` (never into the repository). The `VERIFY` lines are the evidence that the LCU and languages are really in the image.
+
+**Done when:** each OS produces an install.wim whose VERIFY lines show the expected RollupFix, languages and fonts, the validation gate says PASSED, and there is no crash or hang.
+
+**Feature checks still open (tick off during the runs)**
+
+- [ ] A `Profiles` folder with five JSON files appears beside the script on first start; the OS list, the support-date line under it and "Reload profiles" work. An edited file applies to the next run, and a broken file is reported and skipped.
+- [ ] The preflight log shows the `Profile:`, `Support ends`, `... order:` and `Free space on ...` lines, and packages are applied in the logged order.
+- [ ] The free-space estimate is neither too strict nor too loose (otherwise tune `minFreeGB`, or set `spaceCheck` to `warn`).
+- [ ] The header shows the OS and a phase that matches the log throughout a run ("Servicing install.wim (index N of M)" on Server), then Done, Failed or Cancelled.
+- [ ] Section B (derived dates, hotfix list, appx inventory) is worth reading on real data, or needs trimming. **Partly done 2026-09-25:** the staged-appx list included `Deleted` and `Merged`, which are Windows' housekeeping folders under WindowsApps, not packages; only folders named like packages (`<Name>_<Version>_...`) are listed now (`Test-AppxPackageFolder`). Still to judge: whether the rest of Section B is worth reading.
+
+**Profile data and catalog**
+
+- [ ] (Still open 2026-10-06: the Win11 run logs `Support end date not set in the profile.`) Fill in the Win11 24H2 and Server 2022 end-of-support dates from the Microsoft lifecycle pages (the `endOfSupport` key in the JSON files; the built-in profiles in the script can be updated at the same time).
+- [ ] **1809 Setup DU:** the newest one is from 2025-11. Setup DUs for 1809 are released less often than Safe OS DUs, so this is expected, but worth a glance at the catalog before relying on it.
 
 <a id="s7"></a>
 ## 7. SCCM import: new tab, local copy to content source, import, distribute
@@ -155,7 +133,7 @@ The script only logs a warning when the host DISM is older than the image. Servi
 
 - Keep `MediaRefresh_Review_and_Roadmap.md` and this file in step with the script; update the roadmap as steps close.
 - Check WimWizard's licence before reusing any of its code (steps 5 and 7).
-- Version numbering: v2.4 is the build under test; once it passes step 2 it becomes the first tested release with a clean version number (and ideally a file name without the version, with older builds left in `archive\`). Default repository root settled 2026-09-28: the script's own folder until one is saved (no fixed drive letter).
+- Version numbering: v2.4 is the build under test; once the step 6 runs pass it becomes the first tested release with a clean version number (and ideally a file name without the version, with older builds left in `archive\`). Default repository root settled 2026-09-28: the script's own folder until one is saved (no fixed drive letter).
 - Minor code items from the review: rename the `$matches` variable; make OS display names match the project list.
 - Operator guide: superseded by step 10's `INSTRUCTIONS.md` (folders, ISO roles, preflight first, where logs and change logs land, plus a full GUI walkthrough) rather than a separate write-up here.
 

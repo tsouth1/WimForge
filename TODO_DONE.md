@@ -7,7 +7,9 @@ Contents: [2](#s2) · [4](#s4) · [6](#s6) · [7](#s7) · [8](#s8) · [10](#s10)
 ---
 
 <a id="s2"></a>
-## 2. Validate v2.4 - completed parts
+## 2. Validate v2.4 - closed 2026-10-06
+
+**Closed 2026-10-06 (the operator).** Proven on real hardware: the catalog layer (2A, all five profiles) and five servicing runs with gate PASSED - Win11 24H2 on 2026-09-23, 2026-09-25, 2026-09-29 and 2026-10-06 (with es-mx, the first on the ADK's DISM), LTSC 2019 with ten languages on 2026-09-25, LTSC 2021 KMS with four languages on 2026-10-05. Between them they exercised the LCU + checkpoint handling, WinRE servicing, Safe OS / Setup DU, languages and FODs, .NET CU skip-when-not-applicable, app removal, patched boot.wim and media, archiving, the change log and the SCCM import. Still open at closing and moved to `TODO.md` step 6: LTSC 2021 KMS with ten languages, Server 2022 (preflight and run), IoT LTSC 2021, five feature checks (2C), the Win11 24H2 / Server 2022 end-of-support dates and the 1809 Setup DU check.
 
 ### 2A. Real catalog (Claude, on the build PC) - done 2026-09-24
 
@@ -402,6 +404,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 <a id="history"></a>
 ## History
 
+- 2026-10-06: step 2 (validate v2.4) closed: the catalog layer and five real runs with gate PASSED; the remaining runs (LTSC 2021 KMS ten languages, Server 2022, IoT LTSC 2021), feature checks, end-of-support dates and the 1809 Setup DU check moved to step 6. Index rows for steps 7 and 18 updated after the 2026-10-06 import.
 - 2026-10-06: the operator's Win11 24H2 run with es-mx (06:43-08:27, 1 h 44 min against 2 h 2 min on 2026-09-29, gate PASSED, 0 verify issues) - first full run on the ADK's DISM 10.0.26100.9457 and first Win11 run with a language: step 4 confirmed. App removal, patched boot.wim and media worked again; the SCCM import copied install.wim over the network to the content source share, imported it and started the distribution (steps 7 and 18 confirmed for an OS image). Uploaded logs removed from the repository; `*.zip` and `LOGS/` ignored again.
 - 2026-10-06: the operator's Win11 24H2 preflight on the server with the current script: the ADK's DISM 10.0.26100.9457 is loaded (module and dism.exe) and the new preflight version check shows it is not older than the image (26100.9168) - step 4's log line and version check confirmed; the servicing itself is still to confirm. es-mx language pack located on the combined LangPackAll/LoF ISO; PATCHES up to date; PREFLIGHT OK.
 - 2026-10-06: a preflight now compares the DISM in use with the OS ISO's image version (`Test-DismHostVersion`, WARN when the DISM is older; never stops the preflight) - before, only a real run did, after its export. INSTRUCTIONS.md updated. Test kit 668 checks (E30, 5.1 and 7).

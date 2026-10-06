@@ -76,10 +76,11 @@ module), with a dry-run preview before anything is downloaded.
 
 ## Status
 
-v2.4 is being validated (see `TODO.md` step 2). It passes the mock test kit
+v2.4 is being validated (step 2 closed 2026-10-06; the remaining real runs are in
+`TODO.md` step 6). It passes the mock test kit
 (668 checks, on Windows PowerShell 5.1 and 7) and every built-in catalog
 rule has been checked against the live Microsoft Update Catalog. Windows 11 24H2
-(three times, English only), Windows 11 26H2 (install.wim), LTSC 2019 (ten
+(three times English only, once with es-mx on the ADK's DISM), Windows 11 26H2 (install.wim), LTSC 2019 (ten
 languages) and LTSC 2021 KMS (four languages) have been serviced on real
 images, with the install.wim validation gate passing each time; IoT LTSC 2021
 and Server 2022 are still to be run. Treat it as a draft and test on
