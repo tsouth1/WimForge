@@ -1071,12 +1071,17 @@ function Remove-DirectoryContents {
 }
 
 # ---------- DISM helpers ----------
+function Test-DismProgressLine {
+    # dism.exe's progress bar ("[=====    10.0%     ]"): one output line per update, ~170 per component cleanup - not logged.
+    param([string]$Line)
+    return ($Line -match '^\s*\[[=\s]*\d{1,3}(\.\d+)?%[=\s]*\]\s*$')
+}
 function Invoke-DismExe {
     param([Parameter(Mandatory)][string[]]$Arguments = @(), [Parameter(Mandatory)][string]$Description, [switch]$AllowPending)
     Write-Log $Description
     $all = @($Arguments)
     if ($script:DismLogArgs.ContainsKey('LogPath')) { $all += ('/LogPath:' + $script:DismLogArgs['LogPath']) }
-    & dism.exe @all | ForEach-Object { if ($_ -and $_.Trim()) { Write-Log $_ } }
+    & dism.exe @all | ForEach-Object { if ($_ -and $_.Trim() -and -not (Test-DismProgressLine $_)) { Write-Log $_ } }
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         if ($AllowPending -and (($code -eq -2146498554) -or ($code -eq 0x800F0806))) {

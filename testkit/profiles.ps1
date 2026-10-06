@@ -604,6 +604,10 @@ Check 'the real module import fails on a folder without the DISM module (so a br
 $inv23 = [regex]::Match($src, '(?s)function Invoke-MediaRefresh \{.*?\r?\n\}\r?\n').Value
 Check 'every engine run except the SCCM ones loads the ADK''s DISM before any DISM command, and the runs log it' ($inv23 -match "if \(@\('SccmConnect', 'SccmImport'\) -notcontains .*\) \{ Use-AdkDism -Quiet \}" -and $inv23.IndexOf('Use-AdkDism -Quiet') -lt $inv23.IndexOf("-eq 'Cleanup'") -and ([regex]::Matches($inv23, 'Write-DismNote')).Count -eq 2)
 Check 'Find-Oscdimg and Find-AdkDism look in the same ADK places (Get-AdkKitsRoots)' ($src -match '(?s)function Find-Oscdimg \{.*?Get-AdkKitsRoots' -and $src -match '(?s)function Find-AdkDism \{.*?Get-AdkKitsRoots')
+$prog23 = @('[=====                      10.0%                          ] ', '[===========================56.9%=                         ] ', '[==========================100.0%==========================] ')
+$keep23 = @('Deployment Image Servicing and Management tool', 'Image Version: 10.0.19044.7727', 'The operation completed successfully.', 'Error: 0x800f0806 [see 10.0%]')
+Check 'dism.exe progress-bar lines are recognised, its other output is not (2026-10-05 KMS run: ~170 progress lines per cleanup)' ((@($prog23 | Where-Object { Test-DismProgressLine $_ }).Count -eq 3) -and (@($keep23 | Where-Object { Test-DismProgressLine $_ }).Count -eq 0))
+Check 'Invoke-DismExe does not log the progress-bar lines' ($src -match '(?s)function Invoke-DismExe \{.*?-not \(Test-DismProgressLine \$_\)\) \{ Write-Log \$_ \}')
 Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

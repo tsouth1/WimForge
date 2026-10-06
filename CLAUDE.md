@@ -45,7 +45,7 @@ The user is "the operator" in the docs; Claude does the code, the operator does 
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File run_all.ps1` (5.1, what the tool runs on), and/or `pwsh -NoProfile -File run_all.ps1`.
   - Single suite: run that `.ps1` the same way. Suites: `parse`, `xaml`, `harness`, `e2e` (E1-E32), `runner`, `profiles` (P-numbered), `acquisition` (A-numbered). `lint.ps1` / `lint2.ps1` need PSScriptAnalyzer (not in run_all).
   - `$env:MR_SCRIPT` = path of another script copy to test. `mocks.ps1` is shared, dot-sourced.
-- Last known total: **664 checks, 7 suites, all passing** (2026-10-01). When adding a feature, add checks and update the count in TODO_DONE.md History, README.md and `testkit\README_TESTKIT.md`.
+- Last known total: **666 checks, 7 suites, all passing** (2026-10-06). When adding a feature, add checks and update the count in TODO_DONE.md History, README.md and `testkit\README_TESTKIT.md`.
 - Scratch output folders (`testkit\e2e`, `ptest`, `rt`, `tst*`, `acq`, `engine_only.ps1`) are gitignored and recreated each run.
 - Avast on this PC can quarantine new test scripts (see memory) - a vanished `.ps1` is likely the Virus Chest.
 
