@@ -61,8 +61,9 @@ module), with a dry-run preview before anything is downloaded.
 - `MediaRefresh_v2.4.ps1` — the current script and the only one under
   development and test. A complete, standalone script (no shared modules).
 - `TODO.md` — the project's living task list: what is being validated now,
-  the open decisions, the feature backlog, and a reference summary of what
-  v2.4 already contains.
+  the open decisions and the feature backlog (open items only).
+- `TODO_DONE.md` — completed work moved out of `TODO.md`: build details,
+  confirmed checks, what v2.4 already contains, and the project history.
 - `testkit/` — a mock-based PowerShell test kit (unit tests, end-to-end
   scenario tests, XAML/parse/lint checks). It tests `MediaRefresh_v2.4.ps1`
   by default; set `$env:MR_SCRIPT` to test another copy. See
