@@ -10,7 +10,7 @@ Where v2.4 stands:
 
 - **Mock test kit:** 7 suites, 668 checks, all passing on Windows PowerShell 5.1 and PowerShell 7.6 (2026-10-06).
 - **Real Microsoft Update Catalog:** every built-in rule for all five profiles picks the right entry from the live catalog (2026-09-24, step 2A), confirmed by GUI dry runs of all five OSes on the build machine the same evening. Real GUI downloads (LTSC 2019, LTSC 2021 KMS, Win11 24H2) the same evening found one pruning bug, fixed (step 2A).
-- **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). **LTSC 2021 KMS with four languages (de-de, ja-jp, zh-cn, zh-tw) on 2026-10-05 12:42-14:54, gate PASSED** (build 10.0.19044.7727, WinRE on; see TODO_DONE.md 2B). IoT LTSC 2021 and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
+- **Real images and real DISM:** three complete real v2.4 servicing runs, all with gate PASSED: Win11 24H2 Enterprise on 2026-09-23 and 2026-09-25 (English only), and **LTSC 2019 with ten languages on 2026-09-25 16:15-20:30** (`LOGS\`: preflight x2 + full run; WinRE was switched off). **LTSC 2021 KMS with four languages (de-de, ja-jp, zh-cn, zh-tw) on 2026-10-05 12:42-14:54, gate PASSED** (build 10.0.19044.7727, WinRE on; see TODO_DONE.md 2B). **Win11 24H2 with es-mx on 2026-10-06 06:43-08:27, gate PASSED** - the first run with the ADK's DISM and the first Win11 run with a language, with app removal, patched boot.wim, media and a real SCCM import (see TODO_DONE.md 2B). IoT LTSC 2021 and Server 2022 have not been serviced on v2.4 yet (a v2.2 run of IoT LTSC 2021 finished with 0 verify issues on 2026-09-21, but v2.3/v2.4 changed the servicing code).
 
 ## Index
 
@@ -19,7 +19,7 @@ Step numbers are kept from earlier versions of this list because the script, the
 | # | Step | Owner | Status |
 |---|------|-------|--------|
 | [2](#s2) | **Validate v2.4:** real catalog, real servicing runs, feature checks | Claude (catalog) + Operator (servicing) | **Now** (2A catalog done; 2B-2D open) |
-| [4](#s4) | Host DISM vs image build (ADK DISM decision) | Claude + operator | Built 2026-10-01; **ADK DISM 10.0.26100.9457 picked up on the server** (preflight 2026-10-06); confirm with a real servicing run |
+| [4](#s4) | Host DISM vs image build (ADK DISM decision) | Claude + operator | **Confirmed 2026-10-06:** a full Win11 24H2 run with es-mx on the ADK's DISM 10.0.26100.9457, gate PASSED |
 | [6](#s6) | Upgrade-package media readiness and validation round 2 | Claude + operator | After 2 |
 | [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | Built (mock-tested); needs a first real import against the site |
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
@@ -93,17 +93,17 @@ These are the "Try it" checks from steps 1, 3 and 5. They were only ever confirm
 
 ### 2D. Profile data (the operator)
 
-- [ ] Fill in the Win11 24H2 and Server 2022 end-of-support dates from the Microsoft lifecycle pages (the `endOfSupport` key in the JSON files; the built-in profiles in the script can be updated at the same time).
+- [ ] (Still open 2026-10-06: the Win11 run logs `Support end date not set in the profile.`) Fill in the Win11 24H2 and Server 2022 end-of-support dates from the Microsoft lifecycle pages (the `endOfSupport` key in the JSON files; the built-in profiles in the script can be updated at the same time).
 
 <a id="s4"></a>
-## 4. Host DISM vs image build (ADK DISM decision) - built 2026-10-01; confirm with a real run
+## 4. Host DISM vs image build (ADK DISM decision) - built 2026-10-01; confirmed on a real run 2026-10-06
 
 **Owner:** Claude + operator. **Depends on:** 2 (the build-host answer and the Win11 24H2 run).
 
 **Built 2026-10-01** (details in TODO_DONE.md): runs use the Windows ADK's DISM (module and dism.exe) when the ADK is installed, else Windows' own; the log says which.
 
 - [x] **Confirmed 2026-10-06 (Win11 24H2 preflight on the server, `MediaRefresh_20261006_063338.log`):** `DISM: using the Windows ADK's DISM 10.0.26100.9457 from C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\DISM (PowerShell module and dism.exe)` right after the start line, and `ADK DISM 10.0.26100.9457 (...\dism.exe); image 10.0.26100.9168` with no "older than the image" WARN.
-- [ ] **To confirm:** the servicing itself - a real run with the ADK's DISM. The next Win11 24H2 run (es-mx ticked in this preflight) would also be the first **Win11 run with a language**, the test this step was waiting for.
+- [x] **Confirmed 2026-10-06 (Win11 24H2 run 06:43-08:27, `MediaRefresh_20261006_064336.log`):** the whole run on the ADK's DISM 10.0.26100.9457 - app removal, WinRE (servicing stack + Safe OS DU), LCU pass 1, es-mx language pack and its five capabilities, LCU final, cleanup, NetFx3, .NET CU, export, both boot.wim indexes, media - with no failure and gate PASSED. This was the first **Win11 run with a language**, the test this step was waiting for. Step 4 is done for the current profiles; step 13 (25H2 / 26H2 / Server 2025) needs an ADK that is at least as new as those images.
 
 The script only logs a warning when the host DISM is older than the image. Servicing Win11 24H2 (build 26100) from a Server 2022 host (DISM 10.0.20348) is a known source of odd failures. Options: detect and use the ADK's newer DISM for both the cmdlets (module path) and `dism.exe`, or require a newer build host. It is a small change once decided, but it touches every DISM call, so do it once, before the SCCM step adds more code.
 
@@ -121,7 +121,7 @@ The script only logs a warning when the host DISM is older than the image. Servi
 **Owner:** Claude + operator. **Depends on:** 2 (a validated v2.4, including the Setup DU download).
 
 - **Built 2026-09-27** (details in TODO_DONE.md): setup.exe and the boot manager files on the media come from the patched boot.wim; boot.wim is patched only for the media. Partly confirmed on the 2026-09-29 Win11 run (files replaced on the media).
-- [ ] **To confirm:** boot the ISO or a USB stick made from `NEWWIM\Media` on a test machine (UEFI with Secure Boot) and start Setup.
+- [ ] **To confirm:** boot the ISO or a USB stick made from `NEWWIM\Media` on a test machine (UEFI with Secure Boot) and start Setup. (The 2026-10-06 Win11 run built `NEWWIM\Media` with the patched boot.wim again; no ISO was ticked.)
 - The engine follows Microsoft's order (LCU, cleanup, then NetFx3 and .NET CU). If a real run shows the .NET CU or the LCU missing after deployment, test the alternative order and let the validation gate (step 3) decide.
 - The operator runs the second round: an OS with the downloader-fed patch set, media folder built, change log and gate checked.
 
@@ -132,7 +132,8 @@ The script only logs a warning when the host DISM is older than the image. Servi
 
 **Built 2026-09-27** (SCCM tab, Connect, check-then-confirm import, run record, distribution - details in TODO_DONE.md). Mock-tested only.
 
-- [ ] **To confirm on the real site:** Connect (site code and DP list appear); Import into SCCM with a small test name for one OS; check the confirmation, then the console: the OS image with its source path under `\\<this server>\...`, version = build, and the distribution. Then an upgrade package from a run with the media folder. If a cmdlet or parameter behaves differently on this CM version, the `SccmImport_*.log` shows the exact error.
+- [x] **OS image import confirmed 2026-10-06** (`SccmImport_20261006_082743.log`, right after the Win11 24H2 run): install.wim (7.2 GB) copied to a dated folder on the content source share, imported as OS image `Windows 11 Enterprise 24H2 202610`, package ID returned, distribution to one distribution point started. **Still to check in the console:** source path, version = build (10.0.26100.9457), and that the distribution finished.
+- [ ] **To confirm on the real site:** an upgrade package from a run with the media folder. If a cmdlet or parameter behaves differently on this CM version, the `SccmImport_*.log` shows the exact error.
 
 **Done when:** the tab validates its fields, the name is pre-filled and follows the OS selection, the picker returns a usable UNC source path, the local copy lands in the chosen folder, and a finished image that passed the validation gate is imported from a `\\<SCCM-SOURCE-SERVER>\...` path and distributed to the chosen DP or DP group as the chosen package type.
 
@@ -255,4 +256,5 @@ Add these three OSes to the set the tool services, alongside the existing five (
 
 **Built** (details in TODO_DONE.md): UNC content source on any server, mapped drives resolved, Shares... dialog, reach / write / free-space checks, robocopy.
 
+- [x] **Copy over the network, import and distribute confirmed 2026-10-06** (Win11 24H2): WimForge on the build server (`J:\WimForge`) copied install.wim with robocopy to `\\<SCCM-SOURCE-SERVER>\OS\...` (7.2 GB in 14 s, 330 GB free reported), imported it from that UNC path and started the distribution. The log does not show whether the folder was picked by browsing or typed.
 - [ ] **Done when:** from a WimForge server that is not the content source server, the SCCM tab can pick a folder on the site server's share by browsing, the plan shows the UNC path and its checks, and a real import copies the image over the network, imports it from that UNC path and distributes it.
