@@ -14,11 +14,10 @@ Where v2.4 stands:
 
 ## Index
 
-Step numbers are kept from earlier versions of this list because the script, the logs and older notes refer to them. **Done:** steps 1, 3, 5 (built into v2.4), 2 (validation, closed 2026-10-06; its open runs moved to step 6), 11 (app removal, confirmed 2026-09-29) and 14 (download only what is missing, confirmed 2026-09-29) - see `TODO_DONE.md`.
+Step numbers are kept from earlier versions of this list because the script, the logs and older notes refer to them. **Done:** steps 1, 3, 5 (built into v2.4), 2 (validation, closed 2026-10-06; its open runs moved to step 6), 4 (ADK DISM, confirmed 2026-10-06), 11 (app removal, confirmed 2026-09-29) and 14 (download only what is missing, confirmed 2026-09-29) - see `TODO_DONE.md`.
 
 | # | Step | Owner | Status |
 |---|------|-------|--------|
-| [4](#s4) | Host DISM vs image build (ADK DISM decision) | Claude + operator | **Confirmed 2026-10-06:** a full Win11 24H2 run with es-mx on the ADK's DISM 10.0.26100.9457, gate PASSED |
 | [6](#s6) | Upgrade-package media readiness and validation round 2 (incl. the runs carried over from step 2) | Claude + operator | **Now** |
 | [7](#s7) | SCCM import: new tab, local copy to content source, import, distribute | Claude | OS image import confirmed on the real site 2026-10-06; upgrade package and console checks open |
 | [8](#s8) | Hard cancel, batch queue, scheduled run | Claude | Last feature |
@@ -31,29 +30,9 @@ Step numbers are kept from earlier versions of this list because the script, the
 | [16](#s16) | Media-only run: build the media / ISO around the existing NEWWIM\install.wim, without servicing install.wim again | Claude | Built 2026-10-01 (mock-tested); confirm with a real media-only run (Win11 / Server 2022) |
 | [18](#s18) | SCCM import from a WimForge server that is not the content source server: browse / connect to a UNC network path, copy over the network | Claude | Network copy, import and distribution confirmed 2026-10-06; picking the folder by browsing still to confirm |
 
-Order of work: step 2 is closed and step 4 confirmed (2026-10-06); finish the real runs in 6, then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
+Order of work: steps 2 and 4 are closed (2026-10-06); finish the real runs in 6, then the new features. The SCCM import (7) waits for a validated image, and hard cancel / batch queue (8) comes last because it changes how every other step is started and stopped.
 
 ---
-
-<a id="s4"></a>
-## 4. Host DISM vs image build (ADK DISM decision) - built 2026-10-01; confirmed on a real run 2026-10-06
-
-**Owner:** Claude + operator. **Depends on:** 2 (closed 2026-10-06). Build host answered: Server 2022 with the ADK's DISM 10.0.26100.9457.
-
-**Built 2026-10-01** (details in TODO_DONE.md): runs use the Windows ADK's DISM (module and dism.exe) when the ADK is installed, else Windows' own; the log says which.
-
-- [x] **Confirmed 2026-10-06 (Win11 24H2 preflight on the server, `MediaRefresh_20261006_063338.log`):** `DISM: using the Windows ADK's DISM 10.0.26100.9457 from C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\DISM (PowerShell module and dism.exe)` right after the start line, and `ADK DISM 10.0.26100.9457 (...\dism.exe); image 10.0.26100.9168` with no "older than the image" WARN.
-- [x] **Confirmed 2026-10-06 (Win11 24H2 run 06:43-08:27, `MediaRefresh_20261006_064336.log`):** the whole run on the ADK's DISM 10.0.26100.9457 - app removal, WinRE (servicing stack + Safe OS DU), LCU pass 1, es-mx language pack and its five capabilities, LCU final, cleanup, NetFx3, .NET CU, export, both boot.wim indexes, media - with no failure and gate PASSED. This was the first **Win11 run with a language**, the test this step was waiting for. Step 4 is done for the current profiles; step 13 (25H2 / 26H2 / Server 2025) needs an ADK that is at least as new as those images.
-
-The script only logs a warning when the host DISM is older than the image. Servicing Win11 24H2 (build 26100) from a Server 2022 host (DISM 10.0.20348) is a known source of odd failures. Options: detect and use the ADK's newer DISM for both the cmdlets (module path) and `dism.exe`, or require a newer build host. It is a small change once decided, but it touches every DISM call, so do it once, before the SCCM step adds more code.
-
-**First data point (2026-09-23):** the Server 2022 host's DISM 10.0.20348.2849 serviced the Win11 24H2 image (26100.9168 -> 26100.9457) with no failure - only the expected "host DISM is older" WARN, and the gate PASSED. One clean run does not prove it is safe (language packs and FODs were not part of it), so keep the decision open until a Win11 run with languages.
-
-**Second data point (2026-09-25):** the same host DISM serviced Win11 24H2 again, this time with the LCU checkpoint in the folder, Safe OS DU into WinRE and the Setup DU into the media - no failure, gate PASSED. Still no run with languages.
-
-**Before the update (2026-10-05 KMS run):** the server still ran a copy from before the step-4 commit - the log has the old `Host DISM 10.0.20348.2849; image ...` line and no `DISM: ...` line, so Windows' own DISM was used. **Action for the operator:** copy the current `MediaRefresh_v2.4.ps1` from `main` to the server (`J:\WimForge`) before the next run; the run log should then start with `DISM: using the Windows ADK's DISM ...`. Since 2026-10-06 a **preflight** also compares the DISM in use with the OS ISO's image (`ADK DISM <version> (...); image <version>`, WARN when older), so a preflight on the server is enough to confirm the ADK DISM is picked up.
-
-**Third data point (2026-09-25):** the same host DISM serviced LTSC 2019 (17763) with ten languages and their FODs - no failure. That is an older image than the host, so it says nothing about the 26100 case; Win11 with languages is still the missing test.
 
 <a id="s6"></a>
 ## 6. Upgrade-package media readiness and validation round 2
@@ -186,6 +165,8 @@ This is a **separate deliverable from the per-OS WinRE servicing already built**
 ## 13. Expand OS support: Windows 11 25H2, Windows 11 26H2, Windows Server 2025
 
 **Owner:** Claude + operator. **Depends on:** 1 (profile schema/folder conventions) and 5 (acquisition layer - each new OS needs its own `catalogSearch` rules). Added 2026-09-22, requested by the operator.
+
+- **DISM (from step 4, closed 2026-10-06):** runs use the ADK's DISM when it is installed; the server has 10.0.26100.9457. 25H2 / 26H2 and Server 2025 are newer than the Server 2022 host, so the preflight's `ADK DISM <version>; image <version>` line must show an ADK at least as new as each new image (no "older than the image" WARN) - update the ADK on the server first if it does not.
 
 Add these three OSes to the set the tool services, alongside the existing five (LTSC 2019, LTSC 2021 IoT, LTSC 2021 KMS, Win11 24H2, Server 2022).
 

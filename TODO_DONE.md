@@ -75,9 +75,24 @@ Run with the regenerated profiles (`Profiles_corrected_2026-09-24.zip`, written 
 - [x] "Download patches..." shows a dry-run list first, downloads only after confirmation, prunes superseded files in `PATCHES\<class>`, never touches `PATCHES\SSU`, and the downloads show up in Section A of the next servicing run's change log. Confirmed on the real GUI runs of 2026-09-24/25 (dry-run list, confirmation, pruning, SSU untouched; the downloads show up in Section A of the next run's change log).
 
 <a id="s4"></a>
-## 4. Host DISM vs image build - built 2026-10-01
+## 4. Host DISM vs image build - built 2026-10-01; confirmed 2026-10-06, closed
 
 **Built 2026-10-01 (the operator installed the ADK on the new server and asked for WimForge to use its DISM):** every engine run except the SCCM ones calls `Use-AdkDism` before any DISM command: `Find-AdkDism` (KitsRoot10 from the registry on any drive, then the default folder - `Get-AdkKitsRoots`, shared with `Find-Oscdimg`) finds `Deployment Tools\<arch>\DISM`; its PowerShell module is imported in place of the inbox one (`Import-DismModuleFrom`) and the folder goes first on the PATH for `dism.exe`, as Microsoft documents. The run logs `DISM: using the Windows ADK's DISM <version> from <folder>` right after its start line; without the ADK it logs that Windows' own DISM is used and how to get the ADK's; an ADK DISM that cannot be loaded falls back to Windows' own with a WARN. The version check now names which DISM it compared. Tests: 7 in `profiles.ps1` (P23), 1 in `e2e.ps1` (E30). **To confirm:** a real run on the new server - the log line, the version check without the old WARN for a 24H2 image, and the servicing itself.
+
+**Closed 2026-10-06 (moved from TODO.md).** Build host: Server 2022 with the ADK's DISM 10.0.26100.9457. Step 13's new OSes need an ADK at least as new as their images (noted there).
+
+- [x] **Confirmed 2026-10-06 (Win11 24H2 preflight on the server, `MediaRefresh_20261006_063338.log`):** `DISM: using the Windows ADK's DISM 10.0.26100.9457 from C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\DISM (PowerShell module and dism.exe)` right after the start line, and `ADK DISM 10.0.26100.9457 (...\dism.exe); image 10.0.26100.9168` with no "older than the image" WARN.
+- [x] **Confirmed 2026-10-06 (Win11 24H2 run 06:43-08:27, `MediaRefresh_20261006_064336.log`):** the whole run on the ADK's DISM 10.0.26100.9457 - app removal, WinRE (servicing stack + Safe OS DU), LCU pass 1, es-mx language pack and its five capabilities, LCU final, cleanup, NetFx3, .NET CU, export, both boot.wim indexes, media - with no failure and gate PASSED. This was the first **Win11 run with a language**, the test this step was waiting for. Step 4 is done for the current profiles; step 13 (25H2 / 26H2 / Server 2025) needs an ADK that is at least as new as those images.
+
+The script only logs a warning when the host DISM is older than the image. Servicing Win11 24H2 (build 26100) from a Server 2022 host (DISM 10.0.20348) is a known source of odd failures. Options: detect and use the ADK's newer DISM for both the cmdlets (module path) and `dism.exe`, or require a newer build host. It is a small change once decided, but it touches every DISM call, so do it once, before the SCCM step adds more code.
+
+**First data point (2026-09-23):** the Server 2022 host's DISM 10.0.20348.2849 serviced the Win11 24H2 image (26100.9168 -> 26100.9457) with no failure - only the expected "host DISM is older" WARN, and the gate PASSED. One clean run does not prove it is safe (language packs and FODs were not part of it), so keep the decision open until a Win11 run with languages.
+
+**Second data point (2026-09-25):** the same host DISM serviced Win11 24H2 again, this time with the LCU checkpoint in the folder, Safe OS DU into WinRE and the Setup DU into the media - no failure, gate PASSED. Still no run with languages.
+
+**Before the update (2026-10-05 KMS run):** the server still ran a copy from before the step-4 commit - the log has the old `Host DISM 10.0.20348.2849; image ...` line and no `DISM: ...` line, so Windows' own DISM was used. **Action for the operator:** copy the current `MediaRefresh_v2.4.ps1` from `main` to the server (`J:\WimForge`) before the next run; the run log should then start with `DISM: using the Windows ADK's DISM ...`. Since 2026-10-06 a **preflight** also compares the DISM in use with the OS ISO's image (`ADK DISM <version> (...); image <version>`, WARN when older), so a preflight on the server is enough to confirm the ADK DISM is picked up.
+
+**Third data point (2026-09-25):** the same host DISM serviced LTSC 2019 (17763) with ten languages and their FODs - no failure. That is an older image than the host, so it says nothing about the 26100 case; Win11 with languages is still the missing test.
 
 <a id="s6"></a>
 ## 6. Upgrade-package media readiness - built
@@ -404,6 +419,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 <a id="history"></a>
 ## History
 
+- 2026-10-07: step 4 (ADK DISM) closed and moved to TODO_DONE.md after the 2026-10-06 Win11 run; the ADK-version requirement for new OSes is noted in step 13.
 - 2026-10-06: step 2 (validate v2.4) closed: the catalog layer and five real runs with gate PASSED; the remaining runs (LTSC 2021 KMS ten languages, Server 2022, IoT LTSC 2021), feature checks, end-of-support dates and the 1809 Setup DU check moved to step 6. Index rows for steps 7 and 18 updated after the 2026-10-06 import.
 - 2026-10-06: the operator's Win11 24H2 run with es-mx (06:43-08:27, 1 h 44 min against 2 h 2 min on 2026-09-29, gate PASSED, 0 verify issues) - first full run on the ADK's DISM 10.0.26100.9457 and first Win11 run with a language: step 4 confirmed. App removal, patched boot.wim and media worked again; the SCCM import copied install.wim over the network to the content source share, imported it and started the distribution (steps 7 and 18 confirmed for an OS image). Uploaded logs removed from the repository; `*.zip` and `LOGS/` ignored again.
 - 2026-10-06: the operator's Win11 24H2 preflight on the server with the current script: the ADK's DISM 10.0.26100.9457 is loaded (module and dism.exe) and the new preflight version check shows it is not older than the image (26100.9168) - step 4's log line and version check confirmed; the servicing itself is still to confirm. es-mx language pack located on the combined LangPackAll/LoF ISO; PATCHES up to date; PREFLIGHT OK.

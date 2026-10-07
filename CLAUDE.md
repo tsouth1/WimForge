@@ -13,8 +13,8 @@ The user is "the operator" in the docs; Claude does the code, the operator does 
 | Path | What |
 |---|---|
 | `MediaRefresh_v2.4.ps1` | **The only script under development** (~4,800 lines). Tool version is **2.5.0** (`$script:ToolVersion`, line ~186); the file keeps the v2.4 name on purpose (docs, run configs, scheduled tasks). |
-| `TODO.md` | Index + **open** items only, by step number (4, 6-10, 12, 13, 15-18; step 2 closed 2026-10-06). |
-| `TODO_DONE.md` | Completed items moved out of TODO.md (build details, confirmed checks, steps 1/3/5/11/14, History). Add finished work here and a dated History line. |
+| `TODO.md` | Index + **open** items only, by step number (6-10, 12, 13, 15-18; steps 2 and 4 closed 2026-10-06). |
+| `TODO_DONE.md` | Completed items moved out of TODO.md (build details, confirmed checks, steps 1/2/3/4/5/11/14, History). Add finished work here and a dated History line. |
 | `INSTRUCTIONS.md` | Operator guide; also rendered by the GUI's Instructions tab. Only headings, lists, bold, italic, code, links - **no tables** (the tab's small Markdown renderer). Keep it in step with GUI changes. |
 | `README.md` | GitHub readme + screenshots (`images\`). Status section quotes the test-kit check count. |
 | `Languages.json` | Reference language list (repo copy); runtime copy is `Profiles\Languages.json`, also built into the script (`Get-BuiltInLanguageData`, a test keeps them equal). |
