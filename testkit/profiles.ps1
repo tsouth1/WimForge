@@ -602,7 +602,7 @@ Set-Item function:Import-DismModuleFrom $idm; $script:MockAdkDism = $null; $scri
 $e23 = ''; try { Import-DismModuleFrom -Folder $d23 } catch { $e23 = $_.Exception.Message }
 Check 'the real module import fails on a folder without the DISM module (so a broken ADK falls back)' ($e23 -ne '') $e23
 $inv23 = [regex]::Match($src, '(?s)function Invoke-MediaRefresh \{.*?\r?\n\}\r?\n').Value
-Check 'every engine run except the SCCM ones loads the ADK''s DISM before any DISM command, and the runs log it' ($inv23 -match "if \(@\('SccmConnect', 'SccmImport'\) -notcontains .*\) \{ Use-AdkDism -Quiet \}" -and $inv23.IndexOf('Use-AdkDism -Quiet') -lt $inv23.IndexOf("-eq 'Cleanup'") -and ([regex]::Matches($inv23, 'Write-DismNote')).Count -eq 2)
+Check 'every engine run except the SCCM ones loads the ADK''s DISM before any DISM command, and the runs log it' ($inv23 -match "if \(@\('SccmConnect', 'SccmImport'\) -notcontains .*\) \{ Use-AdkDism -Quiet \}" -and $inv23.IndexOf('Use-AdkDism -Quiet') -lt $inv23.IndexOf("-eq 'Cleanup'") -and ([regex]::Matches($inv23, 'Write-DismNote')).Count -eq 3)
 Check 'Find-Oscdimg and Find-AdkDism look in the same ADK places (Get-AdkKitsRoots)' ($src -match '(?s)function Find-Oscdimg \{.*?Get-AdkKitsRoots' -and $src -match '(?s)function Find-AdkDism \{.*?Get-AdkKitsRoots')
 $prog23 = @('[=====                      10.0%                          ] ', '[===========================56.9%=                         ] ', '[==========================100.0%==========================] ')
 $keep23 = @('Deployment Image Servicing and Management tool', 'Image Version: 10.0.19044.7727', 'The operation completed successfully.', 'Error: 0x800f0806 [see 10.0%]')

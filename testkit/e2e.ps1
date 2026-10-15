@@ -990,4 +990,53 @@ Invoke-MediaRefresh $i32
 Set-Item function:Write-Log $wl
 Check 'with Create updated install.wim ticked the option is ignored, with a WARN' ([bool]($logs32 -match '^\[WARN\] Use the existing install\.wim is ticked, but so is Create updated install\.wim'))
 
+Write-Host "`n=== E33 Tools > Verify existing install.wim: Verify, change log and run record for NEWWIM\install.wim (2026-10-15) ==="
+# The Server 2022 run of 2026-10-14 stopped in Verify after the export: install.wim in NEWWIM, no RunResult.json.
+$os33 = Join-Path $base 'Windows_Server_2022'; $nw33 = Join-Path $os33 'NEWWIM'; $wim33 = Join-Path $nw33 'install.wim'; $rrFile33 = Join-Path $nw33 'RunResult.json'
+function Opts33($langs = @(), [hashtable]$o = @{}) { $x = Opts 'Windows Server 2022' $langs $o; $x | Add-Member -NotePropertyName Mode -NotePropertyValue 'VerifyExisting' -Force; return $x }
+$gap33 = ${function:Get-AppxProvisionedPackage}
+function Get-AppxProvisionedPackage { [CmdletBinding()] param($Path)   # Server Core, as on the real server
+    $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new([System.Runtime.InteropServices.COMException]::new('The specified module could not be found.', -2147024770), 'NoAppx', 'NotSpecified', $Path)) }
+$logs33 = [System.Collections.Generic.List[string]]::new(); $wl33 = ${function:Write-Log}
+function Write-Log { param($Message, $Level = 'INFO') $logs33.Add("[$Level] $Message") }
+# no install.wim yet: a clear message, nothing mounted
+Reset-Test; $script:ImageCount = 4
+Remove-Item $wim33, $rrFile33 -Force -ErrorAction SilentlyContinue
+$threw = $false; try { Invoke-MediaRefresh (Opts33) } catch { $threw = $true; $m33 = $_.Exception.Message }
+Check 'verify existing: without NEWWIM\install.wim it stops with a clear message and mounts nothing' ($threw -and $m33 -like 'Verify existing install.wim: there is no *NEWWIM\install.wim. Run a full servicing run*' -and @($script:Calls -match '^Mount').Count -eq 0) $m33
+# the image the stopped run left behind
+New-File $wim33 'the image of the stopped run'; $t33 = (Get-Item $wim33).LastWriteTimeUtc
+Reset-Test; $logs33.Clear(); $script:ChangeEvents = $null
+$r33 = Invoke-MediaRefresh (Opts33)
+$rr33 = Read-RunResult -NewWim $nw33
+Check 'verify existing: every index is mounted read-only and discarded; no ISO, no export, no package' ((@($script:Calls -match '^(Mount|Dismount|Export|AddPkg|AddCap|IsoDismount|EnableFeature|DISM:)') -join '|') -eq 'Mount install.wim idx1 -> MainOS|Dismount MainOS discard|Mount install.wim idx2 -> MainOS|Dismount MainOS discard|Mount install.wim idx3 -> MainOS|Dismount MainOS discard|Mount install.wim idx4 -> MainOS|Dismount MainOS discard' -and $script:MountedIsoPaths.Count -eq 0) ($script:Calls -join ' | ')
+Check 'verify existing: Server Core without AppX passes the gate' ($r33.Mode -eq 'VerifyExisting' -and $r33.Gate -eq 'PASSED' -and $r33.VerifyIssues -eq 0 -and [bool]($logs33 -match '^\[INFO\] VALIDATION GATE: PASSED'))
+Check 'verify existing: RunResult.json is written for this install.wim (gate, build, size and date), so the import can use it' ($null -ne $rr33 -and $rr33.Install -eq $wim33 -and $rr33.Gate -eq 'PASSED' -and $rr33.Build -eq '10.0.17763.9121' -and $rr33.InstallSize -eq [string](Get-Item $wim33).Length -and $rr33.InstallTicks -eq [string]$t33.Ticks)
+Check 'verify existing: the change log is written to LOGS and NEWWIM, with the re-verify row and Section B' ($r33.ChangeLogHtml -and (Test-Path $r33.ChangeLogHtml) -and (Test-Path (Join-Path $nw33 (Split-Path $r33.ChangeLogHtml -Leaf))) -and (Get-Content -Raw $r33.ChangeLogHtml) -match 'install\.wim verified again' -and (Get-Content -Raw $r33.ChangeLogHtml) -match 'Index 4' -and $rr33.ChangeLog -eq $r33.ChangeLogHtml)
+Check 'verify existing: install.wim itself is not touched' ((Get-Content -Raw $wim33).Trim() -eq 'the image of the stopped run' -and (Get-Item $wim33).LastWriteTimeUtc -eq $t33)
+Check 'verify existing: its own run log (MediaRefresh_*.log) names the mode' ([bool]($logs33 -match '^\[INFO\] Starting WimForge v.* for Windows Server 2022 - Verify existing install\.wim') -and $script:LogFile -like (Join-Path $os33 'LOGS\MediaRefresh_*.log'))
+# the reuse check (media-only run) now accepts this image
+$ok33 = $true; try { [void](Get-ReusableInstall -NewWim $nw33 -IsoBuild '10.0.17763.1') } catch { $ok33 = $false }
+Check 'verify existing: afterwards a media-only run can reuse the image' $ok33
+# a media folder recorded for this same, unchanged install.wim stays in the record; the record of another image is replaced
+$media33 = Join-Path $nw33 'Media'; New-Item -ItemType Directory -Force $media33 | Out-Null
+[void](Save-RunResult -Paths @{ NewWim = $nw33 } -OsName 'Windows Server 2022' -Build '10.0.17763.9121' -Gate 'PASSED' -Install $wim33 -Media $media33 -ChangeLog '')
+Reset-Test; [void](Invoke-MediaRefresh (Opts33))
+Check 'verify existing: a media folder recorded for the same unchanged install.wim is kept' ((Read-RunResult -NewWim $nw33).Media -eq $media33)
+[void](Save-RunResult -Paths @{ NewWim = $nw33 } -OsName 'Windows Server 2022' -Build '10.0.17763.9121' -Gate 'PASSED' -Install $wim33 -Media $media33 -ChangeLog '')
+Set-Content $wim33 'a newer image'; $logs33.Clear()
+Reset-Test; [void](Invoke-MediaRefresh (Opts33))
+Check 'verify existing: the record of another (older) install.wim is replaced, its media dropped, with a note' (-not (Read-RunResult -NewWim $nw33).Media -and [bool]($logs33 -match 'is replaced by the result of this check; it named another or an older install\.wim'))
+# an expected language that is missing: gate FAILED, recorded, so the import refuses it
+Reset-Test; $logs33.Clear()
+$r33f = Invoke-MediaRefresh (Opts33 @('de-de'))
+Check 'verify existing: a missing expected language fails the gate and the record says FAILED' ($r33f.Gate -eq 'FAILED' -and (Read-RunResult -NewWim $nw33).Gate -eq 'FAILED' -and [bool]($logs33 -match 'VERIFY   language pack de-de is MISSING'))
+# a client OS whose NEWWIM\install.wim has more than one index is refused
+$script:ImageCount = 2; New-File (Join-Path $base 'Win11Enterprise_24H2\NEWWIM\install.wim') 'two indexes'
+Reset-Test; $threw = $false; $c33 = Opts 'Windows 11 Enterprise 24H2' @(); $c33 | Add-Member -NotePropertyName Mode -NotePropertyValue 'VerifyExisting' -Force
+try { Invoke-MediaRefresh $c33 } catch { $threw = $true; $m33 = $_.Exception.Message }
+Check 'verify existing: a client install.wim with two indexes is refused before any mount' ($threw -and $m33 -eq 'Client output validation failed: expected one index, found 2.' -and @($script:Calls -match '^Mount').Count -eq 0) $m33
+$script:ImageCount = 1
+Set-Item function:Write-Log $wl33; Set-Item function:Get-AppxProvisionedPackage $gap33
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

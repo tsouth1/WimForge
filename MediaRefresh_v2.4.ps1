@@ -17,7 +17,8 @@
     Version 2.5.0 (2026-09-30; the file keeps its v2.4 name so existing docs, run configs and scheduled tasks still work).
       * Added: run configs and the command line (-Config <file> [-Preflight]); Tools > New OS from existing, Rename OS,
                Check OS profile, Edit OS profile, Open Profiles folder; the {version} release placeholder in profiles;
-               the local ADK check for Build an ISO; the app list per OS in Profiles\Apps; download only what is missing.
+               the local ADK check for Build an ISO; the app list per OS in Profiles\Apps; download only what is missing;
+               Tools > Verify existing install.wim (Verify, change log and RunResult.json for NEWWIM\install.wim only).
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
                install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
                longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14).
@@ -2785,6 +2786,63 @@ function Read-RunResult {
             InstallSize = [string](Get-ProfileValue $o 'installSize' ''); InstallTicks = [string](Get-ProfileValue $o 'installTicks' '') }
     } catch { Write-Log "Run record $file could not be used ($($_.Exception.Message))." 'WARN'; return $null }
 }
+function Invoke-VerifyExisting {
+    # Tools > Verify existing install.wim (2026-10-15): the Verify step, the change log and the run record for the
+    # NEWWIM\install.wim a run left behind when it stopped after the export (Server 2022 run, 2026-10-14: Verify failed on
+    # Server Core, so no RunResult.json was written and the SCCM import could not use the image). The image is mounted
+    # read-only only. What to expect (LCU, languages, removed apps) comes from the window's ticks, as in a run; the change
+    # log has no servicing rows in Section A - what the servicing run changed is in that run's own log.
+    param([Parameter(Mandatory)]$Options, [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][hashtable]$Paths, [Parameter(Mandatory)][string]$Stamp)
+    $name = $Definition.Name
+    $wim = Join-Path $Paths.NewWim 'install.wim'
+    if (-not (Test-Path -LiteralPath $wim -PathType Leaf)) { throw "Verify existing install.wim: there is no $wim. Run a full servicing run (Create updated install.wim) first." }
+    $fi = Get-Item -LiteralPath $wim
+    Write-Log ("Verify existing install.wim: {0} ({1:N2} GB, written {2:yyyy-MM-dd HH:mm}). It is mounted read-only; nothing in it changes." -f $wim, ($fi.Length / 1GB), $fi.LastWriteTime)
+    # A media folder recorded for this same, unchanged install.wim stays in the record; anything else is replaced.
+    $prior = Read-RunResult -NewWim $Paths.NewWim
+    $media = ''
+    if ($prior) {
+        $same = ($prior.Install -ieq $wim -and $prior.InstallSize -eq [string]$fi.Length -and $prior.InstallTicks -eq [string]$fi.LastWriteTimeUtc.Ticks)
+        if ($same -and $prior.Media -and (Test-Path -LiteralPath $prior.Media)) { $media = $prior.Media }
+        Write-Log "NEWWIM\RunResult.json (run finished $($prior.Finished), gate $($prior.Gate)) is replaced by the result of this check$(if (-not $same) { '; it named another or an older install.wim' })."
+    }
+    $images = @(Get-WindowsImage -ImagePath $wim)
+    Write-Log ('Indexes in install.wim: ' + (($images | ForEach-Object { "[$($_.ImageIndex)] $($_.ImageName)" }) -join '; '))
+    if ((-not $Definition.ServiceAllIndexes) -and $images.Count -ne 1) { throw "Client output validation failed: expected one index, found $($images.Count)." }
+    $selected = if ($Definition.ServiceAllIndexes) { $null } else { $images[0] }
+    $languages = @($Options.Languages | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    Write-Log ('Languages expected: ' + $(if ($languages.Count) { $languages -join ', ' } else { '(none - English only)' }))
+    $removeApps = @(@(Get-ProfileValue $Options 'RemoveApps' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ } | Select-Object -Unique)
+    if ($Definition.ServiceAllIndexes) { $removeApps = @() }
+
+    Set-Phase 'Clearing stale mounts'
+    Clear-StaleMounts $Paths.Root
+    Remove-DirectoryContents $Paths.MainMount
+    Set-Phase 'Verifying image'
+    Set-Progress 10 'Verifying the existing install.wim'
+    $issues = Test-OutputWim -WimPath $wim -Paths $Paths -Languages $languages -ExpectLcu ([bool]$Options.LCU) -RemovedApps $removeApps
+    $gate = if ($issues -eq 0) { 'PASSED' } else { 'FAILED' }
+    if ($gate -eq 'FAILED') { Write-Log "VALIDATION GATE: FAILED ($issues issue(s)). Review the VERIFY lines above before importing this image into SCCM." 'ERROR' }
+    else { Write-Log 'VALIDATION GATE: PASSED.' }
+
+    Set-Phase 'Writing change log'
+    Set-Progress 90 'Writing the change log'
+    Add-ChangeEvent -Category 'Verify' -Item 'install.wim verified again (Tools > Verify existing install.wim)' -Target 'NEWWIM\install.wim' -Detail ("written {0:yyyy-MM-dd HH:mm}; what the servicing run changed is in that run's log" -f $fi.LastWriteTime)
+    $changeLogPaths = Write-ChangeLog -OsName $name -Paths $Paths -Stamp $Stamp -ToolVersion $script:ToolVersion -BuildBefore '' -BuildAfter $script:VerifyBuildAfter `
+        -Languages $languages -ServiceAllIndexes $Definition.ServiceAllIndexes -Selected $selected -IsoSources @() -Events @($script:ChangeEvents) `
+        -Inventory @($script:VerifyInventory) -VerifyIssues $issues -Gate $gate -VerifyRan $true
+    if ($changeLogPaths) {
+        foreach ($f in @($changeLogPaths.Html, $changeLogPaths.Csv)) { Copy-Item -LiteralPath $f -Destination $Paths.NewWim -Force -ErrorAction SilentlyContinue }
+    }
+    [void](Save-RunResult -Paths $Paths -OsName $name -Build $script:VerifyBuildAfter -Gate $gate -Install $wim -Media $media -ChangeLog $(if ($changeLogPaths) { $changeLogPaths.Html } else { '' }))
+    Write-Log "Run record written: $(Join-Path $Paths.NewWim $script:RunResultFileName) (gate $gate)$(if ($gate -ne 'FAILED') { '; the SCCM tab can import this install.wim now' })."
+    Set-Progress 100 'Verify completed'
+    Set-Phase 'Done'
+    return [pscustomobject]@{
+        Mode = 'VerifyExisting'; NewWim = $Paths.NewWim; Install = $wim; Boot = $null; Media = $(if ($media) { $media } else { $null }); VerifyIssues = $issues; Preflight = $false
+        Gate = $gate; ChangeLogHtml = $(if ($changeLogPaths) { $changeLogPaths.Html } else { $null }); ChangeLogCsv = $(if ($changeLogPaths) { $changeLogPaths.Csv } else { $null })
+    }
+}
 function Get-ServerShares {
     # This server's ordinary file shares (not the admin shares such as C$ or ADMIN$), as Name / Path.
     return @(Get-SmbShare -ErrorAction Stop | Where-Object { -not $_.Special -and $_.Path -and $_.Name -notmatch '\$$' } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Path = [string]$_.Path } })
@@ -3159,6 +3217,21 @@ function Invoke-MediaRefresh {
         $result = Invoke-PatchAcquisition -Options $Options -Definition $definition -Paths $paths
         $script:LastResult = $result
         return $result
+    }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'VerifyExisting') {
+        # Tools > Verify existing install.wim: no ISO, no patches, one read-only mount per index of NEWWIM\install.wim.
+        Set-Phase -OsName $name -Phase 'Verifying the existing install.wim'
+        $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
+        $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
+        $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
+        Write-Log "Starting WimForge v$($script:ToolVersion) for $name - Verify existing install.wim"
+        Write-DismNote
+        Write-ProfileMessages
+        Write-Log "Repository: $($paths.Root)"
+        Write-Log "DISM log: $($script:DismLogArgs['LogPath'])"
+        $script:LastResult = Invoke-VerifyExisting -Options $Options -Definition $definition -Paths $paths -Stamp $stamp
+        return $script:LastResult
     }
     Set-Phase -OsName $name -Phase $(if ([string](Get-ProfileValue $Options 'Mode' '') -eq 'Apps') { 'Reading provisioned apps' } elseif ($Options.PreflightOnly) { 'Preflight' } else { 'Starting' })
     $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
@@ -3634,7 +3707,7 @@ if ($Config) {
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
-    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/><Separator/><MenuItem x:Name="NewOsItem" Header="New OS from existing..." ToolTip="Adds an OS to the list by copying the selected one: a new name, folder and release (for example 26H2). The catalog searches are updated for the new release and the repository folders are created."/><MenuItem x:Name="RenameOsItem" Header="Rename OS..." ToolTip="Changes the selected OS's display name and, if wanted, its folder name. Saved settings, the app list and the repository folder move with it."/><MenuItem x:Name="CheckOsItem" Header="Check OS profile" ToolTip="Tests the selected OS's profile before a long run: the repository folder, which edition it picks on the ISO (and its build), and what each catalog search finds. Changes and downloads nothing."/><MenuItem x:Name="EditOsItem" Header="Edit OS profile..." ToolTip="Opens the selected OS's profile file in Notepad. Save it, then press Reload profiles; problems are shown in the Log tab."/><MenuItem x:Name="OpenProfilesItem" Header="Open Profiles folder" ToolTip="Opens the folder holding the OS profile files in Explorer."/></ContextMenu></Button.ContextMenu>
+    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><MenuItem x:Name="VerifyExistingItem" Header="Verify existing install.wim..." ToolTip="Runs only the Verify step on the selected OS's NEWWIM\install.wim (read-only, a few minutes per index) and writes its change log and RunResult.json - for an image whose run stopped after the export, so the SCCM tab can import it. Uses the ticked LCU, languages and apps for what to expect."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/><Separator/><MenuItem x:Name="NewOsItem" Header="New OS from existing..." ToolTip="Adds an OS to the list by copying the selected one: a new name, folder and release (for example 26H2). The catalog searches are updated for the new release and the repository folders are created."/><MenuItem x:Name="RenameOsItem" Header="Rename OS..." ToolTip="Changes the selected OS's display name and, if wanted, its folder name. Saved settings, the app list and the repository folder move with it."/><MenuItem x:Name="CheckOsItem" Header="Check OS profile" ToolTip="Tests the selected OS's profile before a long run: the repository folder, which edition it picks on the ISO (and its build), and what each catalog search finds. Changes and downloads nothing."/><MenuItem x:Name="EditOsItem" Header="Edit OS profile..." ToolTip="Opens the selected OS's profile file in Notepad. Save it, then press Reload profiles; problems are shown in the Log tab."/><MenuItem x:Name="OpenProfilesItem" Header="Open Profiles folder" ToolTip="Opens the folder holding the OS profile files in Explorer."/></ContextMenu></Button.ContextMenu>
    </Button>
    <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files, with optional refreshed media and ISO." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
@@ -3701,7 +3774,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkReuseInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkReuseInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','VerifyExistingItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -4430,7 +4503,7 @@ function Complete-BackgroundRun {
         }
         # A servicing run finished and "Import after the run finishes" is ticked: import straight away, without a dialog
         # (the engine refuses an image whose validation gate FAILED).
-        if ($resMode -eq '' -and $res -and -not [bool](Get-ProfileValue $res 'Preflight' $false) -and (Get-ProfileValue $res 'Install' $null) -and [bool]$script:ChkSccmAutoImport.IsChecked) {
+        if ($resMode -in @('', 'VerifyExisting') -and $res -and -not [bool](Get-ProfileValue $res 'Preflight' $false) -and (Get-ProfileValue $res 'Install' $null) -and [bool]$script:ChkSccmAutoImport.IsChecked) {
             if ([string](Get-ProfileValue $res 'Gate' '') -eq 'FAILED') {
                 Add-LogText '[WARN] Import after the run finishes is ticked, but the validation gate FAILED, so the image is not imported.'
             } else {
@@ -4438,6 +4511,13 @@ function Complete-BackgroundRun {
                 Start-SccmBackground -Mode 'SccmImport' -DryRun $false
                 return
             }
+        }
+        if ($resMode -eq 'VerifyExisting') {
+            $failed = ([string]$res.Gate -eq 'FAILED')
+            $msg = "Verify existing install.wim: validation gate $($res.Gate)$(if ($failed) { " ($($res.VerifyIssues) issue(s) - see the VERIFY lines on the Log tab)" }).`n`n  $($res.Install)$(if ($res.ChangeLogHtml) { "`n  Change log: $($res.ChangeLogHtml)" })`n`n$(if ($failed) { 'The run record says FAILED, so the SCCM import refuses this image.' } else { 'The run record (RunResult.json) is written; the SCCM tab can import this install.wim now.' })"
+            [System.Windows.MessageBox]::Show($msg, 'WimForge - Verify existing install.wim', 'OK', $(if ($failed) { 'Warning' } else { 'Information' })) | Out-Null
+            Update-HeaderIdle
+            return
         }
         if ($isApps) {
             [System.Windows.MessageBox]::Show("$($res.Count) provisioned app(s) read from $($res.Source), index $($res.Index) ($($res.ImageName)).`n`nTick the apps to remove on the Apps tab, then press Save settings.", 'WimForge - Apps', 'OK', 'Information') | Out-Null
@@ -4789,6 +4869,25 @@ $script:CheckOsItem.Add_Click({
     catch {
         $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         [System.Windows.MessageBox]::Show("Could not start the check: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+    }
+})
+$script:VerifyExistingItem.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { [System.Windows.MessageBox]::Show('A run is in progress. Try again once it has finished.', 'WimForge', 'OK', 'Information') | Out-Null; return }
+    if (-not $script:EngineText) { [System.Windows.MessageBox]::Show('Verify existing install.wim needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null; return }
+    $opts = Get-UiOptions
+    if (-not $opts.OsName) { return }
+    # The OS folder (and so whether NEWWIM\install.wim is there) is resolved by the engine, renamed folders included.
+    $wim = "NEWWIM\install.wim of $($opts.OsName)"
+    $langs = if (@($opts.Languages).Count) { @($opts.Languages) -join ', ' } else { 'none (English only)' }
+    $q = "Verify $wim again?`n`nOnly the Verify step runs: each index is mounted read-only (a few minutes each) and nothing in the image changes. Then the change log and NEWWIM\RunResult.json are written, so the SCCM tab can import it.`n`nWhat it checks for comes from the window - LCU: $(if ($opts.LCU) { 'expected' } else { 'not expected' }); languages: $langs. Set them as for the run that built this image."
+    if ([System.Windows.MessageBox]::Show($q, 'WimForge - Verify existing install.wim', 'YesNo', 'Question') -ne 'Yes') { return }
+    $opts | Add-Member -NotePropertyName Mode -NotePropertyValue 'VerifyExisting' -Force
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start the verify: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
     }
 })
 $script:EditOsItem.Add_Click({

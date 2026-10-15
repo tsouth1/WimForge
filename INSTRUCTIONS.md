@@ -158,6 +158,7 @@ Imports the latest finished run of the selected OS into Configuration Manager. N
 
 Every run also does a smaller version of this for its own OS folder at the start: stray mounts are discarded and ISOs of that OS still mounted are dismounted, with a WARN in the log.
 
+- **Verify existing install.wim...** - runs only the Verify step on the selected OS's `NEWWIM\install.wim`, then writes its change log and `NEWWIM\RunResult.json`. Use it when a run stopped after it had written `install.wim` but before the end (no `RunResult.json`, so the SCCM tab cannot import it). Each index is mounted read-only (a few minutes each); nothing in the image changes, and no ISO or patch is needed. What it checks for comes from the window, as in a run: tick the LCU, languages and apps as for the run that built the image. If **Import after the run finishes** is ticked on the SCCM tab and the gate passes, the import starts straight away. A FAILED gate is recorded too, and the import then refuses the image.
 - **Save run config...** - see "Running without the window" below.
 - **New OS from existing...**, **Rename OS...**, **Check OS profile**, **Edit OS profile...**, **Open Profiles folder** - see the next section.
 
@@ -267,5 +268,6 @@ When asking for help with a run, send the `MediaRefresh_*`, `DISM_*` and `Change
 - **SCCM: "The Configuration Manager console is not installed"** - install the console on the build machine; the import uses its PowerShell module.
 - **SCCM: "not inside a shared folder on this server"** - Configuration Manager reads the content over the network, so the content source folder must be inside a share. Share it (or a parent folder).
 - **SCCM: "Refused: ... FAILED its validation gate"** - fix what the VERIFY lines report, run again, then import.
+- **The run stopped after "Import-ready install.wim created"** (for example in Verify), so there is no `RunResult.json` and the SCCM tab has nothing to import - use Tools > Verify existing install.wim, then import.
 - **A step takes far longer than usual** (component cleanup over half an hour) - check the antivirus exclusion for the repository root and its `MOUNT` folders.
 - **Support-end warning in red** - the OS is within 180 days of the end of support; plan its replacement.
