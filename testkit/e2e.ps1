@@ -584,7 +584,7 @@ function Get-CMDistributionPoint { param([switch]$AllSite) @([pscustomobject]@{ 
 function Get-CMDistributionPointGroup { @([pscustomobject]@{ Name = 'All DPs' }) }
 function Get-CMOperatingSystemImage { param($Name) @($script:Cm.Images | Where-Object { $_ -like $Name } | ForEach-Object { [pscustomobject]@{ Name = $_ } }) }
 function Get-CMOperatingSystemInstaller { param($Name) @($script:Cm.Installers | Where-Object { $_ -like $Name } | ForEach-Object { [pscustomobject]@{ Name = $_ } }) }
-function New-CMOperatingSystemImage { param($Name, $Path, $Description, $Version) $script:Cm.Calls.Add("NewImage|$Name|$Path|$Version"); $script:Cm.Images.Add($Name); [pscustomobject]@{ PackageID = 'PS100123'; Name = $Name } }
+function New-CMOperatingSystemImage { param($Name, $Path, $Description, $Version) $script:Cm.Description = $Description; $script:Cm.Calls.Add("NewImage|$Name|$Path|$Version"); $script:Cm.Images.Add($Name); [pscustomobject]@{ PackageID = 'PS100123'; Name = $Name } }
 function New-CMOperatingSystemInstaller { param($Name, $Path, $Description, $Version) $script:Cm.Calls.Add("NewInstaller|$Name|$Path"); $script:Cm.Installers.Add($Name); [pscustomobject]@{ PackageID = 'PS100124'; Name = $Name } }
 function Start-CMContentDistribution { param($OperatingSystemImageId, $OperatingSystemInstallerId, $DistributionPointName, $DistributionPointGroupName) $script:Cm.Calls.Add("Distribute|img=$OperatingSystemImageId|inst=$OperatingSystemInstallerId|dp=$DistributionPointName|group=$DistributionPointGroupName") }
 $shareRoot = Join-Path $base '_share'; $contentRoot = Join-Path $shareRoot 'OSD\Images'; New-Item -ItemType Directory -Force $contentRoot | Out-Null
@@ -603,7 +603,17 @@ $dry19 = Invoke-MediaRefresh (Opts19)
 Check 'check only: the plan names the next free name, the UNC import path, size, build and gate' ($dry19.DryRun -and $dry19.Name -eq 'Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)' -and $dry19.ImportPath -eq '\\BUILD01\Sources\OSD\Images\Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)\install.wim' -and $dry19.Build -eq '10.0.19044.6456' -and $dry19.Gate -eq 'PASSED' -and $dry19.SiteCode -eq 'PS1')
 Check 'check only: nothing is copied, imported or distributed' ($script:Cm.Calls.Count -eq 0 -and @(Get-ChildItem $contentRoot).Count -eq 0)
 Check 'the description (127 characters at most) names the build, gate and change log' ($dry19.Description.Length -le 127 -and $dry19.Description -like '*build 10.0.19044.6456; gate PASSED; change log ChangeLog_KMS.html')
-$real19 = Invoke-MediaRefresh (Opts19 @{ DryRun = $false; SccmImageName = $dry19.Name })
+# The description template on the SCCM tab (2026-10-15): empty = the default, unchanged from before; placeholders in any case
+Check 'without a template the description is the one imports always had' ($dry19.Description -eq "WimForge $($script:ToolVersion); build 10.0.19044.6456; gate PASSED; change log ChangeLog_KMS.html")
+$d19 = Invoke-MediaRefresh (Opts19 @{ SccmDescription = '{BUILD} {gate} {changelog} {finished} {Tool} {os} {unknown}' })
+Check 'a template fills in the placeholders (any case) and keeps other text as typed' ($d19.Description -eq "10.0.19044.6456 PASSED ChangeLog_KMS.html $((Read-RunResult -NewWim $nw19).Finished) $($script:ToolVersion) Windows 10 Enterprise LTSC 2021 (KMS) {unknown}") $d19.Description
+$logs19 = [System.Collections.Generic.List[string]]::new(); $wl19 = ${function:Write-Log}; function Write-Log { param($Message, $Level = 'INFO') $logs19.Add("[$Level] $Message") }
+$d19b = Invoke-MediaRefresh (Opts19 @{ SccmDescription = ('y' * 140) + ' {build}' })
+Set-Item function:Write-Log $wl19
+Check 'a description over 127 characters is cut to 127, with a WARN' ($d19b.Description -eq ('y' * 127) -and [bool]($logs19 -match '^\[WARN\] The description is longer than the 127 characters'))
+Check 'Expand-SccmDescription: a run without a change log gives an empty {changelog}' ((Expand-SccmDescription -Template '{gate}|{changelog}|' -Run ([pscustomobject]@{ Build = '1'; Gate = 'PASSED'; ChangeLog = ''; Finished = '' })) -eq 'PASSED||')
+$real19 = Invoke-MediaRefresh (Opts19 @{ DryRun = $false; SccmImageName = $dry19.Name; SccmDescription = 'Gold {build}' })
+Check 'import: the OS image gets the description from the template' ($script:Cm.Description -eq 'Gold 10.0.19044.6456' -and $real19.Description -eq 'Gold 10.0.19044.6456')
 $dest19 = Join-Path $contentRoot 'Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)'
 Check 'import: install.wim is copied into a new sub-folder named after the image' ((Get-Content -Raw (Join-Path $dest19 'install.wim')).Trim() -eq 'kms-wim')
 Check 'import: the OS image is created from the UNC path, with the build as its version' (($script:Cm.Calls | Where-Object { $_ -like 'NewImage|*' }) -eq "NewImage|Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)|\\BUILD01\Sources\OSD\Images\Windows 10 Enterprise LTSC 2021 (KMS) 202609 (2)\install.wim|10.0.19044.6456")

@@ -366,14 +366,14 @@ Save-GeneralSettings -Directory $gs15 -Root 'F:\mediaRefresh' -ColorScheme 'Mode
 Save-GeneralSettings -Directory $gs15 -SccmSiteServer 'cm01.contoso.com' -SccmTargetType 'DPGroup' -SccmTarget 'All DPs'
 $sg15 = Read-SccmGeneralSettings -Directory $gs15
 Check 'SCCM site server and target are saved in General.json without losing the root or the colour scheme' ($sg15.SiteServer -eq 'cm01.contoso.com' -and $sg15.TargetType -eq 'DPGroup' -and $sg15.Target -eq 'All DPs' -and (Read-GeneralSettings -Directory $gs15) -eq 'F:\mediaRefresh' -and (Read-ColorSchemeSetting -Directory $gs15) -eq 'Modern Sysadmin')
-[void](Save-OsSettings -Directory $gs15 -Definition $kms -Options @{ SccmAutoImport = $true } -Sccm @{ ContentSource = 'F:\Sources\OSD'; PackageType = 'Upgrade'; ImageName = 'KMS custom' })
+[void](Save-OsSettings -Directory $gs15 -Definition $kms -Options @{ SccmAutoImport = $true } -Sccm @{ ContentSource = 'F:\Sources\OSD'; PackageType = 'Upgrade'; ImageName = 'KMS custom'; Description = 'KMS {build} ({gate})' })
 $os15 = Read-OsSettings -Directory $gs15 -Definition $kms -LanguageList $builtLangs
-Check 'per OS: content source, package type, a hand-typed image name and Import after the run are saved' ($os15.Sccm.ContentSource -eq 'F:\Sources\OSD' -and $os15.Sccm.PackageType -eq 'Upgrade' -and $os15.Sccm.ImageName -eq 'KMS custom' -and $os15.Options['SccmAutoImport'] -eq $true)
+Check 'per OS: content source, package type, a hand-typed image name and Import after the run are saved' ($os15.Sccm.ContentSource -eq 'F:\Sources\OSD' -and $os15.Sccm.PackageType -eq 'Upgrade' -and $os15.Sccm.ImageName -eq 'KMS custom' -and $os15.Sccm.Description -eq 'KMS {build} ({gate})' -and $os15.Options['SccmAutoImport'] -eq $true)
 
 Write-Host "`n=== P16 run config files for the command line (2026-09-28) ==="
 $defs16 = Import-OsProfiles
 $cf16 = Join-Path $tmp 'cfg16\Configs\kms_run.json'
-[void](Save-RunConfig -File $cf16 -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Root 'F:\mediaRefresh' -Options @{ Verify = $true; BuildMedia = $true; BuildIso = $true; AutoDownload = $true; SccmAutoImport = $true } -Languages @('DE-DE', 'ja-jp') -RemoveApps @('Microsoft.BingNews') -Sccm @{ siteServer = 'cm01.contoso.com'; target = 'dp01.contoso.com'; contentSource = 'F:\Sources\OSD' })
+[void](Save-RunConfig -File $cf16 -OsName 'Windows 10 Enterprise LTSC 2021 (KMS)' -Root 'F:\mediaRefresh' -Options @{ Verify = $true; BuildMedia = $true; BuildIso = $true; AutoDownload = $true; SccmAutoImport = $true } -Languages @('DE-DE', 'ja-jp') -RemoveApps @('Microsoft.BingNews') -Sccm @{ siteServer = 'cm01.contoso.com'; target = 'dp01.contoso.com'; contentSource = 'F:\Sources\OSD'; description = 'Gold {build}' })
 $rc16 = Read-RunConfig -File $cf16 -Definitions $defs16 -LanguageList $builtLangs
 Check 'a saved run config reads back: OS, root, every option, languages (lower case), apps, SCCM values' ($rc16.OsName -eq 'Windows 10 Enterprise LTSC 2021 (KMS)' -and $rc16.Root -eq 'F:\mediaRefresh' -and $rc16.Options['AutoDownload'] -and $rc16.Options['BuildIso'] -and -not $rc16.Options['NetFx3'] -and (@($rc16.Languages) -join ',') -eq 'de-de,ja-jp' -and (@($rc16.RemoveApps) -join ',') -eq 'Microsoft.BingNews' -and $rc16.Sccm['siteServer'] -eq 'cm01.contoso.com' -and @($script:SettingOptionNames | Where-Object { -not $rc16.Options.ContainsKey($_) }).Count -eq 0)
 $min16 = Join-Path $tmp 'cfg16\min.json'; [System.IO.File]::WriteAllText($min16, '{ "os": "Windows 11 Enterprise 24H2", "root": "F:\\mediaRefresh" }')
@@ -390,6 +390,7 @@ Check '-Preflight forces a check-only run; the ISO needs the media folder; ticke
 $rc16.Options['BuildMedia'] = $false; $rc16.Options['AppRemoval'] = $false
 $ro16c = ConvertTo-RunOptions -Config $rc16 -Definition $defs16['Windows 10 Enterprise LTSC 2021 (KMS)']
 Check '... without the media folder there is no ISO; with AppRemoval off no app is removed' (-not $ro16c.BuildIso -and @($ro16c.RemoveApps).Count -eq 0 -and $ro16c.SccmTargetType -eq 'DP' -and $ro16c.SccmPackageType -eq 'Image')
+Check 'the SCCM description template is carried by a run config (and is empty, meaning the default, when not given)' ($rc16.Sccm['description'] -eq 'Gold {build}' -and $ro16c.SccmDescription -eq 'Gold {build}' -and $ro16.SccmDescription -eq '')
 $bad16 = Join-Path $tmp 'cfg16\bad.json'
 [System.IO.File]::WriteAllText($bad16, '{ "os": "Windows 12", "options": { "Verfy": true, "LCU": "yes" }, "languages": ["xx-yy"], "sccm": { "site": "x" }, "extra": 1 }')
 $threw = $false; try { Read-RunConfig -File $bad16 -Definitions $defs16 -LanguageList $builtLangs } catch { $threw = $true; $m16 = $_.Exception.Message }

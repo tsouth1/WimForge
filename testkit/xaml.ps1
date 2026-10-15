@@ -54,11 +54,11 @@ if ($wpf) {
     foreach ($n in $script:SettingOptionNames) { Set-Variable -Name "Chk$n" -Scope Script -Value $win.FindName("Chk$n") }
     $script:RootText = $win.FindName('RootText'); $script:LanguageList = $win.FindName('LanguageList')
     Check 'the Save settings and Reset to defaults buttons are in the window' ($null -ne $win.FindName('SaveSettingsButton') -and $null -ne $win.FindName('ResetSettingsButton'))
-    foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource', 'SccmSiteServer', 'SccmSiteInfo', 'SccmTargetDP', 'SccmTargetGroup', 'SccmTargetList', 'SccmTarget', 'SccmContentSource', 'SccmUncPreview', 'SccmImageName', 'SccmPackageType', 'SccmLastRun') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
-    $script:SccmLists = $null; $script:SccmSourceServer = 'BUILD01'
+    foreach ($n in 'AppList', 'ReadAppsButton', 'ChkAppRemoval', 'AppsSource', 'SccmSiteServer', 'SccmSiteInfo', 'SccmTargetDP', 'SccmTargetGroup', 'SccmTargetList', 'SccmTarget', 'SccmContentSource', 'SccmUncPreview', 'SccmImageName', 'SccmPackageType', 'SccmLastRun', 'SccmDescription', 'SccmDescriptionPreview') { Set-Variable -Name $n -Scope Script -Value $win.FindName($n) }
+    $script:SccmLists = $null; $script:SccmSourceServer = 'BUILD01'; $script:SccmRun = $null
     $script:ServerShares = @([pscustomobject]@{ Name = 'Sources'; Path = "$env:SystemDrive\Sources" })   # not this PC's real shares (on a drive every PC has)
     foreach ($fn in 'Set-OsSettings', 'Get-SelectedSettings', 'Save-CurrentOsSettings', 'Reset-CurrentOsSettings', 'Get-TickedApps', 'Update-AppList',
-                    'Get-SccmAutoName', 'Get-SccmPackageTypeTag', 'Set-SccmPackageType', 'Update-SccmTargetList', 'Update-SccmUncPreview', 'Update-SccmLastRun', 'Set-SccmOsValues', 'Get-SccmSelected') {
+                    'Get-SccmAutoName', 'Get-SccmPackageTypeTag', 'Set-SccmPackageType', 'Update-SccmTargetList', 'Update-SccmUncPreview', 'Update-SccmLastRun', 'Update-SccmDescriptionPreview', 'Set-SccmOsValues', 'Get-SccmSelected') {
         $fm = [regex]::Match($src, "(?s)function $fn \{.*?\r?\n\}\r?\n"); Invoke-Expression $fm.Value
     }
     $script:SettingsDir = Join-Path $PWD 'tst_settings'; if (Test-Path $script:SettingsDir) { Remove-Item -Recurse -Force $script:SettingsDir }
@@ -131,6 +131,22 @@ if ($wpf) {
     Check 'WPF SCCM tab: site server and distribution target are saved once for every OS' ($sg12.SiteServer -eq 'cm01.contoso.com' -and $sg12.TargetType -eq 'DPGroup' -and $sg12.Target -eq 'All DPs')
     $script:SccmImageName.Text = (Get-SccmAutoName)
     Check 'WPF SCCM tab: back to the automatic name, nothing typed is saved' ((Get-SccmSelected).ImageName -eq '')
+    # Description (2026-10-15): the default template, a preview filled from the latest run, saved per OS when changed
+    Check 'WPF SCCM tab: the Description box holds the default template, with a Reset button' ($script:SccmDescription.Text -eq 'WimForge {tool}; build {build}; gate {gate}; change log {changelog}' -and [string]$win.FindName('SccmDescResetButton').Content -eq 'Reset' -and $src -match '\$script:SccmDescResetButton\.Add_Click\(\{ \$script:SccmDescription\.Text = \$script:SccmDescriptionDefault \}\)' -and $src -match '\$script:SccmDescription\.Add_TextChanged\(\{ Update-SccmDescriptionPreview \}\)')
+    $script:SccmRun = $null; Update-SccmDescriptionPreview
+    $noRun = $script:SccmDescriptionPreview.Text
+    $script:SccmRun = [pscustomobject]@{ Build = '10.0.20348.5761'; Gate = 'PASSED'; ChangeLog = 'J:\x\LOGS\ChangeLog_S2022.html'; Finished = '2026-10-15 07:30:00' }
+    $script:SccmDescription.Text = 'Patched {build} ({gate}), {changelog}'; Update-SccmDescriptionPreview
+    $custom = $script:SccmDescriptionPreview.Text
+    $script:SccmDescription.Text = 'x' * 130; Update-SccmDescriptionPreview
+    $long = $script:SccmDescriptionPreview.Text
+    Check 'WPF SCCM tab: the preview shows the description the import will give, filled from the latest run; too long is flagged' ($noRun -like 'No finished run yet*{build}*' -and $custom -like 'Will be: Patched 10.0.20348.5761 (PASSED), ChangeLog_S2022.html   (placeholders:*' -and $long -eq "Will be (cut to 127 of 130 characters): $('x' * 127)") "$noRun / $custom / $long"
+    $script:SccmDescription.Text = 'KMS {build}'; [void](Save-CurrentOsSettings)
+    $script:OsCombo.SelectedItem = 'Windows 11 Enterprise 24H2'; Set-OsSettings; $w11Desc = $script:SccmDescription.Text
+    $script:OsCombo.SelectedItem = 'Windows 10 Enterprise LTSC 2021 (KMS)'; Set-OsSettings
+    Check 'WPF SCCM tab: a changed description is saved per OS; another OS keeps the default' ($script:SccmDescription.Text -eq 'KMS {build}' -and $w11Desc -eq 'WimForge {tool}; build {build}; gate {gate}; change log {changelog}' -and (Get-SccmSelected).Description -eq 'KMS {build}')
+    $script:SccmDescription.Text = 'WimForge {tool}; build {build}; gate {gate}; change log {changelog}'
+    Check 'WPF SCCM tab: the default description is not saved as typed text' ((Get-SccmSelected).Description -eq '')
     Update-SccmUncPreview
     $okPreview = $script:SccmUncPreview.Text
     $script:SccmContentSource.Text = "$env:SystemDrive\Elsewhere"; Update-SccmUncPreview
