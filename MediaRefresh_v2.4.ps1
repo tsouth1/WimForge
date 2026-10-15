@@ -19,7 +19,8 @@
                Check OS profile, Edit OS profile, Open Profiles folder; the {version} release placeholder in profiles;
                the local ADK check for Build an ISO; the app list per OS in Profiles\Apps; download only what is missing.
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
-               install.wim; no fixed drive letter (the repository root defaults to the script's folder).
+               install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
+               longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14).
       * Real runs: Windows 11 24H2 Enterprise and Windows 10 LTSC 2019 (IoT) install.wim with gate PASSED.
     Version 2.4.0 (draft - mock-tested; real catalog dry runs for LTSC 2019 only; never run against real images or a real DISM yet).
       * Added: acquisition layer (step 5) - "Download patches..." searches the Microsoft Update Catalog via the
@@ -2291,10 +2292,16 @@ function Test-OutputWim {
                 $capCategory = if ($c.Name -like 'Language.Fonts.*') { 'Font' } elseif ($c.Name -like 'Language.*') { 'Language capability' } else { 'Capability' }
                 $script:VerifyInventory.Add([pscustomobject]@{ Index = $img.ImageIndex; Category = $capCategory; Item = $c.Name; Version = ''; Kb = ''; State = [string]$c.State })
             }
-            foreach ($f in @(Get-WindowsOptionalFeature -Path $Paths.MainMount -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Enabled' })) {
+            # -ErrorAction SilentlyContinue does not stop a terminating error, so these inventory reads are caught: Server Core
+            # (Windows Server 2022 Standard / Datacenter without Desktop Experience) has no AppX stack, and
+            # Get-AppxProvisionedPackage throws 0x8007007E "The specified module could not be found" (Server 2022 run, 2026-10-14).
+            $features = @(); try { $features = @(Get-WindowsOptionalFeature -Path $Paths.MainMount -ErrorAction SilentlyContinue) }
+            catch { Write-Log "VERIFY   optional features could not be read from this image ($($_.Exception.Message)); they are left out of the change log." 'WARN' }
+            foreach ($f in @($features | Where-Object { $_.State -eq 'Enabled' })) {
                 $script:VerifyInventory.Add([pscustomobject]@{ Index = $img.ImageIndex; Category = 'Optional feature'; Item = $f.FeatureName; Version = ''; Kb = ''; State = 'Enabled' })
             }
-            $provisioned = @(Get-AppxProvisionedPackage -Path $Paths.MainMount -ErrorAction SilentlyContinue)
+            $provisioned = @(); try { $provisioned = @(Get-AppxProvisionedPackage -Path $Paths.MainMount -ErrorAction SilentlyContinue) }
+            catch { Write-Log "VERIFY   provisioned apps could not be read from this image ($($_.Exception.Message)); a Server Core image has no AppX, so none are listed." }
             foreach ($a in $provisioned) {
                 $script:VerifyInventory.Add([pscustomobject]@{ Index = $img.ImageIndex; Category = 'Provisioned appx'; Item = $a.DisplayName; Version = [string]$a.Version; Kb = ''; State = 'Provisioned' })
             }

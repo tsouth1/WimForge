@@ -474,14 +474,16 @@ function New-App18($n) { [pscustomobject]@{ DisplayName = $n; Version = '1.0.0.0
 $script:Prov18 = [System.Collections.Generic.List[object]]::new()
 function Reset-Prov18 { $script:Prov18.Clear(); foreach ($n in 'Microsoft.BingNews', 'Microsoft.Copilot', 'Microsoft.WindowsCalculator') { $script:Prov18.Add((New-App18 $n)) } }
 $gap18 = ${function:Get-AppxProvisionedPackage}; $gwi18 = ${function:Get-WindowsImage}
-function Get-AppxProvisionedPackage { [CmdletBinding()] param($Path) return @($script:Prov18) }
+function Get-AppxProvisionedPackage { [CmdletBinding()] param($Path)
+    if ($script:NoAppx18) { $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new([System.Runtime.InteropServices.COMException]::new('The specified module could not be found.', -2147024770), 'NoAppx', 'NotSpecified', $Path)) }
+    return @($script:Prov18) }
 function Remove-AppxProvisionedPackage { [CmdletBinding()] param($Path, $PackageName)
     if ($script:FailRemove18) { throw 'Access is denied' }
     Note "RemoveAppx $PackageName"; $hit = @($script:Prov18 | Where-Object { $_.PackageName -eq $PackageName }); foreach ($h in $hit) { [void]$script:Prov18.Remove($h) } }
 function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
     if (-not $Mounted -and $ImagePath -like '*boot*' -and -not $Index) { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }) }
     & $gwi18 @PSBoundParameters }
-$script:FailRemove18 = $false
+$script:FailRemove18 = $false; $script:NoAppx18 = $false
 $os18 = Join-Path $base 'Win11Enterprise_24H2'; $appsFile18 = Join-Path $base 'Apps\Win11_Enterprise_24H2_Appx.json'   # no ProfilesDir in these runs: Apps beside the OS folders
 $script:SourceNames = @('Windows 11 Pro', 'Windows 11 Pro N', 'Windows 11 Enterprise')
 # Read apps from the ISO: works with empty PATCHES folders (it needs no patches), only mounts read-only, saves the list
@@ -522,7 +524,7 @@ Check 'a real run does not touch the Apps tab list (11b)' ((Get-Item $appsFile18
 # A removal that fails: WARN, the run goes on, Verify catches that the app is still there
 Reset-Test; Reset-Prov18; $script:FailRemove18 = $true
 Invoke-MediaRefresh $o18
-$script:FailRemove18 = $false
+$script:FailRemove18 = $false; $script:NoAppx18 = $false
 Check 'a removal that fails is caught by Verify (app still provisioned) and fails the gate' ($script:LastResult.Gate -eq 'FAILED' -and $script:LastResult.VerifyIssues -ge 1)
 # Preflight: an up-to-date list is not read again; a list from another index is; ticked apps missing from the list are named
 Reset-Test; Reset-Prov18; $logs18.Clear()
@@ -559,6 +561,14 @@ try { Invoke-MediaRefresh $s18 } catch { }
 Set-Item function:Write-Log $wl18
 Check 'Windows Server: ticked apps are ignored with a WARN' ([bool]($logs18 -match '^\[WARN\] App removal is for client editions; the ticked apps are ignored') -and @($script:Calls -match '^RemoveAppx').Count -eq 0)
 $script:ImageCount = 1
+# Server Core has no AppX: Get-AppxProvisionedPackage throws a terminating 0x8007007E that -ErrorAction SilentlyContinue
+# does not stop; Verify must carry on, the gate pass and the run record be written (Server 2022 run, 2026-10-14)
+Reset-Test; $logs18.Clear(); $script:NoAppx18 = $true
+Remove-Item (Join-Path $os18 'NEWWIM\RunResult.json') -Force -ErrorAction SilentlyContinue
+function Write-Log { param($Message, $Level = 'INFO') $logs18.Add("[$Level] $Message") }
+$threw = $false; try { Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; SetupDU = $false }) } catch { $threw = $true; $m18 = $_.Exception.Message }
+Set-Item function:Write-Log $wl18; $script:NoAppx18 = $false
+Check 'an image without AppX (Server Core): Verify notes it, the gate passes and RunResult.json is written' (-not $threw -and [bool]($logs18 -match '^\[INFO\] VERIFY   provisioned apps could not be read from this image \(The specified module could not be found\.\)') -and $script:LastResult.Gate -eq 'PASSED' -and (Test-Path (Join-Path $os18 'NEWWIM\RunResult.json'))) $(if ($threw) { $m18 })
 Set-Item function:Get-AppxProvisionedPackage $gap18; Set-Item function:Get-WindowsImage $gwi18
 
 Write-Host "`n=== E19 SCCM import: check, copy, import, distribute (TODO step 7; Configuration Manager mocked) ==="

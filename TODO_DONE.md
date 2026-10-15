@@ -419,6 +419,7 @@ All three read the same instrumentation: a `Set-Phase` call at each stage bounda
 <a id="history"></a>
 ## History
 
+- 2026-10-15: the operator's first Server 2022 run (2026-10-14, four indexes) serviced and exported install.wim, then failed in Verify on index 1 (Server Core): `Get-AppxProvisionedPackage` throws a terminating 0x8007007E on an image without AppX, which `-ErrorAction SilentlyContinue` does not stop. Verify now catches the provisioned-app and optional-feature reads (no apps listed, the gate unaffected). TODO.md step 6 records the run. Test kit 669 checks (E18).
 - 2026-10-07: reviewed the operator's first Windows 10 Enterprise 22H2 run (new OS made from LTSC 2019): the LCU KB5129236 failed on install.wim with 0x80073713 in the LCU's Extended Security Updates installer (0x80070659), and the run used index 1 (Education) because the profile kept LTSC 2019's edition pattern - recorded in TODO.md step 17. Step 13: 26H2 marked done through step 17; its next run will meet the ADK's DISM (26100) older than the image (26300).
 - 2026-10-07: step 4 (ADK DISM) closed and moved to TODO_DONE.md after the 2026-10-06 Win11 run; the ADK-version requirement for new OSes is noted in step 13.
 - 2026-10-06: step 2 (validate v2.4) closed: the catalog layer and five real runs with gate PASSED; the remaining runs (LTSC 2021 KMS ten languages, Server 2022, IoT LTSC 2021), feature checks, end-of-support dates and the 1809 Setup DU check moved to step 6. Index rows for steps 7 and 18 updated after the 2026-10-06 import.
