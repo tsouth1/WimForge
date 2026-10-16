@@ -22,7 +22,8 @@
                an SCCM tab Description box (template with {build}, {gate}, {changelog}, ... and a preview of the text).
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
                install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
-               longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14).
+               longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14);
+               Verify existing install.wim no longer starts the SCCM import when Import after the run finishes is ticked.
       * Real runs: Windows 11 24H2 Enterprise and Windows 10 LTSC 2019 (IoT) install.wim with gate PASSED.
     Version 2.4.0 (draft - mock-tested; real catalog dry runs for LTSC 2019 only; never run against real images or a real DISM yet).
       * Added: acquisition layer (step 5) - "Download patches..." searches the Microsoft Update Catalog via the
@@ -4544,8 +4545,9 @@ function Complete-BackgroundRun {
             return
         }
         # A servicing run finished and "Import after the run finishes" is ticked: import straight away, without a dialog
-        # (the engine refuses an image whose validation gate FAILED).
-        if ($resMode -in @('', 'VerifyExisting') -and $res -and -not [bool](Get-ProfileValue $res 'Preflight' $false) -and (Get-ProfileValue $res 'Install' $null) -and [bool]$script:ChkSccmAutoImport.IsChecked) {
+        # (the engine refuses an image whose validation gate FAILED). Never after Tools > Verify existing install.wim,
+        # which only verifies (an operator's verify imported the KMS image, 2026-10-16); the SCCM tab imports it.
+        if ($resMode -eq '' -and $res -and -not [bool](Get-ProfileValue $res 'Preflight' $false) -and (Get-ProfileValue $res 'Install' $null) -and [bool]$script:ChkSccmAutoImport.IsChecked) {
             if ([string](Get-ProfileValue $res 'Gate' '') -eq 'FAILED') {
                 Add-LogText '[WARN] Import after the run finishes is ticked, but the validation gate FAILED, so the image is not imported.'
             } else {
@@ -4923,7 +4925,7 @@ $script:VerifyExistingItem.Add_Click({
     # The OS folder (and so whether NEWWIM\install.wim is there) is resolved by the engine, renamed folders included.
     $wim = "NEWWIM\install.wim of $($opts.OsName)"
     $langs = if (@($opts.Languages).Count) { @($opts.Languages) -join ', ' } else { 'none (English only)' }
-    $q = "Verify $wim again?`n`nOnly the Verify step runs: each index is mounted read-only (a few minutes each) and nothing in the image changes. Then the change log and NEWWIM\RunResult.json are written, so the SCCM tab can import it.`n`nWhat it checks for comes from the window - LCU: $(if ($opts.LCU) { 'expected' } else { 'not expected' }); languages: $langs. Set them as for the run that built this image."
+    $q = "Verify $wim again?`n`nOnly the Verify step runs: each index is mounted read-only (a few minutes each) and nothing in the image changes. Then the change log and NEWWIM\RunResult.json are written, so the SCCM tab can import it. Nothing is imported into SCCM, even with Import after the run finishes ticked.`n`nWhat it checks for comes from the window - LCU: $(if ($opts.LCU) { 'expected' } else { 'not expected' }); languages: $langs. Set them as for the run that built this image."
     if ([System.Windows.MessageBox]::Show($q, 'WimForge - Verify existing install.wim', 'YesNo', 'Question') -ne 'Yes') { return }
     $opts | Add-Member -NotePropertyName Mode -NotePropertyValue 'VerifyExisting' -Force
     $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
