@@ -28,6 +28,17 @@
                longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14);
                Verify existing install.wim no longer starts the SCCM import when Import after the run finishes is ticked.
       * Real runs: Windows 11 24H2 Enterprise and Windows 10 LTSC 2019 (IoT) install.wim with gate PASSED.
+      * Known issue (2026-10-16): the October 2026 LCU (KB5126657) and later cannot be installed offline into either
+               Windows 10 LTSC 2021 image (Enterprise LTSC 2021 KMS or IoT Enterprise LTSC 2021). From that LCU on, the
+               LCU deploys the Extended Security Updates installer (ExtendedSecurityUpdatesAI), which refuses offline
+               images: "ESU: Offline is not supported" (1625), DISM 0x80073713. IoT maps to the EnterpriseS edition
+               wrapper, so both editions are hit; injecting the ESU enablement package first does not help. The
+               September 2026 out-of-band LCU (KB5129236) is the last that installs offline. Both built-in LTSC 2021
+               profiles therefore set holdKB = KB5129236 on their LCU rule (holdReason gives the reason): Download
+               patches fetches KB5129236 instead of the newest LCU and prunes the rest, the run installs only it, and
+               Check OS profile shows the hold. Profiles saved before 2026-10-16 need holdKB added by hand (Edit OS
+               profile) or the file deleted and Reload profiles pressed. Install newer LCUs online (task sequence);
+               remove holdKB once Microsoft fixes the LCU.
     Version 2.4.0 (draft - mock-tested; real catalog dry runs for LTSC 2019 only; never run against real images or a real DISM yet).
       * Added: acquisition layer (step 5) - "Download patches..." searches the Microsoft Update Catalog via the
                MSCatalogLTS module using per-profile catalogSearch rules, shows a dry-run preview of what it found,

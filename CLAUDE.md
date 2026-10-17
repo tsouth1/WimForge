@@ -66,4 +66,4 @@ Real media/ISO testing only for Win11 and Server 2022+; Win10 LTSC = install.wim
 
 - Docs style: plain British-ish English, dated entries (`2026-10-06`), "the operator" not names; no real server/domain names in tracked files (use `<SCCM-SOURCE-SERVER>`, contoso.com).
 - Files use CRLF line endings.
-- Commit only when asked; branch is `main`.
+- Commit only when asked; branch is `main`. **Push to GitHub (`git push origin main`, remote tsouth1/WimForge) right after every commit** (operator's rule, 2026-10-17).
