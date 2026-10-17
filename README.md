@@ -1,8 +1,8 @@
 # WimForge
 
 WimForge automates adding cumulative patches, language packs, and Features on Demand to
-Windows OS media (Windows 11, Windows 10 LTSC, Windows Server 2022, and
-others) as an offline DISM servicing step, ahead of importing the refreshed
+Windows OS media (Windows 11, Windows 10 LTSC, Windows Server 2022 and 2025,
+and others) as an offline DISM servicing step, ahead of importing the refreshed
 images into SCCM/Configuration Manager for deployment.
 
 Inspired by other great tools, like WimWizard, WimWitch. While amazing in their own rights,
@@ -78,12 +78,12 @@ module), with a dry-run preview before anything is downloaded.
 
 v2.4 is being validated (step 2 closed 2026-10-06; the remaining real runs are in
 `TODO.md` step 6). It passes the mock test kit
-(706 checks, on Windows PowerShell 5.1 and 7) and every built-in catalog
+(715 checks, on Windows PowerShell 5.1 and 7) and every built-in catalog
 rule has been checked against the live Microsoft Update Catalog. Windows 11 24H2
 (three times English only, once with es-mx on the ADK's DISM), Windows 11 26H2 (install.wim), LTSC 2019 (ten
 languages) and LTSC 2021 KMS (four languages) have been serviced on real
-images, with the install.wim validation gate passing each time; IoT LTSC 2021
-and Server 2022 are still to be run. Treat it as a draft and test on
+images, with the install.wim validation gate passing each time; IoT LTSC 2021,
+Server 2022 and Server 2025 are still to be run. Treat it as a draft and test on
 non-production images first.
 
 ## Requirements

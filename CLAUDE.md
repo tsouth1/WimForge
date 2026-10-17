@@ -46,7 +46,7 @@ The user is "the operator" in the docs; Claude does the code, the operator does 
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File run_all.ps1` (5.1, what the tool runs on), and/or `pwsh -NoProfile -File run_all.ps1`.
   - Single suite: run that `.ps1` the same way. Suites: `parse`, `xaml`, `harness`, `e2e` (E1-E33), `runner`, `profiles` (P-numbered), `acquisition` (A-numbered). `lint.ps1` / `lint2.ps1` need PSScriptAnalyzer (not in run_all).
   - `$env:MR_SCRIPT` = path of another script copy to test. `mocks.ps1` is shared, dot-sourced.
-- Last known total: **706 checks, 7 suites, all passing** (2026-10-16). When adding a feature, add checks and update the count in TODO_DONE.md History, README.md and `testkit\README_TESTKIT.md`.
+- Last known total: **715 checks, 7 suites, all passing** (2026-10-17). When adding a feature, add checks and update the count in TODO_DONE.md History, README.md and `testkit\README_TESTKIT.md`.
 - Scratch output folders (`testkit\e2e`, `ptest`, `rt`, `tst*`, `acq`, `engine_only.ps1`) are gitignored and recreated each run.
 - Avast on this PC can quarantine new test scripts (see memory) - a vanished `.ps1` is likely the Virus Chest.
 
@@ -58,8 +58,9 @@ Default repository root = the script's own folder until one is saved (`Settings\
 
 ## OS profiles
 
-Five built-ins: Win10 Enterprise LTSC 2019 (1809), Win10 Enterprise LTSC 2021 KMS and IoT Enterprise LTSC 2021 (21H2/19041),
-Win11 Enterprise 24H2, Windows Server 2022 (all indexes). 26H2 added on the server via Tools > New OS from existing.
+Seven built-ins: Win10 Enterprise LTSC 2019 (1809), Win10 Enterprise LTSC 2021 KMS and IoT Enterprise LTSC 2021 (21H2/19041; LCU held at KB5129236),
+Win11 Enterprise 24H2, Win11 Enterprise 26H2 (26300; built in 2026-10-17 - the server already had it from Tools > New OS from existing, and an existing file is never replaced),
+Windows Server 2022 and Windows Server 2025 (version 24H2 in the catalog; both all indexes).
 Real media/ISO testing only for Win11 and Server 2022+; Win10 LTSC = install.wim (+WinRE) only.
 
 ## Conventions

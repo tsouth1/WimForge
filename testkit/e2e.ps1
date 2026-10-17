@@ -166,7 +166,7 @@ $profDir = Join-Path $base '_profiles'
 Patches 'Win10_Enterprise_LTSC_2021_KMS' @('SSU/aaa-extra.msu')
 function OptsP($os,$langs,[hashtable]$o=@{}) { $x = Opts $os $langs $o; $x | Add-Member -NotePropertyName ProfilesDir -NotePropertyValue $profDir; $x }
 $out9 = (Invoke-MediaRefresh (OptsP 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String)
-Check 'first run created the profile files' (@(Get-ChildItem $profDir -Filter *.json).Count -eq 5)
+Check 'first run created the profile files' (@(Get-ChildItem $profDir -Filter *.json).Count -eq 7)
 Check 'log names the profile file' ($out9 -match 'Profile: Win10_Enterprise_LTSC_2021_KMS\.json')
 Check 'log states the support end date' ($out9 -match 'Support (ends|ended) 2027-01-13')
 Check 'log reports the profile file creation' ($out9 -match 'Profile files created from the built-in profiles')

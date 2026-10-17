@@ -7,20 +7,21 @@ function New-File($p,$c='x'){ New-Item -ItemType Directory -Force (Split-Path $p
 
 Write-Host "`n=== P1 built-in profiles ==="
 $b = Import-OsProfiles
-Check '5 built-in profiles' ($b.Count -eq 5)
-Check 'order follows sortOrder' ((@($b.Keys) -join '|') -eq 'Windows 10 Enterprise LTSC 2019 (IoT)|Windows 10 IoT Enterprise LTSC 2021|Windows 10 Enterprise LTSC 2021 (KMS)|Windows 11 Enterprise 24H2|Windows Server 2022')
+Check '7 built-in profiles' ($b.Count -eq 7)
+Check 'order follows sortOrder' ((@($b.Keys) -join '|') -eq 'Windows 10 Enterprise LTSC 2019 (IoT)|Windows 10 IoT Enterprise LTSC 2021|Windows 10 Enterprise LTSC 2021 (KMS)|Windows 11 Enterprise 24H2|Windows 11 Enterprise 26H2|Windows Server 2022|Windows Server 2025')
 Check 'KMS profile: folder, regex, EOS' ($b['Windows 10 Enterprise LTSC 2021 (KMS)'].Folder -eq 'Win10_Enterprise_LTSC_2021_KMS' -and $b['Windows 10 Enterprise LTSC 2021 (KMS)'].EndOfSupport -eq '2027-01-13')
 Check 'IoT regex requires IoT' ('Windows 10 Enterprise LTSC 2021' -notmatch $b['Windows 10 IoT Enterprise LTSC 2021'].EditionRegex -and 'Windows 10 IoT Enterprise LTSC 2021' -match $b['Windows 10 IoT Enterprise LTSC 2021'].EditionRegex)
 Check 'Server profile: all indexes, server LP pattern' ($b['Windows Server 2022'].ServiceAllIndexes -and $b['Windows Server 2022'].LpPattern -like '*Server-Language-Pack*')
 Check 'default languages: client 10, Win11 none' (@($b['Windows 10 Enterprise LTSC 2019 (IoT)'].DefaultLanguages).Count -eq 10 -and @($b['Windows 11 Enterprise 24H2'].DefaultLanguages).Count -eq 0)
 Check 'package order has all five classes (empty)' (@($b['Windows Server 2022'].PackageOrder.Keys).Count -eq 5)
+Check 'Windows 11 26H2 and Server 2025 built-ins (2026-10-17): folders, releases, Server 2025 services every index' ($b['Windows 11 Enterprise 26H2'].Folder -eq 'Win11_Enterprise_26H2' -and $b['Windows 11 Enterprise 26H2'].Version -eq '26H2' -and $b['Windows 11 Enterprise 26H2'].PreferredIndex -eq 3 -and -not $b['Windows 11 Enterprise 26H2'].SsuRequired -and $b['Windows Server 2025'].Folder -eq 'Windows_Server_2025' -and $b['Windows Server 2025'].Version -eq '24H2' -and $b['Windows Server 2025'].ServiceAllIndexes -and $b['Windows Server 2025'].LpPattern -like '*Server-Language-Pack*' -and $b['Windows Server 2025'].MinFreeGB -eq 60)
 
 Write-Host "`n=== P2 first run creates the files, then loads them ==="
 $dir = Join-Path $tmp 'Profiles'
 $t = Import-OsProfiles -Directory $dir
 $files = @(Get-ChildItem $dir -Filter *.json)
-Check 'folder created with 5 JSON files' ($files.Count -eq 5) ($files.Name -join ',')
-Check 'loaded 5 profiles from the files' ($t.Count -eq 5 -and $t['Windows 11 Enterprise 24H2'].SourceFile -eq 'Win11_Enterprise_24H2.json')
+Check 'folder created with 7 JSON files' ($files.Count -eq 7) ($files.Name -join ',')
+Check 'loaded 7 profiles from the files' ($t.Count -eq 7 -and $t['Windows 11 Enterprise 24H2'].SourceFile -eq 'Win11_Enterprise_24H2.json')
 Check 'a creation message was recorded' (@($script:ProfileMessages | Where-Object { $_.Text -like 'Profile files created*' }).Count -eq 1)
 $same = $true
 foreach ($k in $b.Keys) { foreach ($prop in 'Folder','EditionRegex','PreferredIndex','LpPattern','SsuRequired','EndOfSupport','KeepArchives','MinFreeGB','SpaceCheck','ServiceAllIndexes') { if ("$($b[$k].$prop)" -ne "$($t[$k].$prop)") { $same=$false; Write-Host "   diff $k $prop '$($b[$k].$prop)' vs '$($t[$k].$prop)'" } }
@@ -32,8 +33,8 @@ Check 'JSON is readable, camelCase, arrays stay arrays' ($json -match '"editionR
 Check 'no BOM in the files' ([System.IO.File]::ReadAllBytes((Join-Path $dir 'Win11_Enterprise_24H2.json'))[0] -eq 0x7B)
 
 Write-Host "`n=== P3 a new OS by file only; a deleted built-in comes back on Reload; .disabled switches one off; edits apply ==="
-$s25 = [ordered]@{ schemaVersion=1; name='Windows Server 2025'; sortOrder=60; folder='Windows_Server_2025'; serviceAllIndexes=$true; lpPattern='Microsoft-Windows-Server-Language-Pack_x64_{0}.cab'; endOfSupport='2034-11-14' }
-[System.IO.File]::WriteAllText((Join-Path $dir 'Windows_Server_2025.json'), ($s25 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+$s25 = [ordered]@{ schemaVersion=1; name='Windows Server 2028'; sortOrder=90; folder='Windows_Server_2028'; serviceAllIndexes=$true; lpPattern='Microsoft-Windows-Server-Language-Pack_x64_{0}.cab'; endOfSupport='2034-11-14' }
+[System.IO.File]::WriteAllText((Join-Path $dir 'Windows_Server_2028.json'), ($s25 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 # Hand edits in the 2019 file, then the file is deleted: Reload writes a fresh built-in copy (2026-09-27)
 $e19 = Get-Content (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json') -Raw | ConvertFrom-Json; $e19.preferredIndex = 7
 [System.IO.File]::WriteAllText((Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'), ($e19 | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
@@ -41,7 +42,7 @@ Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
 $edit = Get-Content (Join-Path $dir 'Win11_Enterprise_24H2.json') -Raw | ConvertFrom-Json; $edit.preferredIndex = 4
 [System.IO.File]::WriteAllText((Join-Path $dir 'Win11_Enterprise_24H2.json'), ($edit | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
 $t = Import-OsProfiles -Directory $dir
-Check 'Server 2025 appears last, the five built-ins remain' ($t.Count -eq 6 -and @($t.Keys)[-1] -eq 'Windows Server 2025')
+Check 'Server 2028 appears last, the seven built-ins remain' ($t.Count -eq 8 -and @($t.Keys)[-1] -eq 'Windows Server 2028')
 Check 'a deleted built-in profile is written again on Reload, fresh from the built-ins' ((Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')) -and $t['Windows 10 Enterprise LTSC 2019 (IoT)'].PreferredIndex -eq 1 -and [bool]($script:ProfileMessages | Where-Object { $_.Text -like 'Profile files created from the built-in profiles in *: Win10_Enterprise_LTSC_2019.json' }))
 Check 'edit to preferredIndex applied, and existing files are never rewritten' ($t['Windows 11 Enterprise 24H2'].PreferredIndex -eq 4)
 Rename-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json') 'Win10_Enterprise_LTSC_2019.json.disabled'
@@ -52,10 +53,10 @@ Rename-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2021_KMS.json') 'KMS - my cop
 $t = Import-OsProfiles -Directory $dir
 Check 'an OS kept under another file name is not duplicated by a new built-in file' (-not (Test-Path (Join-Path $dir 'Win10_Enterprise_LTSC_2021_KMS.json')) -and $t['Windows 10 Enterprise LTSC 2021 (KMS)'].SourceFile -eq 'KMS - my copy.json' -and @($script:ProfileMessages | Where-Object { $_.Level -eq 'WARN' }).Count -eq 0)
 Rename-Item (Join-Path $dir 'KMS - my copy.json') 'Win10_Enterprise_LTSC_2021_KMS.json'
-Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'); Rename-Item (Join-Path $dir 'Windows_Server_2025.json') 'Windows_Server_2025.json.keep'
-$t = Import-OsProfiles -Directory $dir; Rename-Item (Join-Path $dir 'Windows_Server_2025.json.keep') 'Windows_Server_2025.json'; Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
-$t = Import-OsProfiles -Directory $dir   # leave the folder as the later sections expect: 2019 written again, Server 2025 present
-Check 'defaults filled in for a minimal file' ($t['Windows Server 2025'].KeepArchives -eq 3 -and $t['Windows Server 2025'].SpaceCheck -eq 'enforce' -and $t['Windows Server 2025'].MinFreeGB -eq 30)
+Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json'); Rename-Item (Join-Path $dir 'Windows_Server_2028.json') 'Windows_Server_2028.json.keep'
+$t = Import-OsProfiles -Directory $dir; Rename-Item (Join-Path $dir 'Windows_Server_2028.json.keep') 'Windows_Server_2028.json'; Remove-Item (Join-Path $dir 'Win10_Enterprise_LTSC_2019.json')
+$t = Import-OsProfiles -Directory $dir   # leave the folder as the later sections expect: 2019 written again, Server 2028 present
+Check 'defaults filled in for a minimal file' ($t['Windows Server 2028'].KeepArchives -eq 3 -and $t['Windows Server 2028'].SpaceCheck -eq 'enforce' -and $t['Windows Server 2028'].MinFreeGB -eq 30)
 
 Write-Host "`n=== P4 invalid files are skipped with a clear message, the rest still load ==="
 $bad = @{
@@ -67,31 +68,31 @@ $bad = @{
  'bad6.json' = '{"name":"BadDate","folder":"B","editionRegex":"a","endOfSupport":"13/01/2027"}';
  'bad7.json' = '{"name":"BadSpace","folder":"B","editionRegex":"a","spaceCheck":"maybe"}';
  'bad8.json' = '{"name":"BadLang","folder":"B","editionRegex":"a","defaultLanguages":["german"]}';
- 'bad9.json' = '{"name":"Windows Server 2025","folder":"Dup","serviceAllIndexes":true}';
+ 'bad9.json' = '{"name":"Windows Server 2028","folder":"Dup","serviceAllIndexes":true}';
  'bad10.json' = '{"name":"NoEdition","folder":"B"}'
 }
 foreach ($k in $bad.Keys) { [System.IO.File]::WriteAllText((Join-Path $dir $k), $bad[$k]) }
 $t = Import-OsProfiles -Directory $dir
-Check 'good profiles still load (the five built-ins and Server 2025)' ($t.Count -eq 6)
+Check 'good profiles still load (the seven built-ins and Server 2028)' ($t.Count -eq 8)
 $msgs = @($script:ProfileMessages | ForEach-Object { $_.Text })
 foreach ($k in ($bad.Keys | Where-Object { $_ -ne 'bad9.json' })) { Check "message names $k" (@($msgs | Where-Object { $_ -like "Profile file $k skipped:*" }).Count -eq 1) ($msgs -join ' | ') }
-Check 'duplicate name: first file by name wins, the other is skipped and named' (@($msgs | Where-Object { $_ -like 'Profile file Windows_Server_2025.json skipped: another file already defines*' }).Count -eq 1 -and $t['Windows Server 2025'].SourceFile -eq 'bad9.json')
+Check 'duplicate name: first file by name wins, the other is skipped and named' (@($msgs | Where-Object { $_ -like 'Profile file Windows_Server_2028.json skipped: another file already defines*' }).Count -eq 1 -and $t['Windows Server 2028'].SourceFile -eq 'bad9.json')
 Check 'unknown class message lists valid classes' (@($msgs | Where-Object { $_ -like '*unknown class*SSU, LCU, NetCU, SafeOS, SetupDU*' }).Count -eq 1)
 
 Write-Host "`n=== P5 empty folder gets files; only invalid files falls back to built-ins ==="
 $d2 = Join-Path $tmp 'empty'; New-Item -ItemType Directory $d2 | Out-Null
 $t2 = Import-OsProfiles -Directory $d2
-Check 'empty folder is populated' ($t2.Count -eq 5 -and @(Get-ChildItem $d2 -Filter *.json).Count -eq 5)
+Check 'empty folder is populated' ($t2.Count -eq 7 -and @(Get-ChildItem $d2 -Filter *.json).Count -eq 7)
 $d3 = Join-Path $tmp 'allbad'; New-Item -ItemType Directory $d3 | Out-Null; Set-Content (Join-Path $d3 'x.json') '{ nope'
 $t3 = Import-OsProfiles -Directory $d3
-Check 'a folder holding only a broken file gets the built-in files written beside it; the broken one is reported' ($t3.Count -eq 5 -and @(Get-ChildItem $d3 -Filter *.json).Count -eq 6 -and @($script:ProfileMessages | Where-Object { $_.Text -like 'Profile file x.json skipped:*' }).Count -eq 1)
+Check 'a folder holding only a broken file gets the built-in files written beside it; the broken one is reported' ($t3.Count -eq 7 -and @(Get-ChildItem $d3 -Filter *.json).Count -eq 8 -and @($script:ProfileMessages | Where-Object { $_.Text -like 'Profile file x.json skipped:*' }).Count -eq 1)
 $d3b = Join-Path $tmp 'readonly_fallback'
 function Save-BuiltInProfiles { param($Directory, $SkipNames) throw 'Access to the path is denied.' }   # a folder that cannot be written
 $t3b = Import-OsProfiles -Directory $d3b
-Check 'a Profiles folder that cannot be written falls back to the built-in profiles with a warning' ($t3b.Count -eq 5 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*could not be used*' }).Count -eq 1 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*using the built-in profiles*' }).Count -eq 1)
+Check 'a Profiles folder that cannot be written falls back to the built-in profiles with a warning' ($t3b.Count -eq 7 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*could not be used*' }).Count -eq 1 -and @($script:ProfileMessages | Where-Object { $_.Text -like '*using the built-in profiles*' }).Count -eq 1)
 . ([scriptblock]::Create([regex]::Match((Get-Content -Raw $(if ($env:MR_SCRIPT) { $env:MR_SCRIPT } else { (Join-Path $PSScriptRoot '../MediaRefresh_v2.4.ps1') })), '(?s)function Save-BuiltInProfiles \{.*?\r?\n\}\r?\n').Value))   # the real one again
 $t4 = Import-OsProfiles -Directory (Join-Path $tmp 'nested\deep\Profiles')
-Check 'missing nested folder is created' ($t4.Count -eq 5 -and (Test-Path (Join-Path $tmp 'nested\deep\Profiles\Windows_Server_2022.json')))
+Check 'missing nested folder is created' ($t4.Count -eq 7 -and (Test-Path (Join-Path $tmp 'nested\deep\Profiles\Windows_Server_2022.json')))
 
 Write-Host "`n=== P6 package order manifest ==="
 $pk = Join-Path $tmp 'SSU'; foreach ($n in 'a-first.msu','z-ssu-19041.3562-x64.msu','m-kb5005112.msu','b-other.cab') { New-File (Join-Path $pk $n) }
@@ -210,9 +211,9 @@ foreach ($bad in @('not json', '[]', '[ { "language": "German" } ]', '[ { "langu
 $mixDir = Join-Path $tmp 'mixprof'; $script:ProfileMessages.Clear()
 $null = Import-LanguageList -Directory $mixDir
 $pm = Import-OsProfiles -Directory $mixDir
-Check 'a Profiles folder holding only Languages.json still gets the 5 profile files' ($pm.Count -eq 5 -and @(Get-ChildItem $mixDir -Filter '*.json').Count -eq 6)
+Check 'a Profiles folder holding only Languages.json still gets the 7 profile files' ($pm.Count -eq 7 -and @(Get-ChildItem $mixDir -Filter '*.json').Count -eq 8)
 $script:ProfileMessages.Clear(); $pm2 = Import-OsProfiles -Directory $mixDir
-Check 'Languages.json is not read as an OS profile (no "skipped" message)' ($pm2.Count -eq 5 -and -not ($script:ProfileMessages | Where-Object { $_.Text -like '*Languages.json*' }))
+Check 'Languages.json is not read as an OS profile (no "skipped" message)' ($pm2.Count -eq 7 -and -not ($script:ProfileMessages | Where-Object { $_.Text -like '*Languages.json*' }))
 # profile defaults vs the list
 $kms = $b['Windows 10 Enterprise LTSC 2021 (KMS)']
 $s1 = Get-DefaultLanguageSelection -Definition $kms -LanguageList $builtLangs
@@ -438,7 +439,7 @@ Write-Host "`n=== P19 adding and renaming an OS: release placeholder, stable fol
 $bi19 = Import-OsProfiles
 $w11 = $bi19['Windows 11 Enterprise 24H2']; $w19 = $bi19['Windows 10 Enterprise LTSC 2019 (IoT)']
 Check 'built-in profiles carry their release, and {version} gives the same catalog searches as before' ($w11.Version -eq '24H2' -and $w19.Version -eq '1809' -and $w11.CatalogSearch.LCU.search -eq 'Windows 11, version 24H2' -and $w11.CatalogSearch.LCU.buildFilter -eq '^\d{4}-\d{2} Cumulative Update for Windows 11,? version 24H2' -and $w19.CatalogSearch.NetCU.search -eq 'Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version 1809 for x64' -and $bi19['Windows Server 2022'].CatalogSearch.SafeOS.productFilter -eq 'Safe OS')
-Check 'the built-in data itself uses {version} (a new release is a one-field change)' (@(Get-BuiltInProfileData | Where-Object { ($_.catalogSearch | ConvertTo-Json -Depth 5) -match '\{version\}' }).Count -eq 5)
+Check 'the built-in data itself uses {version} (a new release is a one-field change)' (@(Get-BuiltInProfileData | Where-Object { ($_.catalogSearch | ConvertTo-Json -Depth 5) -match '\{version\}' }).Count -eq 7)
 $d19 = (@(Get-BuiltInProfileData)[3] | ConvertTo-Json -Depth 8 | ConvertFrom-Json)
 $d19.version = ''; $err19 = ''; try { [void](ConvertTo-OsProfile -Data $d19) } catch { $err19 = $_.Exception.Message }
 Check '{version} with an empty version: a plain message naming the field' ($err19 -like "'catalogSearch.*' uses {version}, but the profile's 'version' is empty.*") $err19
@@ -448,21 +449,21 @@ $d19.version = 'bad/name'; $err19 = ''; try { [void](ConvertTo-OsProfile -Data $
 Check 'a release with odd characters is refused' ($err19 -like "'version' must be a short release name*")
 Check 'ConvertTo-OsFolderName follows the built-in style' ((ConvertTo-OsFolderName 'Windows 11 Enterprise 26H2') -eq 'Win11_Enterprise_26H2' -and (ConvertTo-OsFolderName 'Windows Server 2025') -eq 'Windows_Server_2025' -and (ConvertTo-OsFolderName 'Windows 10 Enterprise LTSC 2019 (IoT)') -eq 'Win10_Enterprise_LTSC_2019_IoT')
 Check 'Test-OsFolderName refuses bad folder names' ((Test-OsFolderName 'Win11_26H2') -eq '' -and (Test-OsFolderName '') -ne '' -and (Test-OsFolderName 'a\b') -ne '' -and (Test-OsFolderName 'CON') -ne '' -and (Test-OsFolderName '_x') -ne '')
-# New OS from existing: 26H2 from the 24H2 profile, on disk
+# New OS from existing: 27H2 from the 24H2 profile, on disk
 $pd19 = Join-Path $PWD 'tst_root\p19profiles'; $root19 = Join-Path $PWD 'tst_root\p19repo'; $set19 = Join-Path $PWD 'tst_root\p19settings'
 foreach ($d in $pd19, $root19, $set19) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } }
 $defs19 = Import-OsProfiles -Directory $pd19
-$n19 = New-OsProfileFromBase -ProfilesDir $pd19 -Base $defs19['Windows 11 Enterprise 24H2'] -Definitions $defs19 -Name 'Windows 11 Enterprise 26H2' -Version '26H2' -Root $root19
-$defs19 = Import-OsProfiles -Directory $pd19; $new19 = $defs19['Windows 11 Enterprise 26H2']
-Check 'New OS: the profile file, the list entry, and the catalog searches for the new release' ((Split-Path $n19.File -Leaf) -eq 'Win11_Enterprise_26H2.json' -and $null -ne $new19 -and $new19.Version -eq '26H2' -and $new19.CatalogSearch.LCU.search -eq 'Windows 11, version 26H2' -and $new19.CatalogSearch.SetupDU.buildFilter -like '*version 26H2' -and $new19.EditionRegex -eq $defs19['Windows 11 Enterprise 24H2'].EditionRegex -and $new19.SortOrder -eq 41)
+$n19 = New-OsProfileFromBase -ProfilesDir $pd19 -Base $defs19['Windows 11 Enterprise 24H2'] -Definitions $defs19 -Name 'Windows 11 Enterprise 27H2' -Version '27H2' -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19; $new19 = $defs19['Windows 11 Enterprise 27H2']
+Check 'New OS: the profile file, the list entry, and the catalog searches for the new release' ((Split-Path $n19.File -Leaf) -eq 'Win11_Enterprise_27H2.json' -and $null -ne $new19 -and $new19.Version -eq '27H2' -and $new19.CatalogSearch.LCU.search -eq 'Windows 11, version 27H2' -and $new19.CatalogSearch.SetupDU.buildFilter -like '*version 27H2' -and $new19.EditionRegex -eq $defs19['Windows 11 Enterprise 24H2'].EditionRegex -and $new19.SortOrder -eq 41)
 Check 'New OS: support date cleared, a note on what to check, and the 24H2 profile unchanged' ($new19.EndOfSupport -eq '' -and $new19.Notes -like "Created from 'Windows 11 Enterprise 24H2'*Check OS profile*" -and $defs19['Windows 11 Enterprise 24H2'].CatalogSearch.LCU.search -eq 'Windows 11, version 24H2')
-Check 'New OS: the repository folders are created (ISO, PATCHES\LCU, ...)' ($n19.Repository -eq (Join-Path $root19 'Win11_Enterprise_26H2') -and (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2\ISO')) -and (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2\PATCHES\SETUPDU')))
-$e1 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Windows 11 Enterprise 26H2' -Version '27H2') } catch { $e1 = $_.Exception.Message }
+Check 'New OS: the repository folders are created (ISO, PATCHES\LCU, ...)' ($n19.Repository -eq (Join-Path $root19 'Win11_Enterprise_27H2') -and (Test-Path (Join-Path $root19 'Win11_Enterprise_27H2\ISO')) -and (Test-Path (Join-Path $root19 'Win11_Enterprise_27H2\PATCHES\SETUPDU')))
+$e1 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Windows 11 Enterprise 27H2' -Version '27H2') } catch { $e1 = $_.Exception.Message }
 $e2 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Another' -Folder 'Win11_Enterprise_24H2' -Version '27H2') } catch { $e2 = $_.Exception.Message }
 $e3 = ''; try { [void](New-OsProfileFromBase -ProfilesDir $pd19 -Base $new19 -Definitions $defs19 -Name 'Another' -Folder 'Win11Enterprise_24H2' -Version '27H2') } catch { $e3 = $_.Exception.Message }
-Check 'New OS refuses a name or folder already in use (also an accepted old folder name)' ($e1 -eq "An OS named 'Windows 11 Enterprise 26H2' already exists." -and $e2 -like "The folder name 'Win11_Enterprise_24H2' is already used*" -and $e3 -like "The folder name 'Win11Enterprise_24H2' is already used*") "$e1 | $e2 | $e3"
+Check 'New OS refuses a name or folder already in use (also an accepted old folder name)' ($e1 -eq "An OS named 'Windows 11 Enterprise 27H2' already exists." -and $e2 -like "The folder name 'Win11_Enterprise_24H2' is already used*" -and $e3 -like "The folder name 'Win11Enterprise_24H2' is already used*") "$e1 | $e2 | $e3"
 # an older profile file with the release written out (no 'version', no {version}): the text is replaced
-$old19 = (@(Get-BuiltInProfileData)[4] | ConvertTo-Json -Depth 8) -replace '\{version\}', '21H2' | ConvertFrom-Json
+$old19 = (@(Get-BuiltInProfileData | Where-Object { $_.folder -eq 'Windows_Server_2022' })[0] | ConvertTo-Json -Depth 8) -replace '\{version\}', '21H2' | ConvertFrom-Json
 $old19.PSObject.Properties.Remove('version'); $old19.name = 'Server Old Style'; $old19.folder = 'Server_Old'
 [System.IO.File]::WriteAllText((Join-Path $pd19 'Server_Old.json'), ($old19 | ConvertTo-Json -Depth 8))
 $defs19 = Import-OsProfiles -Directory $pd19
@@ -472,31 +473,31 @@ Check 'New OS from an older profile file: the written-out release is replaced in
 # Rename OS: display name only, then the folder as well
 New-Item -ItemType Directory -Force $set19, (Join-Path $pd19 'Apps') | Out-Null
 [void](Save-OsSettings -Directory $set19 -Definition $new19 -Options @{ NetFx3 = $true })
-[System.IO.File]::WriteAllText((Join-Path $pd19 'Apps\Win11_Enterprise_26H2_Appx.json'), '{ "apps": [] }')
-$r1 = Rename-OsProfile -ProfilesDir $pd19 -Definition $new19 -Definitions $defs19 -NewName 'Win 11 26H2 Enterprise' -SettingsDir $set19 -Root $root19
+[System.IO.File]::WriteAllText((Join-Path $pd19 'Apps\Win11_Enterprise_27H2_Appx.json'), '{ "apps": [] }')
+$r1 = Rename-OsProfile -ProfilesDir $pd19 -Definition $new19 -Definitions $defs19 -NewName 'Win 11 27H2 Enterprise' -SettingsDir $set19 -Root $root19
 $defs19 = Import-OsProfiles -Directory $pd19
-Check 'Rename OS, name only: same file and folder, settings still found (they are keyed by folder)' ($defs19.Contains('Win 11 26H2 Enterprise') -and -not $defs19.Contains('Windows 11 Enterprise 26H2') -and $r1.File -eq $n19.File -and @($r1.Moves).Count -eq 0 -and $null -ne (Read-OsSettings -Directory $set19 -Definition $defs19['Win 11 26H2 Enterprise']))
-$r2 = Rename-OsProfile -ProfilesDir $pd19 -Definition $defs19['Win 11 26H2 Enterprise'] -Definitions $defs19 -NewName 'Windows 11 Enterprise 26H2' -NewFolder 'W11_26H2' -SettingsDir $set19 -Root $root19
-$defs19 = Import-OsProfiles -Directory $pd19; $ren19 = $defs19['Windows 11 Enterprise 26H2']
-Check 'Rename OS, folder too: profile file, saved settings, app list and repository folder move; the old folder stays accepted' ($ren19.Folder -eq 'W11_26H2' -and $ren19.AltFolders -contains 'Win11_Enterprise_26H2' -and (Test-Path (Join-Path $pd19 'W11_26H2.json')) -and -not (Test-Path (Join-Path $pd19 'Win11_Enterprise_26H2.json')) -and (Test-Path (Join-Path $set19 'W11_26H2.json')) -and (Test-Path (Join-Path $pd19 'Apps\W11_26H2_Appx.json')) -and (Test-Path (Join-Path $root19 'W11_26H2\ISO')) -and -not (Test-Path (Join-Path $root19 'Win11_Enterprise_26H2')) -and @($r2.Moves).Count -eq 4) (@($r2.Moves) -join ' | ')
+Check 'Rename OS, name only: same file and folder, settings still found (they are keyed by folder)' ($defs19.Contains('Win 11 27H2 Enterprise') -and -not $defs19.Contains('Windows 11 Enterprise 27H2') -and $r1.File -eq $n19.File -and @($r1.Moves).Count -eq 0 -and $null -ne (Read-OsSettings -Directory $set19 -Definition $defs19['Win 11 27H2 Enterprise']))
+$r2 = Rename-OsProfile -ProfilesDir $pd19 -Definition $defs19['Win 11 27H2 Enterprise'] -Definitions $defs19 -NewName 'Windows 11 Enterprise 27H2' -NewFolder 'W11_27H2' -SettingsDir $set19 -Root $root19
+$defs19 = Import-OsProfiles -Directory $pd19; $ren19 = $defs19['Windows 11 Enterprise 27H2']
+Check 'Rename OS, folder too: profile file, saved settings, app list and repository folder move; the old folder stays accepted' ($ren19.Folder -eq 'W11_27H2' -and $ren19.AltFolders -contains 'Win11_Enterprise_27H2' -and (Test-Path (Join-Path $pd19 'W11_27H2.json')) -and -not (Test-Path (Join-Path $pd19 'Win11_Enterprise_27H2.json')) -and (Test-Path (Join-Path $set19 'W11_27H2.json')) -and (Test-Path (Join-Path $pd19 'Apps\W11_27H2_Appx.json')) -and (Test-Path (Join-Path $root19 'W11_27H2\ISO')) -and -not (Test-Path (Join-Path $root19 'Win11_Enterprise_27H2')) -and @($r2.Moves).Count -eq 4) (@($r2.Moves) -join ' | ')
 # renaming a built-in's folder leaves <old>.json.disabled, so Reload does not bring the old built-in back
 $cnt19 = $defs19.Count
 $r3 = Rename-OsProfile -ProfilesDir $pd19 -Definition $defs19['Windows Server 2022'] -Definitions $defs19 -NewName 'Windows Server 2022 Datacenter' -NewFolder 'Server2022' -SettingsDir $set19 -Root $root19
 $defs19 = Import-OsProfiles -Directory $pd19
 Check 'Rename OS of a built-in: the old built-in is not recreated on Reload' ($defs19.Count -eq $cnt19 -and $defs19.Contains('Windows Server 2022 Datacenter') -and -not $defs19.Contains('Windows Server 2022') -and (Test-Path (Join-Path $pd19 'Windows_Server_2022.json.disabled'))) (@($defs19.Keys) -join ', ')
 $e4 = ''; try { [void](Rename-OsProfile -ProfilesDir $pd19 -Definition $ren19 -Definitions $defs19 -NewName 'Windows 11 Enterprise 24H2' -SettingsDir $set19) } catch { $e4 = $_.Exception.Message }
-$script:MountedList = @([pscustomobject]@{ Path = (Join-Path $root19 'W11_26H2\MOUNT\MainOS'); MountStatus = 'Ok' })
-$e5 = ''; try { [void](Rename-OsProfile -ProfilesDir $pd19 -Definition $ren19 -Definitions $defs19 -NewName 'X' -NewFolder 'X_26H2' -SettingsDir $set19 -Root $root19) } catch { $e5 = $_.Exception.Message }
+$script:MountedList = @([pscustomobject]@{ Path = (Join-Path $root19 'W11_27H2\MOUNT\MainOS'); MountStatus = 'Ok' })
+$e5 = ''; try { [void](Rename-OsProfile -ProfilesDir $pd19 -Definition $ren19 -Definitions $defs19 -NewName 'X' -NewFolder 'X_27H2' -SettingsDir $set19 -Root $root19) } catch { $e5 = $_.Exception.Message }
 $script:MountedList = @()
-Check 'Rename OS refuses a name in use, and a folder move while an image is mounted in it (nothing changed)' ($e4 -eq "An OS named 'Windows 11 Enterprise 24H2' already exists." -and $e5 -like 'An image is still mounted under *Cleanup Mountpoints*' -and (Test-Path (Join-Path $pd19 'W11_26H2.json'))) "$e4 | $e5"
+Check 'Rename OS refuses a name in use, and a folder move while an image is mounted in it (nothing changed)' ($e4 -eq "An OS named 'Windows 11 Enterprise 24H2' already exists." -and $e5 -like 'An image is still mounted under *Cleanup Mountpoints*' -and (Test-Path (Join-Path $pd19 'W11_27H2.json'))) "$e4 | $e5"
 # run configs: the folder is the stable key
 $rc19 = Join-Path $PWD 'tst_root\p19run.json'
-[void](Save-RunConfig -File $rc19 -OsName 'Windows 11 Enterprise 26H2' -Folder 'W11_26H2' -Root $root19)
+[void](Save-RunConfig -File $rc19 -OsName 'Windows 11 Enterprise 27H2' -Folder 'W11_27H2' -Root $root19)
 $j19 = Get-Content -Raw $rc19 | ConvertFrom-Json; $j19.os = 'An Old Display Name'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5))
 $c19 = Read-RunConfig -File $rc19 -Definitions $defs19
-Check 'a run config whose OS was renamed is found by its folder, and says so' ($c19.OsName -eq 'Windows 11 Enterprise 26H2' -and $c19.ResolvedFrom -eq "'An Old Display Name'" -and $j19.folder -eq 'W11_26H2')
-$j19.folder = ''; $j19.os = 'Win11_Enterprise_26H2'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5))
-Check 'a run config may name the OS by a folder name (current or old)' ((Read-RunConfig -File $rc19 -Definitions $defs19).OsName -eq 'Windows 11 Enterprise 26H2')
+Check 'a run config whose OS was renamed is found by its folder, and says so' ($c19.OsName -eq 'Windows 11 Enterprise 27H2' -and $c19.ResolvedFrom -eq "'An Old Display Name'" -and $j19.folder -eq 'W11_27H2')
+$j19.folder = ''; $j19.os = 'Win11_Enterprise_27H2'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5))
+Check 'a run config may name the OS by a folder name (current or old)' ((Read-RunConfig -File $rc19 -Definitions $defs19).OsName -eq 'Windows 11 Enterprise 27H2')
 $j19.os = 'Windows 12'; [System.IO.File]::WriteAllText($rc19, ($j19 | ConvertTo-Json -Depth 5)); $e6 = ''; try { [void](Read-RunConfig -File $rc19 -Definitions $defs19) } catch { $e6 = $_.Exception.Message }
 Check 'an unknown OS is still refused with the list of profiles' ($e6 -like "*'os' is 'Windows 12', which is not one of the profiles:*") $e6
 

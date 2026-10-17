@@ -23,7 +23,9 @@ Everything lives under one **repository root** (until you save one, the default 
 - `Win10_IoT_Enterprise_LTSC_2021` - Windows 10 IoT Enterprise LTSC 2021
 - `Win10_Enterprise_LTSC_2021_KMS` - Windows 10 Enterprise LTSC 2021 (KMS)
 - `Win11_Enterprise_24H2` - Windows 11 Enterprise 24H2
+- `Win11_Enterprise_26H2` - Windows 11 Enterprise 26H2
 - `Windows_Server_2022` - Windows Server 2022
+- `Windows_Server_2025` - Windows Server 2025
 
 WimForge creates the sub-folders of an OS folder the first time that OS is run:
 
@@ -44,7 +46,7 @@ WimForge creates the sub-folders of an OS folder the first time that OS is run:
 - the **Language Pack ISO** (only when languages are added);
 - the **Features on Demand (FOD) ISO(s)** (only when languages are added; a second FOD ISO is fine and is used as an extra source).
 
-Windows 11 24H2 and Server 2022 are built English-only and need only the OS ISO. Get fresh Microsoft ISOs each servicing cycle.
+Windows 11 24H2 and 26H2, Server 2022 and Server 2025 are built English-only and need only the OS ISO. Get fresh Microsoft ISOs each servicing cycle.
 
 **Beside the script** WimForge keeps two folders of its own:
 
@@ -167,11 +169,13 @@ Every run also does a smaller version of this for its own OS folder at the start
 
 Every OS in the list is one JSON file in `Profiles` (its **profile**). WimForge has nothing OS-specific built into its code, so a new Windows release needs only a new profile - no new version of WimForge. Everything below can be done in the window; Notepad is only needed for the less common settings.
 
-### A new release: for example Windows 11 26H2
+### A new release: for example Windows 11 27H2
 
-1. Select the closest OS in the list (for Windows 11 26H2: Windows 11 Enterprise 24H2).
-2. **Tools > New OS from existing...** - type the new name (`Windows 11 Enterprise 26H2`); the folder name follows it (`Win11_Enterprise_26H2`); type the release (`26H2`). The last box is the text replaced by the release in the catalog searches - normally the base OS's release, already filled in.
-3. WimForge writes `Profiles\Win11_Enterprise_26H2.json`, creates the OS's repository folders (`ISO`, `PATCHES\LCU`, ...) and selects the new OS. The support end date is left empty on purpose.
+Windows 11 26H2 and Windows Server 2025 are built in (2026-10-17). For a release that is not in the list:
+
+1. Select the closest OS in the list (for Windows 11 27H2: Windows 11 Enterprise 26H2).
+2. **Tools > New OS from existing...** - type the new name (`Windows 11 Enterprise 27H2`); the folder name follows it (`Win11_Enterprise_27H2`); type the release (`27H2`). The last box is the text replaced by the release in the catalog searches - normally the base OS's release, already filled in.
+3. WimForge writes `Profiles\Win11_Enterprise_27H2.json`, creates the OS's repository folders (`ISO`, `PATCHES\LCU`, ...) and selects the new OS. The support end date is left empty on purpose.
 4. Copy the new OS ISO into its `ISO` folder (and the Language Pack / FOD ISOs if you add languages).
 5. **Tools > Check OS profile** - reads the ISO and searches the catalog without changing or downloading anything, then lists what it found (the edition it would service, its build, the update each catalog search finds) and what to fix. The same lines are in the Log tab, starting `PROFILE CHECK`.
 6. Fix what it reports (see below), then **Download patches...** and a **Preflight** as usual.
