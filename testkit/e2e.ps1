@@ -1049,4 +1049,69 @@ Check 'verify existing: a client install.wim with two indexes is refused before 
 $script:ImageCount = 1
 Set-Item function:Write-Log $wl33; Set-Item function:Get-AppxProvisionedPackage $gap33
 
+Write-Host "`n=== E34 Tools > Inspect ISO: editions, ei.cfg / pid.txt, licence channels from pkeyconfig; read-only, report in LOGS (2026-10-17) ==="
+# a pkeyconfig licence file as Windows ships it: XML in a base64 block (UTF-8 with BOM)
+function New-PkeyConfigText([object[]]$Configs, [string]$Encoding = 'utf8bom') {
+    $x = '<?xml version="1.0" encoding="utf-8"?><ProductKeyConfiguration xmlns="http://www.microsoft.com/DRM/PKEY/Configuration/2.0"><Configurations>' +
+         (($Configs | ForEach-Object { "<Configuration><ActConfigId>{$([guid]::NewGuid())}</ActConfigId><RefGroupId>1</RefGroupId><EditionId>$($_[0])</EditionId><ProductDescription>Win 10 RTM $($_[0]) $($_[1])</ProductDescription><ProductKeyType>$($_[1])</ProductKeyType><IsRandomized>false</IsRandomized></Configuration>" }) -join '') +
+         '</Configurations></ProductKeyConfiguration>'
+    $bytes = if ($Encoding -eq 'utf16') { [byte[]](0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes($x) } else { [byte[]](0xEF, 0xBB, 0xBF) + [System.Text.Encoding]::UTF8.GetBytes($x) }
+    return '<?xml version="1.0" encoding="utf-8"?><rg:licenseGroup xmlns:rg="urn:mpeg:mpeg21:2003:01-REL-R-NS"><r:license xmlns:r="urn:mpeg:mpeg21:2003:01-REL-R-NS" xmlns:tm="http://www.microsoft.com/DRM/XrML2/TM/v2"><r:otherInfo><tm:infoTables><tm:infoList tag="#global"><tm:infoBin name="pkeyConfigData">' +
+           [Convert]::ToBase64String($bytes) + '</tm:infoBin></tm:infoList></tm:infoTables></r:otherInfo></r:license></rg:licenseGroup>'
+}
+$cfg34 = @(@('EnterpriseS', 'Volume:GVLK'), @('EnterpriseS', 'Volume:MAK'), @('EnterpriseS', 'Volume:GVLK'), @('IoTEnterpriseS', 'OEM:NONSLP'), @('IoTEnterpriseS', 'OEM:DM'), @('Professional', 'Retail'), @('Professional', 'OEM:DM'), @('EnterpriseSEval', 'Retail:TB:Eval'))
+$pk34 = @(ConvertFrom-PkeyConfig -Text (New-PkeyConfigText $cfg34))
+$pk34u = @(ConvertFrom-PkeyConfig -Text (New-PkeyConfigText $cfg34 'utf16'))
+Check 'pkeyconfig: every key configuration is read (edition ID, key type, description), UTF-8 and UTF-16 alike' ($pk34.Count -eq 8 -and $pk34[0].EditionId -eq 'EnterpriseS' -and $pk34[0].ProductKeyType -eq 'Volume:GVLK' -and $pk34[0].ProductDescription -like '*EnterpriseS Volume:GVLK' -and $pk34u.Count -eq 8 -and $pk34u[3].ProductKeyType -eq 'OEM:NONSLP')
+Check 'pkeyconfig: a file without the pkeyConfigData block gives nothing (no error)' (@(ConvertFrom-PkeyConfig -Text '<r:license/>').Count -eq 0)
+Check 'licence families: KMS, MAK, Retail, OEM, Evaluation, KMS host, each once and in that order' (((Get-LicenceFamilies -Types @('OEM:DM', 'Volume:MAK', 'Volume:GVLK', 'OEM:NONSLP', 'Retail', 'Retail:TB:Eval', 'Volume:CSVLK')) -join ',') -eq 'KMS,MAK,Retail,OEM,Evaluation,KMS host' -and ((Get-LicenceFamilies -Types @('Retail:TB:Eval')) -join ',') -eq 'Evaluation')
+Check 'licence channel words: GVLK = KMS client, MAK, OEM:DM = key in the firmware' ((Get-LicenceChannelText 'Volume:GVLK') -like 'KMS client (GVLK)*' -and (Get-LicenceChannelText 'Volume:MAK') -like 'MAK - *' -and (Get-LicenceChannelText 'OEM:DM') -like '*firmware*' -and (Get-LicenceChannelText 'Something:New') -eq 'Something:New')
+Check 'edition notes: IoT LTSC (OEM channel, no ESU), Enterprise LTSC (volume only), evaluation, Server' ((Get-EditionLicensingNote 'IoTEnterpriseS') -like 'IoT Enterprise LTSC: licensed per device*OEM*ESU*' -and (Get-EditionLicensingNote 'EnterpriseS') -like 'Enterprise LTSC: volume licensing only*' -and (Get-EditionLicensingNote 'EnterpriseSEval') -like 'Evaluation edition*' -and (Get-EditionLicensingNote 'ServerDatacenter') -like 'Windows Server:*' -and (Get-EditionLicensingNote 'Unknown') -eq '')
+$h34 = @(Get-IsoNameHints 'SW_DVD9_WIN_ENT_LTSC_2021_64BIT_English_MLF_X22-84402.ISO')
+Check 'ISO name hints: SW_DVD9 and MLF = volume licensing, LTSC; an MCT name; a renamed file says nothing' (@($h34 -like 'SW_DVD*volume licensing*').Count -eq 1 -and @($h34 -like 'MLF*').Count -eq 1 -and @($h34 -like 'LTSC*').Count -eq 1 -and @(Get-IsoNameHints 'Win11_24H2_English_x64.iso' | Where-Object { $_ -like '*Media Creation Tool*' }).Count -eq 1 -and @(Get-IsoNameHints 'en-us_windows_10_iot_enterprise_ltsc_2021_x64_dvd_257ad90f.iso' | Where-Object { $_ -like '*Visual Studio*' -or $_ -like 'IoT*' }).Count -eq 2 -and (@(Get-IsoNameHints 'os.iso') -join '') -like '*no hint*')
+$ei34 = ConvertFrom-IsoInfoText "[EditionID]`r`nEnterpriseS`r`n`r`n[Channel]`r`nVolume`r`n[VL]`r`n1"
+$pid34 = ConvertFrom-IsoInfoText "[PID]`r`nValue=M7XTQ-FN8P6-TTKYV-9D4CC-J462D"
+Check 'ei.cfg and pid.txt are read; the product key is masked to its last group' ($ei34['EditionID'] -eq 'EnterpriseS' -and $ei34['Channel'] -eq 'Volume' -and $ei34['VL'] -eq '1' -and (Format-MaskedProductKey $pid34['Value']) -eq 'XXXXX-XXXXX-XXXXX-XXXXX-J462D' -and (Format-MaskedProductKey 'abc') -like '(not a product key*')
+Check 'architecture numbers are named (9 = x64, 12 = arm64, 0 = x86)' ((Get-ImageArchitectureText 9) -eq 'x64' -and (Get-ImageArchitectureText 12) -eq 'arm64' -and (Get-ImageArchitectureText 0) -eq 'x86')
+
+# the run: an OS ISO with pid.txt and two editions, plus a Language Pack ISO (skipped)
+$def34 = ConvertTo-OsProfile -Data ([pscustomobject]@{ name = 'Inspect Test'; folder = 'Inspect_Test'; version = '21H2'; editionRegex = '(?i)^Windows 10 IoT Enterprise LTSC$'; preferredIndex = 2; endOfSupport = '2032-01-14' })
+$script:OsDefinitions['Inspect Test'] = $def34
+$iso34 = 'en-us_windows_10_iot_enterprise_ltsc_2021_x64_dvd'
+Fake-Iso 'Inspect_Test' $iso34 @('sources/install.wim', 'sources/pid.txt', 'sources/idwbinfo.txt')
+Set-Content (Join-Path $isos "$iso34\sources\pid.txt") "[PID]`r`nValue=M7XTQ-FN8P6-TTKYV-9D4CC-J462D"
+Set-Content (Join-Path $isos "$iso34\sources\idwbinfo.txt") "[BUILDINFO]`r`nBuildArch=amd64`r`nBuildBranch=vb_release"
+Fake-Iso 'Inspect_Test' 'lp34' @('x64/langpacks/Microsoft-Windows-Client-Language-Pack_x64_de-de.cab')
+$gwi34 = ${function:Get-WindowsImage}; $mwi34 = ${function:Mount-WindowsImage}; $wl34 = ${function:Write-Log}
+$logs34 = [System.Collections.Generic.List[string]]::new(); function Write-Log { param($Message, $Level = 'INFO') $logs34.Add("[$Level] $Message") }
+function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
+    if ($Mounted) { return $script:MountedList }
+    $all = @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Windows 10 Enterprise LTSC'; EditionId = 'EnterpriseS' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Windows 10 IoT Enterprise LTSC'; EditionId = 'IoTEnterpriseS' })
+    if ($Index) { $i = $all[$Index - 1]; return [pscustomobject]@{ ImageIndex = $i.ImageIndex; ImageName = $i.ImageName; EditionId = $i.EditionId; Version = '10.0.19041.1288'; SPBuild = 1288; Architecture = 9; InstallationType = 'Client'; Languages = @('en-US'); ModifiedTime = '2021-10-07' } }
+    return @($all | ForEach-Object { [pscustomobject]@{ ImageIndex = $_.ImageIndex; ImageName = $_.ImageName } }) }
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+    Note ("Mount $(Split-Path $ImagePath -Leaf) idx$Index -> $(Split-Path $Path -Leaf)$(if ($ReadOnly) { ' readonly' })")
+    $pk = Join-Path $Path 'Windows\System32\spp\tokens\pkeyconfig'; New-Item -ItemType Directory -Force $pk | Out-Null
+    Set-Content (Join-Path $pk 'pkeyconfig.xrm-ms') (New-PkeyConfigText $cfg34)
+    foreach ($s in 'EnterpriseS', 'IoTEnterpriseS') { New-Item -ItemType Directory -Force (Join-Path $Path "Windows\System32\spp\tokens\skus\$s") | Out-Null }
+    $script:MountedList += [pscustomobject]@{ Path = $Path + '\'; MountStatus = 'Ok' } }
+function Get-WindowsEdition { [CmdletBinding()] param($Path, [switch]$Target) if ($Target) { @() } else { [pscustomobject]@{ Edition = 'IoTEnterpriseS' } } }
+function Read-OfflineWindowsInfo { param($Mount) [ordered]@{ ProductName = 'Windows 10 IoT Enterprise LTSC 2021'; EditionID = 'IoTEnterpriseS'; CurrentBuild = '19044'; UBR = '1288'; DisplayVersion = '21H2' } }
+Reset-Test
+$r34 = Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'IsoInspect'; OsName = 'Inspect Test'; Root = $base })
+$txt34 = if ($r34 -and $r34.Report -and (Test-Path $r34.Report)) { Get-Content -Raw $r34.Report } else { '' }
+Check 'Inspect ISO: one result for the OS ISO; the Language Pack ISO is named and skipped' ($r34.Mode -eq 'IsoInspect' -and @($r34.Isos).Count -eq 1 -and $txt34 -match 'lp34\.iso.*\r?\nNot an OS ISO') $txt34
+Check 'Inspect ISO: every edition with its edition ID, build and architecture' ($txt34 -match '\[1\] Windows 10 Enterprise LTSC: edition ID EnterpriseS, version 10\.0\.19041\.1288, x64, Client' -and $txt34 -match '\[2\] Windows 10 IoT Enterprise LTSC: edition ID IoTEnterpriseS')
+Check 'Inspect ISO: no ei.cfg reported as such; pid.txt key masked; idwbinfo.txt read' ($txt34 -match 'sources\\ei\.cfg: none' -and $txt34 -match 'XXXXX-XXXXX-XXXXX-XXXXX-J462D' -and $txt34 -notmatch 'M7XTQ' -and $txt34 -match 'BuildBranch = vb_release')
+Check 'Inspect ISO: channels per edition - Enterprise LTSC KMS and MAK, IoT LTSC OEM only - with the notes' ((@($r34.Isos[0].Images[0].Families) -join ',') -eq 'KMS,MAK' -and (@($r34.Isos[0].Images[1].Families) -join ',') -eq 'OEM' -and $txt34 -match 'Note: IoT Enterprise LTSC' -and $r34.Summary -like '*IoTEnterpriseS*OEM*') $r34.Summary
+Check 'Inspect ISO: the edition the profile picks is mounted read-only once and discarded; registry and licence folders reported' (@($script:Calls -match '^Mount install\.wim idx2 -> MainOS readonly$').Count -eq 1 -and @($script:Calls -match '^Mount ').Count -eq 1 -and @($script:Calls -match '^Dismount MainOS discard$').Count -eq 1 -and $script:MountedList.Count -eq 0 -and $txt34 -match 'DisplayVersion = 21H2' -and $txt34 -match 'no ProductId' -and $txt34 -match 'skus\): EnterpriseS, IoTEnterpriseS') ($script:Calls -join ' | ')
+Check 'Inspect ISO: changes nothing else - no package added, ISOs dismounted, report and log in the OS''s LOGS' (@($script:Calls -match '^(AddPkg|AddCap|Export)').Count -eq 0 -and @($script:Calls -match '^IsoDismount').Count -eq 2 -and $r34.Report -like '*\Inspect_Test\LOGS\IsoInspect_Inspect_Test_*.txt' -and [bool]($logs34 -match '^\[INFO\] ISO INSPECT: report written to ')) ($script:Calls -join ' | ')
+Remove-Item (Join-Path $base 'Inspect_Test\ISO\*.iso')
+Reset-Test; $threw34 = $false; $m34 = ''; try { Invoke-MediaRefresh ([pscustomobject]@{ Mode = 'IsoInspect'; OsName = 'Inspect Test'; Root = $base }) } catch { $threw34 = $true; $m34 = $_.Exception.Message }
+Check 'Inspect ISO without an ISO stops with a plain message' ($threw34 -and $m34 -like 'There is no ISO in *Inspect_Test\ISO. Copy the OS ISO there first.') $m34
+Set-Item function:Get-WindowsImage $gwi34; Set-Item function:Mount-WindowsImage $mwi34; Set-Item function:Write-Log $wl34
+Remove-Item function:Get-WindowsEdition, function:Read-OfflineWindowsInfo
+. ([scriptblock]::Create([regex]::Match((Get-Content -Raw $(if ($env:MR_SCRIPT) { $env:MR_SCRIPT } else { (Join-Path $PSScriptRoot '../MediaRefresh_v2.4.ps1') })), '(?s)function Read-OfflineWindowsInfo \{.*?\r?\n\}\r?\n').Value))
+$script:OsDefinitions.Remove('Inspect Test')
+
 Write-Host "`nRESULT: $pass passed, $fail failed"

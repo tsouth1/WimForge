@@ -23,7 +23,8 @@
                holdKB / holdReason in a profile's catalogSearch rule (Download patches fetches that KB, not the newest;
                the run installs only it) - both LTSC 2021 profiles hold the LCU at KB5129236 (October 2026 LCU's ESU
                installer refuses offline images); built-in profiles for Windows 11 Enterprise 26H2 and Windows Server
-               2025 (seven built-ins; catalog titles checked against the live catalog on 2026-10-17).
+               2025 (seven built-ins; catalog titles checked against the live catalog on 2026-10-17); Tools > Inspect ISO
+               (editions, build, ei.cfg / pid.txt, registry and the licence channels each edition accepts; report in LOGS).
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
                install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
                longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14);
@@ -3281,6 +3282,273 @@ function Invoke-ProfileCheck {
     Set-Phase 'Done'
     return [pscustomobject]@{ Mode = 'ProfileCheck'; OsName = $Definition.Name; Found = @($found); Problems = @($problems); Summary = $summary; Build = $selectedBuild; NewWim = ''; Preflight = $false; VerifyIssues = $null; Gate = $null }
 }
+# ---------- Tools > Inspect ISO (2026-10-17) ----------
+# Reads what an OS ISO says about itself: the file name, sources\ei.cfg / pid.txt / idwbinfo.txt, every index's edition and
+# build, and - from one read-only mount - the offline registry and the licence channels the build accepts per edition
+# (Windows\System32\spp\tokens\pkeyconfig\*.xrm-ms). A WIM carries no licence type of its own: the product key does. This
+# shows which editions are on the media and which key types each one accepts. Changes nothing; writes a report to LOGS.
+function Get-IsoNameHints {
+    # What an ISO's file name says about where it came from (naming conventions only - a renamed file says nothing).
+    param([string]$Name)
+    $h = [System.Collections.Generic.List[string]]::new()
+    if ($Name -match '(?i)^SW_DVD') { $h.Add('SW_DVD...: volume licensing media (Volume Licensing Service Center or the Microsoft 365 admin centre)') }
+    if ($Name -match '(?i)_MLF_') { $h.Add('MLF: Microsoft Licensing Fulfillment - volume licensing media') }
+    if ($Name -match '(?i)^X\d{2}-\d{5}') { $h.Add('X..-.....: a Microsoft part number - OEM preinstallation kit or retail media') }
+    if ($Name -match '(?i)^[a-z]{2}-[a-z]{2}_windows_') { $h.Add('<language>_windows_...: Visual Studio subscription (MSDN) style name') }
+    if ($Name -match '(?i)business_editions') { $h.Add('business editions: the volume licensing editions (Pro, Enterprise, Education)') }
+    if ($Name -match '(?i)consumer_editions') { $h.Add('consumer editions: the retail / OEM editions (Home, Pro, Education)') }
+    if ($Name -match '(?i)^Win1[01]_') { $h.Add('Win10_ / Win11_...: Microsoft download / Media Creation Tool style name (retail and OEM editions)') }
+    if ($Name -match '(?i)eval') { $h.Add('EVAL: evaluation media (time-limited)') }
+    if ($Name -match '(?i)iot') { $h.Add('IoT: IoT Enterprise media') }
+    if ($Name -match '(?i)ltsc|ltsb') { $h.Add('LTSC: Long-Term Servicing Channel media') }
+    if ($h.Count -eq 0) { $h.Add('the file name gives no hint about the source (it may have been renamed)') }
+    return @($h)
+}
+function ConvertFrom-IsoInfoText {
+    # sources\ei.cfg ([Section] then the value on the next line), sources\pid.txt and idwbinfo.txt (Key=Value): an ordered
+    # table. Sections without a Key=Value line take the first line that follows them.
+    param([string]$Text)
+    $r = [ordered]@{}
+    $section = ''
+    foreach ($raw in @(([string]$Text) -split '\r?\n')) {
+        $line = $raw.Trim()
+        if (-not $line -or $line.StartsWith(';')) { continue }
+        if ($line -match '^\[(.+)\]$') { $section = $Matches[1].Trim(); continue }
+        if ($line -match '^([^=]+)=(.*)$') { $r[$Matches[1].Trim()] = $Matches[2].Trim(); continue }
+        if ($section -and -not $r.Contains($section)) { $r[$section] = $line }
+    }
+    return $r
+}
+function Format-MaskedProductKey {
+    # A product key for logs and reports: only the last group is shown.
+    param([string]$Key)
+    $k = ([string]$Key).Trim()
+    if ($k -match '^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$') { return 'XXXXX-XXXXX-XXXXX-XXXXX-' + $k.Substring(24) }
+    if ($k) { return '(not a product key: ' + $k.Length + ' characters)' }
+    return ''
+}
+function ConvertFrom-PkeyConfig {
+    # The key configurations in a pkeyconfig .xrm-ms licence file: the base64 pkeyConfigData block holds an XML list of
+    # Configuration entries (EditionId, ProductKeyType such as Volume:GVLK, ProductDescription). Returns objects.
+    param([string]$Text)
+    $out = [System.Collections.Generic.List[object]]::new()
+    $m = [regex]::Match([string]$Text, '(?s)name="pkeyConfigData"[^>]*>\s*([A-Za-z0-9+/=\s]+?)\s*<')
+    if (-not $m.Success) { return @() }
+    $bytes = [Convert]::FromBase64String(($m.Groups[1].Value -replace '\s', ''))
+    $xmlText = if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) { [System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2) }
+               elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3) }
+               else { [System.Text.Encoding]::UTF8.GetString($bytes) }
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.LoadXml($xmlText)
+    foreach ($c in @($doc.SelectNodes("//*[local-name()='Configuration']"))) {
+        $get = { param($n) $x = $c.SelectSingleNode("*[local-name()='$n']"); if ($x) { [string]$x.InnerText } else { '' } }
+        $out.Add([pscustomobject]@{ EditionId = (& $get 'EditionId'); ProductKeyType = (& $get 'ProductKeyType'); ProductDescription = (& $get 'ProductDescription') })
+    }
+    return @($out)
+}
+function Get-LicenceChannelText {
+    # Plain words for a ProductKeyType from pkeyconfig.
+    param([string]$Type)
+    switch -Regex ($Type) {
+        '^Volume:GVLK$'   { return 'KMS client (GVLK) - activates against your KMS host or Active Directory-based activation' }
+        '^Volume:MAK$'    { return 'MAK - a Multiple Activation Key from a volume licensing agreement' }
+        '^Volume:CSVLK$'  { return 'KMS host key (CSVLK) - makes a machine a KMS host' }
+        '(?i)eval'        { return "Evaluation ($Type) - time-limited" }
+        '^Retail'         { return "Retail ($Type) - a key bought for one device" }
+        '^OEM:DM$'        { return 'OEM:DM - device maker, key held in the device firmware' }
+        '^OEM:NONSLP$'    { return 'OEM:NONSLP - device maker, key on a label or supplied by the maker' }
+        '^OEM:COA'        { return "$Type - device maker, Certificate of Authenticity key" }
+        '^OEM'            { return "$Type - device maker (OEM)" }
+        default           { return $Type }
+    }
+}
+function Get-LicenceFamilies {
+    # The short list for the summary: KMS, MAK, Retail, OEM, Evaluation, KMS host - in that order, each once.
+    param([string[]]$Types = @())
+    $f = [System.Collections.Generic.List[string]]::new()
+    foreach ($pair in @(@('KMS', '^Volume:GVLK$'), @('MAK', '^Volume:MAK$'), @('Retail', '^Retail(?!.*eval)'), @('OEM', '^OEM'), @('Evaluation', '(?i)eval'), @('KMS host', '^Volume:CSVLK$'))) {
+        if (@($Types | Where-Object { $_ -match $pair[1] }).Count -gt 0) { $f.Add($pair[0]) }
+    }
+    return @($f)
+}
+function Get-EditionLicensingNote {
+    # General guidance per edition ID - Microsoft's licensing terms and your agreement decide, not the media.
+    param([string]$EditionId)
+    switch -Regex ($EditionId) {
+        'Eval$'                          { return 'Evaluation edition: time-limited. A Server evaluation can be converted to a licensed edition (DISM /Set-Edition with a key); a client evaluation cannot - reinstall from licensed media.' }
+        '^IoTEnterpriseS'                { return 'IoT Enterprise LTSC: licensed per device for fixed-purpose devices, normally through the OEM / IoT (embedded) channel - check your agreement before using KMS or MAK keys. Microsoft says the LTSC 2021 ESU offer does not apply to it.' }
+        '^EnterpriseS'                   { return 'Enterprise LTSC: volume licensing only (KMS or MAK); needs a volume licensing agreement that covers Enterprise LTSC.' }
+        '^IoTEnterprise'                 { return 'IoT Enterprise: licensed per device through the OEM / IoT (embedded) channel.' }
+        '^Enterprise'                    { return 'Enterprise: volume licensing (KMS or MAK), or Windows Enterprise E3/E5 subscription activation on top of Pro.' }
+        '^Education'                     { return 'Education: academic volume licensing (KMS or MAK), or subscription activation.' }
+        '^Professional'                  { return 'Pro: retail, OEM or volume (KMS / MAK) keys all work - the key decides the channel.' }
+        '^Core'                          { return 'Home: retail or OEM only; cannot join a domain - not for managed deployment.' }
+        '^Server'                        { return 'Windows Server: retail, OEM or volume (KMS / MAK) keys; core licences and client access licences (CALs) apply.' }
+        default                          { return '' }
+    }
+}
+function Get-ImageArchitectureText {
+    param($Value)
+    switch ([string]$Value) { '0' { 'x86' } '5' { 'arm' } '9' { 'x64' } '12' { 'arm64' } default { [string]$Value } }
+}
+function Read-OfflineWindowsInfo {
+    # The Windows NT\CurrentVersion values of a mounted image's offline SOFTWARE hive (loaded under a temporary key and
+    # unloaded again). Returns an ordered table; values the image does not have are left out.
+    param([Parameter(Mandatory)][string]$Mount)
+    $hiveFile = Join-Chain $Mount @('Windows', 'System32', 'config', 'SOFTWARE')
+    if (-not (Test-Path -LiteralPath $hiveFile)) { throw "the image has no $hiveFile" }
+    $hive = "WF_INSPECT_$PID"
+    $r = [ordered]@{}
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = & reg.exe load "HKLM\$hive" $hiveFile 2>&1; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $eap }
+    if ($code -ne 0) { throw "reg load failed: $(@($out) -join ' ')" }
+    try {
+        $p = Get-ItemProperty -LiteralPath "Registry::HKEY_LOCAL_MACHINE\$hive\Microsoft\Windows NT\CurrentVersion" -ErrorAction Stop
+        foreach ($n in @('ProductName', 'EditionID', 'CompositionEditionID', 'InstallationType', 'CurrentBuild', 'UBR', 'DisplayVersion', 'ReleaseId', 'BuildLabEx', 'ProductId')) {
+            $v = $p.PSObject.Properties[$n]
+            if ($v -and "$($v.Value)" -ne '') { $r[$n] = [string]$v.Value }
+        }
+    } finally {
+        $p = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+        $unloaded = $false
+        for ($i = 0; $i -lt 5 -and -not $unloaded; $i++) {
+            $ErrorActionPreference = 'Continue'
+            try { [void](& reg.exe unload "HKLM\$hive" 2>&1); $unloaded = ($LASTEXITCODE -eq 0) } finally { $ErrorActionPreference = $eap }
+            if (-not $unloaded) { Start-Sleep -Seconds 1 }
+        }
+        if (-not $unloaded) { Write-Log "The image's registry is still loaded as HKLM\$hive; run 'reg unload HKLM\$hive' before Cleanup Mountpoints." 'WARN' }
+    }
+    return $r
+}
+function Get-ImageLicenceData {
+    # From a mounted image: the licence channels per edition (every pkeyconfig file) and the edition folders under spp\tokens\skus.
+    param([Parameter(Mandatory)][string]$Mount)
+    $configs = [System.Collections.Generic.List[object]]::new()
+    $dir = Join-Chain $Mount @('Windows', 'System32', 'spp', 'tokens', 'pkeyconfig')
+    foreach ($f in @(if (Test-Path -LiteralPath $dir) { Get-ChildItem -LiteralPath $dir -Filter '*.xrm-ms' -File })) {
+        try { foreach ($c in @(ConvertFrom-PkeyConfig -Text ([System.IO.File]::ReadAllText($f.FullName)))) { $c | Add-Member -NotePropertyName File -NotePropertyValue $f.Name; $configs.Add($c) } }
+        catch { Write-Log "ISO INSPECT   $($f.Name) could not be read: $($_.Exception.Message)" 'WARN' }
+    }
+    $skuDir = Join-Chain $Mount @('Windows', 'System32', 'spp', 'tokens', 'skus')
+    $skus = @(if (Test-Path -LiteralPath $skuDir) { Get-ChildItem -LiteralPath $skuDir -Directory | ForEach-Object { $_.Name } | Sort-Object })
+    return [pscustomobject]@{ Configs = @($configs); Skus = $skus }
+}
+function Invoke-IsoInspection {
+    param([Parameter(Mandatory)][pscustomobject]$Options, [Parameter(Mandatory)]$Definition)
+    $name = $Definition.Name
+    Set-Phase -OsName $name -Phase 'Inspecting the ISO'
+    $paths = Initialize-Repository -Root ([string]$Options.Root).Trim() -Definition $Definition
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $script:LogFile = Join-Path $paths.Logs ("IsoInspect_{0}.log" -f $stamp)
+    $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
+    $dl = $script:DismLogArgs
+    Write-Log "Starting WimForge v$($script:ToolVersion) for $name - Inspect ISO (read-only; nothing changes)"
+    Write-DismNote
+    $isoFiles = @(Get-ChildItem -LiteralPath $paths.ISO -Filter '*.iso' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($isoFiles.Count -eq 0) { throw "There is no ISO in $($paths.ISO). Copy the OS ISO there first." }
+    $rep = [System.Collections.Generic.List[string]]::new()
+    $add = { param([string]$s) $rep.Add($s); if ($s.Trim()) { Write-Log "ISO INSPECT   $s" } }
+    $summary = [System.Collections.Generic.List[string]]::new()
+    $results = [System.Collections.Generic.List[object]]::new()
+    & $add "WimForge v$($script:ToolVersion) - Inspect ISO - $name - $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+    & $add 'A WIM has no licence type of its own: the product key used at or after setup decides it. This report shows which'
+    & $add 'editions the media holds and which key types (channels) each edition accepts. Licensing notes are general guidance;'
+    & $add 'your Microsoft agreement decides what you may install where. The channels are the key types the build''s licensing'
+    & $add 'accepts; Microsoft does not sell every edition through every channel (newer builds list KMS and MAK even for IoT).'
+    $total = $isoFiles.Count; $n = 0
+    foreach ($f in $isoFiles) {
+        Assert-NotCancelled
+        $n++
+        Set-Progress ([int](($n - 1) * 100 / $total)) "Reading $($f.Name)"
+        & $add ''
+        & $add ("=== {0} ({1:N2} GB, dated {2:yyyy-MM-dd})" -f $f.Name, ($f.Length / 1GB), $f.LastWriteTime)
+        try {
+            $drive = Mount-IsoFile $f.FullName
+            $wim = Join-Chain $drive @('sources', 'install.wim'); if (-not (Test-Path -LiteralPath $wim)) { $wim = Join-Chain $drive @('sources', 'install.esd') }
+            if (-not (Test-Path -LiteralPath $wim)) { & $add 'Not an OS ISO (no sources\install.wim or install.esd) - a Language Pack / Features on Demand ISO; skipped.'; continue }
+            foreach ($h in @(Get-IsoNameHints $f.Name)) { & $add "File name: $h" }
+            $files = [ordered]@{}
+            foreach ($leaf in 'ei.cfg', 'pid.txt', 'idwbinfo.txt') {
+                $p = Join-Chain $drive @('sources', $leaf)
+                if (Test-Path -LiteralPath $p) { $files[$leaf] = ConvertFrom-IsoInfoText ([System.IO.File]::ReadAllText($p)) }
+            }
+            if ($files.Contains('ei.cfg')) { & $add ('sources\ei.cfg: ' + (@($files['ei.cfg'].Keys | ForEach-Object { "$_ = $($files['ei.cfg'][$_])" }) -join '; ') + ' - Setup is locked to this channel / edition') }
+            else { & $add 'sources\ei.cfg: none - Setup offers every edition on the media and the key entered picks one' }
+            if ($files.Contains('pid.txt')) { & $add "sources\pid.txt: a product key is built in ($(Format-MaskedProductKey ([string](Get-ProfileValue $files['pid.txt'] 'Value' ''))))" }
+            else { & $add 'sources\pid.txt: none - no product key built into the media' }
+            if ($files.Contains('idwbinfo.txt')) { & $add ('sources\idwbinfo.txt: ' + (@($files['idwbinfo.txt'].Keys | ForEach-Object { "$_ = $($files['idwbinfo.txt'][$_])" }) -join '; ')) }
+            $inv = @(Get-WindowsImage -ImagePath $wim -ErrorAction Stop)
+            & $add "$(Split-Path $wim -Leaf): $($inv.Count) edition(s)"
+            $details = [System.Collections.Generic.List[object]]::new()
+            foreach ($i in $inv) {
+                $d = Get-WindowsImage -ImagePath $wim -Index $i.ImageIndex -ErrorAction Stop
+                $o = [pscustomobject]@{
+                    Index = [int]$i.ImageIndex; Name = [string]$i.ImageName; EditionId = [string](Get-ProfileValue $d 'EditionId' '')
+                    Version = [string](Get-ProfileValue $d 'Version' ''); SPBuild = [string](Get-ProfileValue $d 'SPBuild' '')
+                    Architecture = (Get-ImageArchitectureText (Get-ProfileValue $d 'Architecture' '')); InstallationType = [string](Get-ProfileValue $d 'InstallationType' '')
+                    Languages = (@(Get-ProfileValue $d 'Languages' @()) -join ', '); Modified = [string](Get-ProfileValue $d 'ModifiedTime' '')
+                }
+                $details.Add($o)
+                & $add ("  [{0}] {1}: edition ID {2}, version {3}{4}, {5}{6}{7}{8}" -f $o.Index, $o.Name, $(if ($o.EditionId) { $o.EditionId } else { '?' }), $o.Version,
+                    $(if ($o.SPBuild -and $o.Version -notlike "*.$($o.SPBuild)") { " (build revision $($o.SPBuild))" }), $o.Architecture,
+                    $(if ($o.InstallationType) { ", $($o.InstallationType)" }), $(if ($o.Languages) { ", languages $($o.Languages)" }), $(if ($o.Modified) { ", modified $($o.Modified)" }))
+            }
+            # One read-only mount is enough: pkeyconfig lists every edition of the build. Clients: the edition the profile picks.
+            $mountIdx = if ($Definition.ServiceAllIndexes) { $inv[0] } else { try { Select-SourceImage -Inventory $inv -Definition $Definition -Name $name } catch { & $add "The profile's edition rule did not match ($($_.Exception.Message)); index $($inv[0].ImageIndex) is read instead."; $inv[0] } }
+            Assert-NotCancelled
+            Set-Phase 'Mounting the edition read-only'; Set-Progress ([int](($n - 0.6) * 100 / $total)) "Mounting index $($mountIdx.ImageIndex) ($($mountIdx.ImageName)) read-only"
+            $mwim = $wim; $midx = [int]$mountIdx.ImageIndex; $tmp = $null
+            if ($wim -like '*.esd') {
+                $tmp = Join-Path $paths.Temp 'inspect.read.wim'; Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                Export-WindowsImage -SourceImagePath $wim -SourceIndex $midx -DestinationImagePath $tmp -CompressionType Max @dl -ErrorAction Stop | Out-Null
+                $mwim = $tmp; $midx = 1
+            }
+            Remove-DirectoryContents $paths.MainMount
+            $reg = $null; $lic = $null; $cur = ''; $targets = @()
+            try {
+                Mount-WindowsImage -ImagePath $mwim -Index $midx -Path $paths.MainMount -ReadOnly @dl -ErrorAction Stop | Out-Null
+                Set-Phase 'Reading edition, registry and licence files'
+                try { $cur = [string](Get-ProfileValue (Get-WindowsEdition -Path $paths.MainMount -ErrorAction Stop) 'Edition' '') } catch { & $add "Current edition could not be read: $($_.Exception.Message)" }
+                try { $targets = @(Get-WindowsEdition -Path $paths.MainMount -Target -ErrorAction Stop | ForEach-Object { [string](Get-ProfileValue $_ 'Edition' '') } | Where-Object { $_ }) } catch { }
+                try { $reg = Read-OfflineWindowsInfo -Mount $paths.MainMount } catch { & $add "Registry could not be read: $($_.Exception.Message)" }
+                $lic = Get-ImageLicenceData -Mount $paths.MainMount
+                Dismount-WindowsImage -Path $paths.MainMount -Discard @dl -ErrorAction Stop | Out-Null
+            } catch { Dismount-IfMounted $paths.MainMount; throw }
+            finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
+            & $add "Read-only mount of index $($mountIdx.ImageIndex) ($($mountIdx.ImageName)):"
+            if ($cur) { & $add "  current edition (DISM): $cur" }
+            if (@($targets).Count) { & $add "  can be changed with a key to: $(@($targets) -join ', ')" } else { & $add '  can be changed with a key to: (none listed)' }
+            if ($reg -and $reg.Count) {
+                & $add ('  registry (Windows NT\CurrentVersion): ' + (@($reg.Keys | ForEach-Object { "$_ = $($reg[$_])" }) -join '; '))
+                if (-not $reg.Contains('ProductId')) { & $add '  no ProductId: it is generated from the product key during setup, so no image carries one' }
+                if ([string](Get-ProfileValue $reg 'ProductName' '') -like 'Windows 10*' -and [int](Get-ProfileValue $reg 'CurrentBuild' '0') -ge 22000) { & $add '  ProductName says Windows 10 on a Windows 11 build (22000 or later) - a known Microsoft quirk, not a wrong ISO' }
+            }
+            if ($lic -and @($lic.Skus).Count) { & $add "  licence folders (spp\tokens\skus): $(@($lic.Skus) -join ', ')" }
+            if (-not $lic -or @($lic.Configs).Count -eq 0) { & $add '  no key configuration (pkeyconfig) found - the licence channels cannot be listed' }
+            & $add 'Licence channels per edition (from the key configuration):'
+            foreach ($o in $details) {
+                $types = @(@($lic.Configs) | Where-Object { $o.EditionId -and $_.EditionId -ieq $o.EditionId } | ForEach-Object { $_.ProductKeyType } | Where-Object { $_ } | Select-Object -Unique)
+                $fam = @(Get-LicenceFamilies -Types $types)
+                & $add "  [$($o.Index)] $($o.Name) ($($o.EditionId)): $(if ($types.Count) { $fam -join ', ' } else { 'no channels found for this edition ID' })"
+                foreach ($t in $types) { & $add "      $(Get-LicenceChannelText $t)" }
+                $note = Get-EditionLicensingNote $o.EditionId
+                if ($note) { & $add "      Note: $note" }
+                $o | Add-Member -NotePropertyName Channels -NotePropertyValue @($types)
+                $o | Add-Member -NotePropertyName Families -NotePropertyValue @($fam)
+                $summary.Add("$($f.Name) [$($o.Index)] $($o.Name) - $($o.EditionId), $($o.Version) $($o.Architecture): $(if ($fam.Count) { $fam -join ', ' } else { 'channels unknown' })")
+            }
+            $results.Add([pscustomobject]@{ Iso = $f.Name; Hints = @(Get-IsoNameHints $f.Name); Files = $files; Images = @($details); MountedIndex = [int]$mountIdx.ImageIndex; Registry = $reg; CurrentEdition = $cur; TargetEditions = @($targets); Skus = $(if ($lic) { @($lic.Skus) } else { @() }) })
+        } catch { $rep.Add("$($f.Name) could not be read: $($_.Exception.Message)"); Write-Log "ISO INSPECT   $($f.Name) could not be read: $($_.Exception.Message)" 'WARN' }
+        finally { Dismount-AllIso }
+    }
+    $report = Join-Path $paths.Logs ("IsoInspect_{0}_{1}.txt" -f $Definition.Folder, $stamp)
+    [System.IO.File]::WriteAllText($report, (($rep -join [Environment]::NewLine) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Log "ISO INSPECT: report written to $report"
+    if ($results.Count -eq 0) { Write-Log "ISO INSPECT: no OS ISO could be read in $($paths.ISO)." 'WARN' }
+    Set-Progress 100 'Done'; Set-Phase 'Done'
+    $text = "$name`n`n" + $(if ($summary.Count) { ($summary -join "`n") } else { "No OS ISO could be read in $($paths.ISO)." }) + "`n`nA WIM has no licence type of its own - the product key decides. Full report (edition details, ei.cfg / pid.txt, registry, licensing notes):`n$report"
+    return [pscustomobject]@{ Mode = 'IsoInspect'; OsName = $name; Isos = @($results); Report = $report; Summary = $text; NewWim = ''; Preflight = $false; VerifyIssues = $null; Gate = $null }
+}
 function Invoke-MediaRefresh {
     param([Parameter(Mandatory)][pscustomobject]$Options)
     $script:Cancelled = $false
@@ -3325,6 +3593,11 @@ function Invoke-MediaRefresh {
     }
     if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'ProfileCheck') {
         $r = Invoke-ProfileCheck -Options $Options -Definition $definition
+        $script:LastResult = $r; return $r
+    }
+    if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'IsoInspect') {
+        # Tools > Inspect ISO (2026-10-17): editions, build and licence channels of the OS ISO; read-only, writes a report.
+        $r = Invoke-IsoInspection -Options $Options -Definition $definition
         $script:LastResult = $r; return $r
     }
     if ([string](Get-ProfileValue $Options 'Mode' 'Service') -eq 'Download') {
@@ -3830,7 +4103,7 @@ if ($Config) {
  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <Button x:Name="ToolsButton" Grid.Column="2" Content="Tools &#x25BE;" Margin="16,0,0,0" Padding="12,5" VerticalAlignment="Center" ToolTip="Maintenance tools">
-    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><MenuItem x:Name="VerifyExistingItem" Header="Verify existing install.wim..." ToolTip="Runs only the Verify step on the selected OS's NEWWIM\install.wim (read-only, a few minutes per index) and writes its change log and RunResult.json - for an image whose run stopped after the export, so the SCCM tab can import it. Uses the ticked LCU, languages and apps for what to expect."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/><Separator/><MenuItem x:Name="NewOsItem" Header="New OS from existing..." ToolTip="Adds an OS to the list by copying the selected one: a new name, folder and release (for example 26H2). The catalog searches are updated for the new release and the repository folders are created."/><MenuItem x:Name="RenameOsItem" Header="Rename OS..." ToolTip="Changes the selected OS's display name and, if wanted, its folder name. Saved settings, the app list and the repository folder move with it."/><MenuItem x:Name="CheckOsItem" Header="Check OS profile" ToolTip="Tests the selected OS's profile before a long run: the repository folder, which edition it picks on the ISO (and its build), and what each catalog search finds. Changes and downloads nothing."/><MenuItem x:Name="EditOsItem" Header="Edit OS profile..." ToolTip="Opens the selected OS's profile file in Notepad. Save it, then press Reload profiles; problems are shown in the Log tab."/><MenuItem x:Name="OpenProfilesItem" Header="Open Profiles folder" ToolTip="Opens the folder holding the OS profile files in Explorer."/></ContextMenu></Button.ContextMenu>
+    <Button.ContextMenu><ContextMenu><MenuItem x:Name="CleanupMountsItem" Header="Cleanup Mountpoints..." ToolTip="Find images and ISOs still mounted under the repository root (for example after a crash), show them, and after confirmation discard / dismount them. Nothing outside the repository root is touched."/><MenuItem x:Name="VerifyExistingItem" Header="Verify existing install.wim..." ToolTip="Runs only the Verify step on the selected OS's NEWWIM\install.wim (read-only, a few minutes per index) and writes its change log and RunResult.json - for an image whose run stopped after the export, so the SCCM tab can import it. Uses the ticked LCU, languages and apps for what to expect."/><Separator/><MenuItem x:Name="SaveRunConfigItem" Header="Save run config..." ToolTip="Saves every choice for the selected OS (outputs, updates, languages, apps, SCCM) to a JSON file for a run without the window: MediaRefresh_v2.4.ps1 -Config &lt;file&gt; [-Preflight]"/><Separator/><MenuItem x:Name="NewOsItem" Header="New OS from existing..." ToolTip="Adds an OS to the list by copying the selected one: a new name, folder and release (for example 26H2). The catalog searches are updated for the new release and the repository folders are created."/><MenuItem x:Name="RenameOsItem" Header="Rename OS..." ToolTip="Changes the selected OS's display name and, if wanted, its folder name. Saved settings, the app list and the repository folder move with it."/><MenuItem x:Name="CheckOsItem" Header="Check OS profile" ToolTip="Tests the selected OS's profile before a long run: the repository folder, which edition it picks on the ISO (and its build), and what each catalog search finds. Changes and downloads nothing."/><MenuItem x:Name="InspectIsoItem" Header="Inspect ISO (editions and licensing)" ToolTip="Reads the selected OS&apos;s ISOs: each edition&apos;s edition ID, build, architecture and languages, sources\ei.cfg and pid.txt, and - from one read-only mount - the registry and the licence channels each edition accepts (KMS, MAK, Retail, OEM). Writes a report to the OS&apos;s LOGS folder. Changes nothing."/><MenuItem x:Name="EditOsItem" Header="Edit OS profile..." ToolTip="Opens the selected OS's profile file in Notepad. Save it, then press Reload profiles; problems are shown in the Log tab."/><MenuItem x:Name="OpenProfilesItem" Header="Open Profiles folder" ToolTip="Opens the folder holding the OS profile files in Explorer."/></ContextMenu></Button.ContextMenu>
    </Button>
    <StackPanel Grid.Column="0"><TextBlock Text="WimForge" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource WF.Title}"/><TextBlock Text="Create cleaned, optimized, verified install.wim files, with optional refreshed media and ISO." TextWrapping="Wrap" Foreground="{DynamicResource WF.SubtleText}" Margin="0,4,0,0"/></StackPanel>
    <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="220"><TextBlock x:Name="HeaderOs" Text="" FontSize="16" FontWeight="SemiBold" TextAlignment="Right" HorizontalAlignment="Right"/><TextBlock x:Name="HeaderPhase" Text="Idle" FontSize="13" Foreground="{DynamicResource WF.SubtleText}" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,2,0,0"/></StackPanel>
@@ -3900,7 +4173,7 @@ if ($Config) {
 '@
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkReuseInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','VerifyExistingItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmDescription','SccmDescResetButton','SccmDescriptionPreview','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
+foreach ($ctl in @('HeaderOs','HeaderPhase','RootText','OsCombo','ReloadProfilesButton','AcquirePatchesButton','ProfileInfo','ChkPreflight','ChkInstall','ChkReuseInstall','ChkBoot','ChkWinRE','ChkVerify','ChkBuildMedia','ChkBuildIso','ChkMedia2023','ChkAutoDownload','ChkSSU','ChkLCU','ChkSafeOS','ChkNetCU','ChkSetupDU','ChkNetFx3','LanguageList','LogBox','ColorSchemeCombo','SchemeSwatches','Status','Progress','RunButton','CancelButton','SaveSettingsButton','ResetSettingsButton','ToolsButton','CleanupMountsItem','VerifyExistingItem','SaveRunConfigItem','NewOsItem','RenameOsItem','CheckOsItem','InspectIsoItem','EditOsItem','OpenProfilesItem','InstructionsTab','ReloadInstructionsButton','InstructionsSource','InstructionsViewer','ReadAppsButton','ChkAppRemoval','AppsSource','AppList','SccmSiteServer','SccmConnectButton','SccmSiteInfo','SccmTargetDP','SccmTargetGroup','SccmTargetList','SccmTarget','SccmContentSource','SccmBrowseButton','SccmSharesButton','SccmUncPreview','SccmImageName','SccmNameResetButton','SccmDescription','SccmDescResetButton','SccmDescriptionPreview','SccmPackageType','ChkSccmAutoImport','SccmImportButton','SccmLastRun')) {
     Set-Variable -Name $ctl -Value $window.FindName($ctl) -Scope Script
 }
 # Profiles: JSON files in a Profiles folder beside the script (or under LOCALAPPDATA when the script has no file path).
@@ -4540,6 +4813,14 @@ function Complete-BackgroundRun {
         [System.Windows.MessageBox]::Show("Check OS profile: $($res.Summary)", 'WimForge', 'OK', $(if (@($res.Problems).Count) { 'Warning' } else { 'Information' })) | Out-Null
         return
     }
+    # Tools > Inspect ISO finished: the editions and licence channels per ISO, and where the report is.
+    if ($resMode -eq 'IsoInspect') {
+        $script:Status.Text = 'Ready'; $script:Progress.Value = 0
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        Update-HeaderIdle
+        [System.Windows.MessageBox]::Show("Inspect ISO: $($res.Summary)", 'WimForge - Inspect ISO', 'OK', $(if (@($res.Isos).Count) { 'Information' } else { 'Warning' })) | Out-Null
+        return
+    }
     # SCCM tab: Connect finished - fill the distribution point / group list.
     if ($resMode -eq 'SccmConnect') {
         $script:SccmLists = $res
@@ -5015,6 +5296,19 @@ $script:CheckOsItem.Add_Click({
     catch {
         $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         [System.Windows.MessageBox]::Show("Could not start the check: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
+    }
+})
+$script:InspectIsoItem.Add_Click({
+    if (-not $script:RunButton.IsEnabled) { [System.Windows.MessageBox]::Show('A run is in progress. Try again once it has finished.', 'WimForge', 'OK', 'Information') | Out-Null; return }
+    if (-not $script:EngineText) { [System.Windows.MessageBox]::Show('Inspect ISO needs the script running from a file (the background engine text is unavailable).', 'WimForge', 'OK', 'Error') | Out-Null; return }
+    $opts = [pscustomobject]@{ Mode = 'IsoInspect'; Root = ([string]$script:RootText.Text).Trim(); OsName = [string]$script:OsCombo.SelectedItem; ProfilesDir = $script:ProfilesDir }
+    if (-not $opts.OsName) { return }
+    $script:RunButton.IsEnabled = $false; $script:AcquirePatchesButton.IsEnabled = $false; $script:CancelButton.IsEnabled = $true
+    $script:Cancelled = $false
+    try { Start-BackgroundRun -Options $opts }
+    catch {
+        $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
+        [System.Windows.MessageBox]::Show("Could not start Inspect ISO: $($_.Exception.Message)", 'WimForge', 'OK', 'Error') | Out-Null
     }
 })
 $script:VerifyExistingItem.Add_Click({
