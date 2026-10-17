@@ -19,7 +19,10 @@
                Check OS profile, Edit OS profile, Open Profiles folder; the {version} release placeholder in profiles;
                the local ADK check for Build an ISO; the app list per OS in Profiles\Apps; download only what is missing;
                Tools > Verify existing install.wim (Verify, change log and RunResult.json for NEWWIM\install.wim only);
-               an SCCM tab Description box (template with {build}, {gate}, {changelog}, ... and a preview of the text).
+               an SCCM tab Description box (template with {build}, {gate}, {changelog}, ... and a preview of the text);
+               holdKB / holdReason in a profile's catalogSearch rule (Download patches fetches that KB, not the newest;
+               the run installs only it) - both LTSC 2021 profiles hold the LCU at KB5129236 (October 2026 LCU's ESU
+               installer refuses offline images).
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
                install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
                longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14);
@@ -207,6 +210,8 @@ $script:ProfileClasses  = @('SSU', 'LCU', 'NetCU', 'SafeOS', 'SetupDU')
 $script:ProfileMessages = [System.Collections.Generic.List[object]]::new()
 $script:LanguagesFileName = 'Languages.json'   # Profiles\Languages.json: the Languages tab list (step 10e), not an OS profile
 $script:OutputArchived  = $false
+# The LTSC 2021 LCU hold (2026-10-16): KB5129236 is the September 2026 out-of-band LCU, the last one that services offline.
+$script:Ltsc2021LcuHoldReason = 'From the October 2026 LCU (KB5126657) on, the LCU deploys the Extended Security Updates installer, which refuses offline images (ESU: Offline is not supported, 1625) on Enterprise and IoT LTSC 2021 alike. Install newer LCUs online (task sequence). Remove the hold once Microsoft fixes this.'
 
 function Get-BuiltInProfileData {
     $noOrder = { [ordered]@{ SSU = @(); LCU = @(); NetCU = @(); SafeOS = @(); SetupDU = @() } }
@@ -218,11 +223,11 @@ function Get-BuiltInProfileData {
         [ordered]@{ schemaVersion = 1; name = 'Windows 10 IoT Enterprise LTSC 2021'; sortOrder = 20; folder = 'Win10_IoT_Enterprise_LTSC_2021'; version = '21H2'; altFolders = @('Win10_IOT_Enterprise_LTSC_2021')
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 10 IoT Enterprise LTSC( 2021)?$'; preferredIndex = 2
             lpPattern = $script:ClientLpPattern; ssuRequired = $true; defaultLanguages = $script:DefaultLanguageSet; packageOrder = (& $noOrder)
-            endOfSupport = '2032-01-14'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+            endOfSupport = '2032-01-14'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @(); holdKB = 'KB5129236'; holdReason = $script:Ltsc2021LcuHoldReason }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
         [ordered]@{ schemaVersion = 1; name = 'Windows 10 Enterprise LTSC 2021 (KMS)'; sortOrder = 30; folder = 'Win10_Enterprise_LTSC_2021_KMS'; version = '21H2'; altFolders = @()
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 10 Enterprise LTSC( 2021)?$'; preferredIndex = 1
             lpPattern = $script:ClientLpPattern; ssuRequired = $true; defaultLanguages = $script:DefaultLanguageSet; packageOrder = (& $noOrder)
-            endOfSupport = '2027-01-13'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Support ends 2027-01-13; plan the replacement. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @() }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
+            endOfSupport = '2027-01-13'; keepArchives = 3; minFreeGB = 30; spaceCheck = 'enforce'; notes = 'SSU ssu-19041.3562-x64.msu goes in PATCHES\SSU. Support ends 2027-01-13; plan the replacement. Catalog search rules checked against the real catalog on 2026-09-24.'; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'Cumulative Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for Windows 10 Version {version}'; checkpointKBs = @(); holdKB = 'KB5129236'; holdReason = $script:Ltsc2021LcuHoldReason }; NetCU = [ordered]@{ search = 'Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version {version} for x64'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Cumulative Update for \.NET Framework 3\.5, 4\.8 and 4\.8\.1 for Windows 10 Version {version}'; checkpointKBs = @() }; SafeOS = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Safe OS'; productExclude = ''; checkpointKBs = @() }; SetupDU = [ordered]@{ search = 'Dynamic Update for Windows 10 Version {version} for x64-based Systems'; architecture = 'x64'; excludePreview = $true; buildFilter = '^\d{4}-\d{2} Dynamic Update for Windows 10 Version {version}'; productFilter = 'Dynamic Update'; productExclude = 'Safe OS'; checkpointKBs = @() } } }
         [ordered]@{ schemaVersion = 1; name = 'Windows 11 Enterprise 24H2'; sortOrder = 40; folder = 'Win11_Enterprise_24H2'; version = '24H2'; altFolders = @('Win11Enterprise_24H2')
             serviceAllIndexes = $false; editionRegex = '(?i)^Windows 11 Enterprise$'; preferredIndex = 3
             lpPattern = $script:ClientLpPattern; ssuRequired = $false; defaultLanguages = @(); packageOrder = (& $noOrder)
@@ -309,6 +314,11 @@ function ConvertTo-OsProfile {
             # The catalog returns nothing at all for a search over 100 characters (checked 2026-09-24: 106 -> 0 results, 93 -> 41).
             foreach ($st in $searchTerms) { if ($st.Length -gt 100) { throw "'catalogSearch.$canon.search' is $($st.Length) characters; the Microsoft Update Catalog returns nothing for a search over 100 characters. Shorten it and let buildFilter match the exact title." } }
             $chainKbs = @(@(Get-ProfileValue $ruleData 'checkpointKBs' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim() })
+            # holdKB (2026-10-16): keep this class at one KB - Download patches picks that catalog entry instead of the
+            # newest, and the run leaves out any other KB in the folder. For LTSC 2021: from the October 2026 LCU on, the
+            # LCU deploys the ESU installer, which refuses offline images.
+            $holdKb = ([string](Get-ProfileValue $ruleData 'holdKB' '')).Trim().ToUpperInvariant()
+            if ($holdKb -and $holdKb -notmatch '^KB[0-9]{6,8}$') { throw "'catalogSearch.$canon.holdKB' must be a KB number such as KB5129236 (or empty)." }
             $catalogSearch[$canon] = [ordered]@{
                 search = $searchTerms[0]
                 searches = @($searchTerms)
@@ -318,6 +328,8 @@ function ConvertTo-OsProfile {
                 productFilter = (& $expand ([string](Get-ProfileValue $ruleData 'productFilter' '')) "catalogSearch.$canon.productFilter" -Regex)
                 productExclude = (& $expand ([string](Get-ProfileValue $ruleData 'productExclude' '')) "catalogSearch.$canon.productExclude" -Regex)
                 checkpointKBs = $chainKbs
+                holdKB = $holdKb
+                holdReason = ([string](Get-ProfileValue $ruleData 'holdReason' '')).Trim()
             }
             foreach ($rk in @('buildFilter', 'productFilter', 'productExclude')) {
                 $rx = $catalogSearch[$canon][$rk]
@@ -1173,6 +1185,14 @@ function Get-KbFromName {
     $m = [regex]::Match([string]$Name, '(?i)KB[0-9]{6,8}')
     if ($m.Success) { return $m.Value.ToUpperInvariant() } else { return '' }
 }
+function Format-HoldNote {
+    # For a Download patches plan line: "" unless the profile holds the class, then the hold and the newer entry not used.
+    param($PlanItem)
+    $held = [string](Get-ProfileValue $PlanItem 'Held' '')
+    if (-not $held) { return '' }
+    $newer = [string](Get-ProfileValue $PlanItem 'Newer' '')
+    return "`n      HELD at $held by the OS profile$(if ($newer) { " - newer, not used: $newer" })"
+}
 function Test-PatchTuesday {
     # $true for the second Tuesday of a month (Microsoft's monthly release day).
     param([datetime]$Date)
@@ -1525,6 +1545,11 @@ function Invoke-PatchAcquisition {
         $ruleProductFilter = [string](Get-ProfileValue $rule 'productFilter' '')
         $ruleProductExclude = [string](Get-ProfileValue $rule 'productExclude' '')
         $chainKbs = @(@(Get-ProfileValue $rule 'checkpointKBs' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() })
+        $holdKb = [string](Get-ProfileValue $rule 'holdKB' '')
+        if ($holdKb) {
+            $holdReason = [string](Get-ProfileValue $rule 'holdReason' '')
+            Write-Log "$class is held at $holdKb by the OS profile$(if ($holdReason) { ": $holdReason" } else { '.' })" 'WARN'
+        }
         if ($chainKbs.Count -gt 0) {
             Write-Log "$class checkpoint chain from the profile: $($chainKbs -join ', ') - kept alongside the downloaded file(s) when already present, not fetched separately (open point, TODO.md step 5)." 'INFO'
         }
@@ -1546,13 +1571,28 @@ function Invoke-PatchAcquisition {
             catch { Write-Log "Catalog search failed for $class ('$term'): $($_.Exception.Message)" 'ERROR'; $skippedClasses.Add("$class (search failed for '$term': $($_.Exception.Message))"); continue }
             if ($candidates.Count -eq 0) { $skippedClasses.Add("$class (no catalog result matched '$term')"); continue }
             $best = $candidates[0]
+            $newer = ''
+            if ($holdKb) {
+                # The held entry, not the newest. Not in the results: nothing is downloaded and nothing pruned for this class.
+                $held = @($candidates | Where-Object { (Get-KbFromName ([string](Get-ProfileValue $_ 'Title' ''))) -eq $holdKb }) | Select-Object -First 1
+                if (-not $held) {
+                    Write-Log "$class`: none of the $($candidates.Count) catalog result(s) for '$term' is $holdKb, the KB the profile holds; nothing downloaded or removed for $class." 'WARN'
+                    $skippedClasses.Add("$class (held at $holdKb, which is not in the catalog results for '$term')"); continue
+                }
+                $newestTitle = [string](Get-ProfileValue $best 'Title' '')
+                if ((Get-KbFromName $newestTitle) -ne $holdKb) {
+                    $newer = Format-CatalogPick -Title $newestTitle -Kb (Get-KbFromName $newestTitle) -Date (Get-CatalogDate $best) -Release:($class -eq 'LCU')
+                    Write-Log "$class`: newest in the catalog is '$newer' - not used (held at $holdKb)."
+                }
+                $best = $held
+            }
             $title = [string](Get-ProfileValue $best 'Title' '(untitled catalog result)')
             $kb = Get-KbFromName $title
             $released = Get-CatalogDate $best; $classification = [string](Get-ProfileValue $best 'Classification' '')
             $present = @(Get-PresentCatalogFiles -Result $best -Folder $folder -Record $record)
-            $plan.Add([pscustomobject]@{ Class = $class; Title = $title; Kb = $kb; Date = $released; Classification = $classification; Present = ($present.Count -gt 0); Folder = $folders[$class] })
+            $plan.Add([pscustomobject]@{ Class = $class; Title = $title; Kb = $kb; Date = $released; Classification = $classification; Present = ($present.Count -gt 0); Folder = $folders[$class]; Held = $holdKb; Newer = $newer })
             if ($kb) { $classPickedKbs.Add($kb) }
-            Write-Log "$class`: selected '$(Format-CatalogPick -Title $title -Kb $kb -Date $released -Classification $classification -Release:($class -eq 'LCU'))'$(if ($searchTerms.Count -gt 1) { " [search: $term]" })"
+            Write-Log "$class`: selected '$(Format-CatalogPick -Title $title -Kb $kb -Date $released -Classification $classification -Release:($class -eq 'LCU'))'$(if ($holdKb) { ' (held by the OS profile)' })$(if ($searchTerms.Count -gt 1) { " [search: $term]" })"
             if ($present.Count -gt 0) { Write-Log "$class`: already in PATCHES\$($folders[$class]) ($(($present | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')); not downloaded again." }
             elseif (-not $dryRun) { Write-Log "$class`: not in PATCHES\$($folders[$class]) yet; downloading." }
             if ($dryRun) { continue }
@@ -1626,13 +1666,37 @@ function Get-PackageFiles {
     }
     return @($files | Sort-Object -Property @{ Expression = { $n = $_.Name; $r = $pats.Count; for ($i = 0; $i -lt $pats.Count; $i++) { if ($n -like $pats[$i]) { $r = $i; break } }; $r } }, FullName)
 }
+function Get-CatalogHolds {
+    # The profile's holdKB per class: @{ <class> = @{ Kb; Reason; Allowed } }. Allowed = the held KB plus the class's
+    # checkpointKBs (a held checkpoint-model LCU still needs its checkpoints beside it).
+    param($Definition)
+    $holds = @{}
+    $cs = Get-ProfileValue $Definition 'CatalogSearch' $null
+    if ($null -eq $cs) { return $holds }
+    foreach ($c in @($cs.Keys)) {
+        $rule = $cs[$c]; $kb = ([string](Get-ProfileValue $rule 'holdKB' '')).ToUpperInvariant()
+        if (-not $kb) { continue }
+        $chain = @(@(Get-ProfileValue $rule 'checkpointKBs' @()) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpperInvariant() })
+        $holds[[string]$c] = @{ Kb = $kb; Reason = [string](Get-ProfileValue $rule 'holdReason' ''); Allowed = @(@($kb) + $chain) }
+    }
+    return $holds
+}
 function Get-PackageSet {
-    param([string]$PatchRoot, [hashtable]$Enabled, [hashtable]$Order = @{})
+    # $Holds (from Get-CatalogHolds): a held class keeps only the held KB's files (and its checkpoints); every other file
+    # in its folder is left out of the run and listed in HeldOut, so a newer LCU still lying in PATCHES\LCU is never added.
+    param([string]$PatchRoot, [hashtable]$Enabled, [hashtable]$Order = @{}, [hashtable]$Holds = @{})
     $folders = [ordered]@{ LCU = 'LCU'; SSU = 'SSU'; NetCU = 'NETCU'; SafeOS = 'SAFEOSDU'; SetupDU = 'SETUPDU' }
     $set = @{}
     foreach ($k in $folders.Keys) {
         $ext = if ($k -eq 'SetupDU') { @('.cab') } else { @('.cab', '.msu') }
         $set[$k] = @( if ($Enabled[$k]) { Get-PackageFiles -Path (Join-Path $PatchRoot $folders[$k]) -Extensions $ext -Order @($Order[$k]) } )
+    }
+    $set.Holds = $Holds; $set.HeldOut = @{}
+    foreach ($k in @($Holds.Keys)) {
+        if (-not $set.ContainsKey($k) -or @($set[$k]).Count -eq 0) { continue }
+        $allowed = @($Holds[$k].Allowed)
+        $out = @($set[$k] | Where-Object { $allowed -notcontains (Get-KbFromName $_.Name) })
+        if ($out.Count -gt 0) { $set.HeldOut[$k] = $out; $set[$k] = @($set[$k] | Where-Object { $allowed -contains (Get-KbFromName $_.Name) }) }
     }
     $lcu = Resolve-LcuTarget -Files $set.LCU
     $set.LCU = $lcu.Install; $set.LcuCheckpoints = $lcu.Checkpoints
@@ -1658,6 +1722,20 @@ function Test-PackageSet {
         $state = if ($Enabled[$k]) { 'selected' } else { 'not selected' }
         Write-Log "$k packages: $(@($Packages[$k]).Count) ($state)"
         if (@($Packages[$k]).Count -gt 1) { Write-Log "$k order: $((@($Packages[$k]) | ForEach-Object { $_.Name }) -join ' -> ')" }
+    }
+    # Held classes (the profile's holdKB): say so, name what is left out, and refuse a run without the held file.
+    $holds = if ($Packages.ContainsKey('Holds') -and $Packages.Holds) { $Packages.Holds } else { @{} }
+    $heldOut = if ($Packages.ContainsKey('HeldOut') -and $Packages.HeldOut) { $Packages.HeldOut } else { @{} }
+    $holdFolders = @{ LCU = 'LCU'; NetCU = 'NETCU'; SafeOS = 'SAFEOSDU'; SetupDU = 'SETUPDU'; SSU = 'SSU' }
+    foreach ($k in @($holds.Keys | Sort-Object)) {
+        if (-not $Enabled[$k]) { continue }
+        $h = $holds[$k]; $out = @($heldOut[$k] | Where-Object { $_ })
+        Write-Log "$k is held at $($h.Kb) by the OS profile$(if ($h.Reason) { ": $($h.Reason)" } else { '.' })" 'WARN'
+        if ($out.Count -gt 0) { Write-Log "$k`: left out of this run (not $($h.Kb)): $(($out | ForEach-Object { $_.Name }) -join ', ')" 'WARN' }
+        # Only other KBs in the folder (an empty folder gets the usual "is empty" message below).
+        if (@($Packages[$k]).Count -eq 0 -and $out.Count -gt 0) {
+            throw "$k is held at $($h.Kb) by the OS profile, but PATCHES\$($holdFolders[$k]) has no $($h.Kb) file (it holds $(($out | ForEach-Object { $_.Name }) -join ', ')). Run Download patches (it fetches $($h.Kb)) or put the file there, or remove 'holdKB' from the profile."
+        }
     }
     if ($Enabled.LCU -and @($Packages.LCU).Count -eq 0) { throw 'Latest Cumulative Update is selected but PATCHES\LCU is empty. Add the LCU or untick it.' }
     $cps = @($Packages['LcuCheckpoints'] | Where-Object { $_ })
@@ -3129,6 +3207,8 @@ function Invoke-ProfileCheck {
     foreach ($c in @($Definition.CatalogSearch.Keys | Sort-Object)) {
         $rule = $Definition.CatalogSearch[$c]
         Write-Log "PROFILE CHECK   catalog rule $c : search '$(@($rule.searches) -join "' + '")'$(if ($rule.buildFilter) { "; title must match '$($rule.buildFilter)'" })"
+        $hk = [string](Get-ProfileValue $rule 'holdKB' '')
+        if ($hk) { $found.Add("$c held at $hk by the profile ('holdKB') - Download patches and the run use only $hk") }
     }
     $root = ([string]$Options.Root).Trim()
     $osRoot = if ($root) { Get-OsRootPath -Root $root -Definition $Definition } else { '' }
@@ -3329,7 +3409,7 @@ function Invoke-MediaRefresh {
                 }
                 Set-Phase -OsName $name -Phase $(if ($Options.PreflightOnly) { 'Preflight' } else { 'Starting' })
             } else { Write-Log 'Patches: the ones already in PATCHES are used (Download the latest patches before the run is not ticked).' }
-            $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder
+            $packages = Get-PackageSet -PatchRoot $paths.Patches -Enabled $enabled -Order $definition.PackageOrder -Holds (Get-CatalogHolds $definition)
             $checkEnabled = $enabled.Clone()
             if ($lcuComing -and @($packages.LCU).Count -eq 0) {
                 # A preflight with an empty PATCHES\LCU is fine when the run downloads the LCU first.
@@ -4513,11 +4593,11 @@ function Complete-BackgroundRun {
             $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         } elseif (@($plan | Where-Object { -not [bool](Get-ProfileValue $_ 'Present' $false) }).Count -eq 0) {
             # Step 14: everything detected is already in the folders - nothing to download, so no confirmation.
-            $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))" })
+            $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))$(Format-HoldNote $_)" })
             [System.Windows.MessageBox]::Show("PATCHES is up to date - every detected patch is already in its folder, so nothing needs downloading:`n`n$($lines -join "`n")", 'WimForge - Download patches', 'OK', 'Information') | Out-Null
             $script:RunButton.IsEnabled = $true; $script:AcquirePatchesButton.IsEnabled = $true; $script:CancelButton.IsEnabled = $false
         } else {
-            $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))`n      $(if ([bool](Get-ProfileValue $_ 'Present' $false)) { "already in PATCHES\$($_.Folder) - not downloaded again" } else { 'will be downloaded' })" })
+            $lines = @($plan | ForEach-Object { "  $($_.Class): $(Format-CatalogPick -Title $_.Title -Kb $_.Kb -Date $_.Date -Classification $_.Classification -Release:($_.Class -eq 'LCU'))$(Format-HoldNote $_)`n      $(if ([bool](Get-ProfileValue $_ 'Present' $false)) { "already in PATCHES\$($_.Folder) - not downloaded again" } else { 'will be downloaded' })" })
             $msg = "Latest patches found (older files in the same PATCHES class are removed; PATCHES\SSU is never touched):`n`n$($lines -join "`n")`n`nThe newest cumulative release is picked, out-of-band included. The LCU line says whether its release date is Patch Tuesday (the second Tuesday) or out-of-band.`n`nDownload the missing ones now?"
             $answer = [System.Windows.MessageBox]::Show($msg, 'WimForge - confirm download', 'YesNo', 'Question')
             if ($answer -eq 'Yes' -and $script:PendingDownloadOptions) {

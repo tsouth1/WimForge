@@ -114,7 +114,7 @@ Check 'empty LCU folder is fatal with a clear message' ($threw -and $msg -like '
 
 Write-Host "`n=== E7 Preflight only: checks everything, changes nothing ==="
 Reset-Test; $script:ImageCount=1; $script:SourceNames=@('Windows 10 Enterprise LTSC 2021')
-Patches 'Win10_Enterprise_LTSC_2021_KMS' @('LCU/windows10.0-kb3-x64.msu')
+Patches 'Win10_Enterprise_LTSC_2021_KMS' @('LCU/windows10.0-kb5129236-x64.msu')
 Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'fod2021' @('Microsoft-Windows-LanguageFeatures-Basic-de-de-Package~x.cab')
 Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'lp2021' @('x64/langpacks/Microsoft-Windows-Client-Language-Pack_x64_de-de.cab','x64/langpacks/Microsoft-Windows-Client-Language-Pack_x64_ja-jp.cab')
 $script:ExtraPkgs=@(); $script:Caps=@()
@@ -130,7 +130,7 @@ Check 'preflight catches a language pack that is not on the ISO (fr-fr)' ($threw
 Write-Host "`n=== E8 One ISO holding BOTH an Enterprise LTSC index and an IoT index (the reported error) ==="
 Reset-Test; $script:ImageCount=1; $script:SourceNames=@('Windows 10 Enterprise LTSC 2021','Windows 10 IoT Enterprise LTSC 2021')
 Fake-Iso 'Win10_IoT_Enterprise_LTSC_2021' 'os2021iot' @('sources/install.wim')
-Patches 'Win10_IoT_Enterprise_LTSC_2021' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb3-x64.msu')
+Patches 'Win10_IoT_Enterprise_LTSC_2021' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb5129236-x64.msu')
 $script:LogCapture = @()
 Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight=$true })
 Check 'IoT profile picks the IoT index without an error' ($script:LastResult.Preflight -eq $true)
@@ -138,7 +138,7 @@ Invoke-MediaRefresh (Opts 'Windows 10 IoT Enterprise LTSC 2021' @() @{ Preflight
 Check 'IoT profile selected index 2' ($out8 -match 'Selected client image index 2: Windows 10 IoT Enterprise LTSC 2021')
 Get-ChildItem (Join-Path $base 'Win10_Enterprise_LTSC_2021_KMS\ISO') -Filter *.iso -ErrorAction SilentlyContinue | Remove-Item -Force; Reset-Test; $script:SourceNames=@('Windows 10 Enterprise LTSC 2021','Windows 10 IoT Enterprise LTSC 2021')
 Fake-Iso 'Win10_Enterprise_LTSC_2021_KMS' 'os2021kms' @('sources/install.wim')
-Patches 'Win10_Enterprise_LTSC_2021_KMS' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb3-x64.msu')
+Patches 'Win10_Enterprise_LTSC_2021_KMS' @('SSU/ssu-19041.3562-x64.msu','LCU/windows10.0-kb5129236-x64.msu')
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2021 (KMS)' @() @{ Preflight=$true }) *>&1 | Out-String | Set-Variable out8b
 Check 'KMS profile selected index 1 (the non-IoT edition)' ($out8b -match 'Selected client image index 1: Windows 10 Enterprise LTSC 2021')
 # real ISO layouts (2026-09-27): KMS = [1] Enterprise LTSC, [2] Enterprise N LTSC; IoT = [1] Enterprise LTSC, [2] IoT Enterprise LTSC

@@ -466,4 +466,59 @@ Check 'an unusable record: a WARN, and its patches are downloaded again' ((Read-
 $pkg14 = Get-PackageSet -PatchRoot $paths4.Patches -Enabled @{ LCU = $true }
 Check 'the record file is never taken for a patch' (@($pkg14.LCU + $pkg14.LcuCheckpoints | Where-Object { $_.Name -like '_downloads*' }).Count -eq 0)
 
+Write-Host "`n=== A13 LCU hold (holdKB): LTSC 2021 stays on the September 2026 OOB LCU (ESU installer refuses offline images, 2026-10-16) ==="
+$holdData = [ordered]@{ name = 'X'; folder = 'X'; editionRegex = 'a'; preferredIndex = 1
+    catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 's'; holdKB = ' kb5129236 '; holdReason = 'ESU installer'; checkpointKBs = @('KB5000001') } } }
+$pHold = ConvertTo-OsProfile -Data $holdData
+Check 'holdKB is read (trimmed, upper case) with its reason' ($pHold.CatalogSearch['LCU'].holdKB -eq 'KB5129236' -and $pHold.CatalogSearch['LCU'].holdReason -eq 'ESU installer')
+Check 'no holdKB: empty' ((ConvertTo-OsProfile -Data $goodData).CatalogSearch['LCU'].holdKB -eq '')
+$threw = $false; try { ConvertTo-OsProfile -Data ([ordered]@{ name = 'X'; folder = 'X'; editionRegex = 'a'; preferredIndex = 1; catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 's'; holdKB = '5129236' } } }) } catch { $threw = $true; $mh = $_.Exception.Message }
+Check 'a holdKB that is not a KB number throws' ($threw -and $mh -like "*holdKB' must be a KB number*")
+$hHold = Get-CatalogHolds $pHold
+Check 'Get-CatalogHolds: the held KB plus its checkpoints are allowed' ($hHold['LCU'].Kb -eq 'KB5129236' -and ((@($hHold['LCU'].Allowed) -join ',') -eq 'KB5129236,KB5000001') -and (Get-CatalogHolds $w11Def).Count -eq 0)
+$builtInHold = @(Get-BuiltInProfileData | ForEach-Object { ConvertTo-OsProfile -Data $_ })
+$heldNames = @($builtInHold | Where-Object { $_.CatalogSearch['LCU'].holdKB } | ForEach-Object { "$($_.Name)=$($_.CatalogSearch['LCU'].holdKB)" })
+Check 'built-ins: only IoT LTSC 2021 and LTSC 2021 KMS hold the LCU, at KB5129236, with the ESU reason' ((($heldNames | Sort-Object) -join '|') -eq 'Windows 10 Enterprise LTSC 2021 (KMS)=KB5129236|Windows 10 IoT Enterprise LTSC 2021=KB5129236' -and @($builtInHold | Where-Object { $_.CatalogSearch['LCU'].holdKB -and $_.CatalogSearch['LCU'].holdReason -notlike '*Offline is not supported*' }).Count -eq 0) ($heldNames -join '|')
+# Download patches: the catalog's newest is October (KB5126657); the profile holds September OOB (KB5129236).
+$tOct = '2026-10 Cumulative Update for Windows 10 Version 21H2 for x64-based Systems (KB5126657)'
+$tSepOob = '2026-09 Cumulative Update for Windows 10 Version 21H2 for x64-based Systems (KB5129236)'
+$tSep = '2026-09 Cumulative Update for Windows 10 Version 21H2 for x64-based Systems (KB5128000)'
+$holdDef = ConvertTo-OsProfile -Data ([ordered]@{ name = 'TestOS13'; folder = 'TestOS13'; editionRegex = 'a'; preferredIndex = 1
+    catalogSearch = [ordered]@{ LCU = [ordered]@{ search = 'search-ltsc-lcu'; architecture = 'x64'; excludePreview = $true; buildFilter = ''; holdKB = 'KB5129236'; holdReason = 'ESU installer refuses offline images' } } })
+$paths13 = Initialize-Repository -Root $base -Definition $holdDef
+Fake-Iso 'TestOS13' 'osiso13' @('sources/install.wim')
+$script:CatalogResults['search-ltsc-lcu'] = @((Real-Result $tOct '10/13/2026 10:00:00 AM'), (Real-Result $tSepOob '9/14/2026 10:00:00 AM'), (Real-Result $tSep '9/8/2026 10:00:00 AM'))
+$script:CatalogFileNames[$tSepOob] = @('windows10.0-kb5129236-x64.msu'); $script:CatalogFileNames[$tOct] = @('windows10.0-kb5126657-x64.msu')
+$lcu13 = Join-Path $paths13.Patches 'LCU'
+New-File (Join-Path $lcu13 'windows10.0-kb5126657-x64.msu')   # the October LCU an earlier Download patches fetched
+$opts13 = [pscustomobject]@{ OsName = 'TestOS13'; Root = $base; Mode = 'Download'; DryRun = $true; LCU = $true; NetCU = $false; SafeOS = $false; SetupDU = $false }
+Reset-Test; $script:LogLines.Clear()
+$dry13 = Invoke-PatchAcquisition -Options $opts13 -Definition $holdDef -Paths $paths13
+Check 'dry run: the held KB is picked, not the newest; the plan names the newer one' ($dry13.Plan[0].Kb -eq 'KB5129236' -and $dry13.Plan[0].Held -eq 'KB5129236' -and $dry13.Plan[0].Newer -like '*KB5126657*' -and -not $dry13.Plan[0].Present) ("$($dry13.Plan[0].Kb) / $($dry13.Plan[0].Newer)")
+Check '... the log WARNs the hold with its reason and names the newer entry' ([bool]($script:LogLines -match '^\[WARN\] LCU is held at KB5129236 by the OS profile: ESU installer') -and [bool]($script:LogLines -match 'newest in the catalog is .*KB5126657.* - not used \(held at KB5129236\)') -and [bool]($script:LogLines -match "LCU: selected .*KB5129236.*\(held by the OS profile\)"))
+$note13 = Format-HoldNote $dry13.Plan[0]
+Check 'the confirmation line says HELD and names the newer entry; an unheld pick gets nothing' ($note13 -like '*HELD at KB5129236 by the OS profile - newer, not used: *KB5126657*' -and (Format-HoldNote ([pscustomobject]@{ Class = 'LCU' })) -eq '')
+$opts13.DryRun = $false; Reset-Test
+$run13 = Invoke-PatchAcquisition -Options $opts13 -Definition $holdDef -Paths $paths13
+$lcuNow13 = @(Get-ChildItem $lcu13 -File | Where-Object { $_.Name -ne '_downloads.json' } | Select-Object -ExpandProperty Name)
+Check 'real run: KB5129236 downloaded, the October LCU removed from PATCHES\LCU' (@($script:Calls -match '^CatalogSave.*KB5129236').Count -eq 1 -and @($script:Calls -match '^CatalogSave.*KB5126657').Count -eq 0 -and (($lcuNow13 -join ',') -eq 'windows10.0-kb5129236-x64.msu')) ($lcuNow13 -join ',')
+# The held KB is not in the catalog results: nothing downloaded, nothing pruned
+$script:CatalogResults['search-ltsc-lcu'] = @((Real-Result $tOct '10/13/2026 10:00:00 AM'))
+New-File (Join-Path $lcu13 'windows10.0-kb5126657-x64.msu'); Reset-Test
+$miss13 = Invoke-PatchAcquisition -Options $opts13 -Definition $holdDef -Paths $paths13
+Check 'held KB not in the results: skipped with the reason, nothing downloaded or removed' (@($script:Calls -match '^CatalogSave').Count -eq 0 -and (@($miss13.SkippedClasses) -join ';') -like '*held at KB5129236*' -and (Test-Path (Join-Path $lcu13 'windows10.0-kb5126657-x64.msu')) -and (Test-Path (Join-Path $lcu13 'windows10.0-kb5129236-x64.msu')))
+# The run: only the held KB is installed; a newer LCU in the folder is left out (and named)
+$holds13 = Get-CatalogHolds $holdDef
+$pkg13 = Get-PackageSet -PatchRoot $paths13.Patches -Enabled @{ LCU = $true } -Holds $holds13
+Check 'Get-PackageSet with a hold: LCU = the held KB only; the October file is left out' ((@($pkg13.LCU).Name -join ',') -eq 'windows10.0-kb5129236-x64.msu' -and (@($pkg13.HeldOut['LCU']).Name -join ',') -eq 'windows10.0-kb5126657-x64.msu' -and @($pkg13.LcuCheckpoints).Count -eq 0)
+$script:LogLines.Clear()
+Test-PackageSet -Definition ([pscustomobject]@{ SsuRequired = $false }) -Packages $pkg13 -Enabled @{ LCU = $true; SSU = $false; NetCU = $false; SafeOS = $false; SetupDU = $false } -DoWinRe $false -BuildMedia $false
+Check 'Test-PackageSet: WARNs the hold and names the file left out' ([bool]($script:LogLines -match '^\[WARN\] LCU is held at KB5129236 by the OS profile') -and [bool]($script:LogLines -match '^\[WARN\] LCU: left out of this run \(not KB5129236\): windows10.0-kb5126657-x64.msu'))
+Remove-Item (Join-Path $lcu13 'windows10.0-kb5129236-x64.msu')
+$pkg13b = Get-PackageSet -PatchRoot $paths13.Patches -Enabled @{ LCU = $true } -Holds $holds13
+$threw = $false; try { Test-PackageSet -Definition ([pscustomobject]@{ SsuRequired = $false }) -Packages $pkg13b -Enabled @{ LCU = $true; SSU = $false; NetCU = $false; SafeOS = $false; SetupDU = $false } -DoWinRe $false -BuildMedia $false } catch { $threw = $true; $mh2 = $_.Exception.Message }
+Check 'only the October LCU in the folder: the run refuses, naming the held KB and the file found' ($threw -and $mh2 -like '*held at KB5129236*has no KB5129236 file*windows10.0-kb5126657-x64.msu*') $mh2
+$pkg13c = Get-PackageSet -PatchRoot $paths13.Patches -Enabled @{ LCU = $true }
+Check 'without a hold nothing is left out (the other profiles are unchanged)' ((@($pkg13c.LCU).Name -join ',') -eq 'windows10.0-kb5126657-x64.msu' -and $pkg13c.HeldOut.Count -eq 0)
+
 Write-Host "`nRESULT: $pass passed, $fail failed"
