@@ -3391,6 +3391,21 @@ function Get-ImageArchitectureText {
     param($Value)
     switch ([string]$Value) { '0' { 'x86' } '5' { 'arm' } '9' { 'x64' } '12' { 'arm64' } default { [string]$Value } }
 }
+function Get-InstalledBuildText {
+    # What a PC installed from the unmodified ISO reports (winver) before any update: the registry's release build
+    # (CurrentBuild.UBR - 19044 for 21H2, 26300 for 26H2), which can be higher than DISM's base build (19041, 26100) when
+    # the release is an enablement package. Without the registry only the base build and its revision are known.
+    param($Registry, [string]$ImageVersion = '')
+    $build = [string](Get-ProfileValue $Registry 'CurrentBuild' ''); $ubr = [string](Get-ProfileValue $Registry 'UBR' '')
+    if ($build -and $ubr) {
+        $product = [string](Get-ProfileValue $Registry 'ProductName' '')
+        if ($product -like 'Windows 10*' -and [int]$build -ge 22000) { $product = 'Windows 11' + $product.Substring(10) }
+        $dv = [string](Get-ProfileValue $Registry 'DisplayVersion' '')
+        return "A PC installed from this ISO reports: $(if ($product) { $product } else { 'Windows' })$(if ($dv) { " $dv" }), build $build.$ubr (before updates)"
+    }
+    if ($ImageVersion) { return "A PC installed from this ISO: patch level $(@($ImageVersion -split '\.')[-1]) on base build $ImageVersion - the registry could not be read, so the release build (for example 19044 for 21H2) is not known" }
+    return 'A PC installed from this ISO: the build could not be read'
+}
 function Read-OfflineWindowsInfo {
     # The Windows NT\CurrentVersion values of a mounted image's offline SOFTWARE hive (loaded under a temporary key and
     # unloaded again). Returns an ordered table; values the image does not have are left out.
@@ -3523,6 +3538,9 @@ function Invoke-IsoInspection {
                 if (-not $reg.Contains('ProductId')) { & $add '  no ProductId: it is generated from the product key during setup, so no image carries one' }
                 if ([string](Get-ProfileValue $reg 'ProductName' '') -like 'Windows 10*' -and [int](Get-ProfileValue $reg 'CurrentBuild' '0') -ge 22000) { & $add '  ProductName says Windows 10 on a Windows 11 build (22000 or later) - a known Microsoft quirk, not a wrong ISO' }
             }
+            $installed = Get-InstalledBuildText -Registry $reg -ImageVersion ([string](@(@($details | Where-Object { $_.Index -eq [int]$mountIdx.ImageIndex }) + @($details)) | Select-Object -First 1).Version)
+            & $add $installed
+            $summary.Add("$($f.Name): $installed")
             if ($lic -and @($lic.Skus).Count) { & $add "  licence folders (spp\tokens\skus): $(@($lic.Skus) -join ', ')" }
             if (-not $lic -or @($lic.Configs).Count -eq 0) { & $add '  no key configuration (pkeyconfig) found - the licence channels cannot be listed' }
             & $add 'Licence channels per edition (from the key configuration):'
@@ -3537,7 +3555,7 @@ function Invoke-IsoInspection {
                 $o | Add-Member -NotePropertyName Families -NotePropertyValue @($fam)
                 $summary.Add("$($f.Name) [$($o.Index)] $($o.Name) - $($o.EditionId), $($o.Version) $($o.Architecture): $(if ($fam.Count) { $fam -join ', ' } else { 'channels unknown' })")
             }
-            $results.Add([pscustomobject]@{ Iso = $f.Name; Hints = @(Get-IsoNameHints $f.Name); Files = $files; Images = @($details); MountedIndex = [int]$mountIdx.ImageIndex; Registry = $reg; CurrentEdition = $cur; TargetEditions = @($targets); Skus = $(if ($lic) { @($lic.Skus) } else { @() }) })
+            $results.Add([pscustomobject]@{ Iso = $f.Name; Hints = @(Get-IsoNameHints $f.Name); Files = $files; Images = @($details); MountedIndex = [int]$mountIdx.ImageIndex; Registry = $reg; InstalledBuild = $installed; CurrentEdition = $cur; TargetEditions = @($targets); Skus = $(if ($lic) { @($lic.Skus) } else { @() }) })
         } catch { $rep.Add("$($f.Name) could not be read: $($_.Exception.Message)"); Write-Log "ISO INSPECT   $($f.Name) could not be read: $($_.Exception.Message)" 'WARN' }
         finally { Dismount-AllIso }
     }
