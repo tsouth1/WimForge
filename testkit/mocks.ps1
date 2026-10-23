@@ -10,12 +10,12 @@ $script:MountedList = @()
 function Note($s) { $script:Calls.Add($s) }
 function Write-Log { param($Message,$Level='INFO') Write-Host ("   [{0}] {1}" -f $Level,$Message) }
 # ---- mocks for DISM cmdlets / dism.exe ----
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,$Path,[switch]$CheckIntegrity,[switch]$ReadOnly,$LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,$Path,[switch]$CheckIntegrity,[switch]$ReadOnly,$LogPath,$ScratchDirectory)
   Note ("Mount $(Split-Path $ImagePath -Leaf) idx$Index -> $(Split-Path $Path -Leaf)")
   New-Item -ItemType Directory -Force (Join-Path $Path 'Windows/System32/Recovery') | Out-Null
   Set-Content (Join-Path $Path 'Windows/System32/Recovery/winre.wim') 'orig'
   $script:MountedList += [pscustomobject]@{ Path = $Path + '\'; MountStatus='Ok' } }   # trailing backslash on purpose
-function Dismount-WindowsImage { [CmdletBinding()] param($Path,[switch]$Save,[switch]$Discard,[switch]$CheckIntegrity,$LogPath)
+function Dismount-WindowsImage { [CmdletBinding()] param($Path,[switch]$Save,[switch]$Discard,[switch]$CheckIntegrity,$LogPath,$ScratchDirectory)
   Note ("Dismount $(Split-Path $Path -Leaf) " + $(if($Save){'save'}else{'discard'}))
   $script:MountedList = @($script:MountedList | Where-Object { (Get-NormalizedPath $_.Path) -ne (Get-NormalizedPath $Path) })
   Get-ChildItem $Path -Force | Remove-Item -Recurse -Force }
@@ -25,15 +25,16 @@ function Get-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,[switch]$M
   return @([pscustomobject]@{ ImageIndex=1; ImageName='Img1' }) }
 # Each added package shows up in Get-WindowsPackage, as on a real image (Add-Packages compares the list before and after).
 $script:MockImagePackages = [System.Collections.Generic.List[object]]::new()
-function Add-WindowsPackage { [CmdletBinding()] param($Path,[Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath,$LogPath)
-  Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)")
+$script:ScratchSeen = [System.Collections.Generic.List[string]]::new()   # the ScratchDirectory each Add-WindowsPackage was given
+function Add-WindowsPackage { [CmdletBinding()] param($Path,[Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath,$LogPath,$ScratchDirectory)
+  Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)"); $script:ScratchSeen.Add([string]$ScratchDirectory)
   $script:MockImagePackages.Add([pscustomobject]@{ PackageName = "Package_for_$(Split-Path $PackagePath -Leaf)~$(Split-Path $Path -Leaf)"; PackageState = 'Installed'; ReleaseType = 'Update' }) }
-function Add-WindowsCapability { [CmdletBinding()] param($Name,$Path,$Source,[switch]$LimitAccess,$LogPath) Note "AddCap $Name" }
-function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path,$FeatureName,[switch]$All,$Source,[switch]$LimitAccess,$LogPath) Note "EnableFeature $FeatureName" }
-function Export-WindowsImage { [CmdletBinding()] param($SourceImagePath,$SourceIndex,$DestinationImagePath,$DestinationName,$CompressionType,[switch]$CheckIntegrity,$LogPath)
+function Add-WindowsCapability { [CmdletBinding()] param($Name,$Path,$Source,[switch]$LimitAccess,$LogPath,$ScratchDirectory) Note "AddCap $Name" }
+function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path,$FeatureName,[switch]$All,$Source,[switch]$LimitAccess,$LogPath,$ScratchDirectory) Note "EnableFeature $FeatureName" }
+function Export-WindowsImage { [CmdletBinding()] param($SourceImagePath,$SourceIndex,$DestinationImagePath,$DestinationName,$CompressionType,[switch]$CheckIntegrity,$LogPath,$ScratchDirectory)
   Note "Export -> $(Split-Path $DestinationImagePath -Leaf)"; Set-Content $DestinationImagePath 'x' }
-function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath) return @($script:MockImagePackages) }
-function Get-WindowsOptionalFeature { [CmdletBinding()] param($Path,[switch]$All,$LogPath) return $script:OptionalFeatures }
+function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory) return @($script:MockImagePackages) }
+function Get-WindowsOptionalFeature { [CmdletBinding()] param($Path,[switch]$All,$LogPath,$ScratchDirectory) return $script:OptionalFeatures }
 function Get-AppxProvisionedPackage { [CmdletBinding()] param($Path) return $script:ProvisionedAppx }
 $script:OptionalFeatures = @()
 $script:ProvisionedAppx = @()

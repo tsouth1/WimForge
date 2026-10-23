@@ -24,7 +24,9 @@
                the run installs only it) - both LTSC 2021 profiles hold the LCU at KB5129236 (October 2026 LCU's ESU
                installer refuses offline images); built-in profiles for Windows 11 Enterprise 26H2 and Windows Server
                2025 (seven built-ins; catalog titles checked against the live catalog on 2026-10-17); Tools > Inspect ISO
-               (editions, build, ei.cfg / pid.txt, registry and the licence channels each edition accepts; report in LOGS).
+               (editions, build, ei.cfg / pid.txt, registry and the licence channels each edition accepts; report in LOGS);
+               DISM's scratch folder is <OS folder>\TEMP on every run (was the user's Temp on C:, where the
+               2026-10-23 LTSC 2021 KMS run lost the LCU's files mid-expansion, 0x80070003).
       * Fixed: WinRE and boot.wim with a combined 1809 LCU (0x8007371b); a boot.wim / media failure keeps a finished
                install.wim; no fixed drive letter (the repository root defaults to the script's folder); Verify no
                longer fails on a Server Core index, which has no AppX (0x8007007E, Server 2022 run, 2026-10-14);
@@ -1114,11 +1116,21 @@ function Test-DismProgressLine {
     param([string]$Line)
     return ($Line -match '^\s*\[[=\s]*\d{1,3}(\.\d+)?%[=\s]*\]\s*$')
 }
+function New-DismArgs {
+    # The DISM log and scratch folder for one run, splatted into every DISM cmdlet (and passed to dism.exe). Without a
+    # scratch folder DISM unpacks each package into the signed-in user's Temp on C: (Temp\<session> under Remote Desktop);
+    # the 2026-10-23 LTSC 2021 KMS run lost the LCU's files there 8 minutes into the expansion (0x80070003). <OS folder>\TEMP
+    # is on the repository drive, next to MOUNT, so one antivirus exclusion can cover both.
+    param([Parameter(Mandatory)]$Paths, [Parameter(Mandatory)][string]$Stamp)
+    Ensure-Directory $Paths.Temp
+    return @{ LogPath = (Join-Path $Paths.Logs ("DISM_{0}.log" -f $Stamp)); ScratchDirectory = $Paths.Temp }
+}
 function Invoke-DismExe {
     param([Parameter(Mandatory)][string[]]$Arguments = @(), [Parameter(Mandatory)][string]$Description, [switch]$AllowPending)
     Write-Log $Description
     $all = @($Arguments)
     if ($script:DismLogArgs.ContainsKey('LogPath')) { $all += ('/LogPath:' + $script:DismLogArgs['LogPath']) }
+    if ($script:DismLogArgs.ContainsKey('ScratchDirectory')) { $all += ('/ScratchDir:' + $script:DismLogArgs['ScratchDirectory']) }
     & dism.exe @all | ForEach-Object { if ($_ -and $_.Trim() -and -not (Test-DismProgressLine $_)) { Write-Log $_ } }
     $code = $LASTEXITCODE
     if ($code -ne 0) {
@@ -3455,7 +3467,7 @@ function Invoke-IsoInspection {
     $paths = Initialize-Repository -Root ([string]$Options.Root).Trim() -Definition $Definition
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $script:LogFile = Join-Path $paths.Logs ("IsoInspect_{0}.log" -f $stamp)
-    $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
+    $script:DismLogArgs = New-DismArgs -Paths $paths -Stamp $stamp
     $dl = $script:DismLogArgs
     Write-Log "Starting WimForge v$($script:ToolVersion) for $name - Inspect ISO (read-only; nothing changes)"
     Write-DismNote
@@ -3637,12 +3649,13 @@ function Invoke-MediaRefresh {
         $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
         $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
-        $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
+        $script:DismLogArgs = New-DismArgs -Paths $paths -Stamp $stamp
         Write-Log "Starting WimForge v$($script:ToolVersion) for $name - Verify existing install.wim"
         Write-DismNote
         Write-ProfileMessages
         Write-Log "Repository: $($paths.Root)"
         Write-Log "DISM log: $($script:DismLogArgs['LogPath'])"
+        Write-Log "DISM scratch folder: $($script:DismLogArgs['ScratchDirectory'])"
         $script:LastResult = Invoke-VerifyExisting -Options $Options -Definition $definition -Paths $paths -Stamp $stamp
         return $script:LastResult
     }
@@ -3650,7 +3663,7 @@ function Invoke-MediaRefresh {
     $paths = Initialize-Repository -Root $Options.Root.Trim() -Definition $definition
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $script:LogFile = Join-Path $paths.Logs ("MediaRefresh_{0}.log" -f $stamp)
-    $script:DismLogArgs = @{ LogPath = (Join-Path $paths.Logs ("DISM_{0}.log" -f $stamp)) }
+    $script:DismLogArgs = New-DismArgs -Paths $paths -Stamp $stamp
     Write-Log "Starting WimForge v$($script:ToolVersion) for $name"
     Write-DismNote
     Write-ProfileMessages
@@ -3658,6 +3671,7 @@ function Invoke-MediaRefresh {
     Write-SupportStatus -Definition $definition
     Write-Log "Repository: $($paths.Root)"
     Write-Log "DISM log: $($script:DismLogArgs['LogPath'])"
+    Write-Log "DISM scratch folder: $($script:DismLogArgs['ScratchDirectory'])"
     $dl = $script:DismLogArgs
     # The Apps tab's list for this OS (11b): Profiles\Apps\<folder>_Appx.json; without a Profiles folder (scripted use, the
     # test kit) an Apps folder beside the OS folders. A step-11 <OS folder>\ProvisionedApps.json is moved there once.

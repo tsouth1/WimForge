@@ -611,5 +611,17 @@ $keep23 = @('Deployment Image Servicing and Management tool', 'Image Version: 10
 Check 'dism.exe progress-bar lines are recognised, its other output is not (2026-10-05 KMS run: ~170 progress lines per cleanup)' ((@($prog23 | Where-Object { Test-DismProgressLine $_ }).Count -eq 3) -and (@($keep23 | Where-Object { Test-DismProgressLine $_ }).Count -eq 0))
 Check 'Invoke-DismExe does not log the progress-bar lines' ($src -match '(?s)function Invoke-DismExe \{.*?-not \(Test-DismProgressLine \$_\)\) \{ Write-Log \$_ \}')
 Check 'a run with an empty ISO folder says to check the Repository root' ($src -match 'No ISO files found in \$\(\$paths\.ISO\)\. Copy the OS ISO there, or .* correct the Repository root on the Source and Targets tab')
+Write-Host "`n=== P24 DISM scratch folder: <OS folder>\TEMP, not the user's Temp on C: (2026-10-23 KMS run lost the LCU there, 0x80070003) ==="
+$r24 = Join-Path $PWD 'tst_root\p24'; Remove-Item -LiteralPath $r24 -Recurse -Force -ErrorAction SilentlyContinue
+$p24 = @{ Logs = (Join-Path $r24 'LOGS'); Temp = (Join-Path $r24 'TEMP') }
+$a24 = New-DismArgs -Paths $p24 -Stamp '20261023_094847'
+Check 'New-DismArgs: the DISM log in LOGS and the scratch folder <OS folder>\TEMP, which it creates' ($a24['LogPath'] -eq (Join-Path $p24.Logs 'DISM_20261023_094847.log') -and $a24['ScratchDirectory'] -eq $p24.Temp -and (Test-Path -LiteralPath $p24.Temp -PathType Container))
+Invoke-Expression ([regex]::Match($src, '(?s)function Invoke-DismExe \{.*?\r?\n\}\r?\n').Value.Replace('function Invoke-DismExe', 'function Invoke-RealDismExe'))   # mocks.ps1 replaces the real one
+$dla24 = $script:DismLogArgs; $script:DismLogArgs = $a24; $script:Args24 = @()
+function dism.exe { $script:Args24 = @($args); $global:LASTEXITCODE = 0 }
+Invoke-RealDismExe -Arguments @('/Image:X', '/Cleanup-Image') -Description 'P24'
+Remove-Item function:dism.exe; $script:DismLogArgs = $dla24
+Check 'Invoke-DismExe passes the DISM log and the scratch folder to dism.exe' (($script:Args24 -contains "/LogPath:$($a24['LogPath'])") -and ($script:Args24 -contains "/ScratchDir:$($p24.Temp)")) ($script:Args24 -join ' ')
+Check 'service runs, Verify existing and Inspect ISO all set the DISM arguments with New-DismArgs, and the runs log the scratch folder' (([regex]::Matches($src, '\$script:DismLogArgs = New-DismArgs -Paths \$paths -Stamp \$stamp')).Count -eq 3 -and $src -notmatch '\$script:DismLogArgs = @\{ LogPath' -and ([regex]::Matches($src, 'Write-Log "DISM scratch folder: ')).Count -eq 2)
 
 Write-Host "`nRESULT: $pass passed, $fail failed"

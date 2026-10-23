@@ -332,7 +332,7 @@ Check 'a downloaded file named for another architecture is removed and not repor
 
 # Servicing: the 4.8 part of the combined .NET CU does not apply to an image with only 4.7.2 (CBS_E_NOT_APPLICABLE).
 Reset-Test
-function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath, $LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath, $LogPath, $ScratchDirectory)
     if ($PackagePath -like '*ndp48*') { throw 'Add-WindowsPackage failed. Error code = 0x800f081e. The specified package is not applicable to this image.' }
     Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)")
     $script:MockImagePackages.Add([pscustomobject]@{ PackageName = "Package_for_$(Split-Path $PackagePath -Leaf)"; PackageState = 'Installed' }) }
@@ -345,7 +345,7 @@ $threw = $false; try { Add-Packages -MountPath (Join-Path $base 'mnt') -Packages
 Check 'without -SkipNotApplicable (every other class) a not-applicable package still fails the run' $threw
 # What real DISM did on the LTSC 2019 run (2026-09-25): the .MSU returned success, but CBS logged 0x800f081e and
 # installed nothing. The package list is unchanged, so the 4.8 part must be reported as skipped, not added.
-function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath, $LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, [Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath, $LogPath, $ScratchDirectory)
     Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)")
     if ($PackagePath -notlike '*ndp48*') { $script:MockImagePackages.Add([pscustomobject]@{ PackageName = "Package_for_DotNetRollup~$(Split-Path $PackagePath -Leaf)"; PackageState = 'Installed' }) } }
 Reset-Test; $script:LogLines.Clear(); $script:ChangeEvents.Clear()
@@ -360,11 +360,11 @@ Check 'classes without -SkipNotApplicable are not compared (no extra package-lis
 # Package_for_DotNetRollup_481 package names the KB in its details, so the log says the image already has it (INFO).
 $gwp14 = ${function:Get-WindowsPackage}
 $script:Details14 = @{ 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1' = [pscustomobject]@{ PackageName = 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1'; Description = 'Fix for KB5126052'; SupportInformation = 'http://support.microsoft.com/?kbid=5126052'; InstallTime = '9/9/2026 3:12:00 AM'; PackageState = 'Installed' } }
-function Get-WindowsPackage { [CmdletBinding()] param($Path, $PackageName, $PackagePath, $LogPath)
+function Get-WindowsPackage { [CmdletBinding()] param($Path, $PackageName, $PackagePath, $LogPath, $ScratchDirectory)
     if ($PackageName) { return $script:Details14[$PackageName] }
     if ($PackagePath) { if ($PackagePath -like '*.cab') { return [pscustomobject]@{ PackageName = 'Package_for_SafeOSDU~31bf3856ad364e35~amd64~~26100.5000.1.0'; InstallTime = '' } }; throw 'An error occurred. The specified package is not a valid Windows package.' }
     return @($script:MockImagePackages) }
-function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath) Note ("AddPkg $(Split-Path $PackagePath -Leaf)") }   # installs nothing
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath, $ScratchDirectory) Note ("AddPkg $(Split-Path $PackagePath -Leaf)") }   # installs nothing
 $script:MockImagePackages.Clear()
 $script:MockImagePackages.Add([pscustomobject]@{ PackageName = 'Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.9457.1.0'; PackageState = 'Installed'; ReleaseType = 'SecurityUpdate' })
 $script:MockImagePackages.Add([pscustomobject]@{ PackageName = 'Package_for_DotNetRollup_481~31bf3856ad364e35~amd64~~10.0.9347.1'; PackageState = 'Installed'; ReleaseType = 'Update' })
@@ -378,7 +378,7 @@ Check '... and the change log says "already in the image"' ($ev14.Count -eq 1 -a
 $found14 = Find-InstalledUpdate -MountPath 'x' -PackageFile 'C:\p\windows11.0-kb5124015-x64.cab'
 Check 'a .cab is identified by DISM itself (its package name), without searching details' ($found14 -and $found14.PackageName -eq 'Package_for_SafeOSDU~31bf3856ad364e35~amd64~~26100.5000.1.0' -and $found14.State -eq 'Installed')
 Check 'an update the image does not have is not found (the not-applicable WARN stays)' ($null -eq (Find-InstalledUpdate -MountPath 'x' -PackageFile 'C:\p\windows11.0-kb5999999-x64.msu'))
-function Get-WindowsPackage { [CmdletBinding()] param($Path, $LogPath) throw 'DISM is not available' }
+function Get-WindowsPackage { [CmdletBinding()] param($Path, $LogPath, $ScratchDirectory) throw 'DISM is not available' }
 Check 'a failing lookup never stops the run: it is just "not found"' ($null -eq (Find-InstalledUpdate -MountPath 'x' -PackageFile $net14))
 Set-Item function:Get-WindowsPackage $gwp14; $script:MockImagePackages.Clear()
 

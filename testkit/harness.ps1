@@ -10,12 +10,12 @@ $script:MountedList = @()
 function Note($s) { $script:Calls.Add($s) }
 function Write-Log { param($Message,$Level='INFO') Write-Host ("   [{0}] {1}" -f $Level,$Message) }
 # ---- mocks for DISM cmdlets / dism.exe ----
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,$Path,[switch]$CheckIntegrity,[switch]$ReadOnly,$LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,$Path,[switch]$CheckIntegrity,[switch]$ReadOnly,$LogPath,$ScratchDirectory)
   Note ("Mount $(Split-Path $ImagePath -Leaf) idx$Index -> $(Split-Path $Path -Leaf)")
   New-Item -ItemType Directory -Force (Join-Path $Path 'Windows/System32/Recovery') | Out-Null
   Set-Content (Join-Path $Path 'Windows/System32/Recovery/winre.wim') 'orig'
   $script:MountedList += [pscustomobject]@{ Path = $Path + '\'; MountStatus='Ok' } }   # trailing backslash on purpose
-function Dismount-WindowsImage { [CmdletBinding()] param($Path,[switch]$Save,[switch]$Discard,[switch]$CheckIntegrity,$LogPath)
+function Dismount-WindowsImage { [CmdletBinding()] param($Path,[switch]$Save,[switch]$Discard,[switch]$CheckIntegrity,$LogPath,$ScratchDirectory)
   Note ("Dismount $(Split-Path $Path -Leaf) " + $(if($Save){'save'}else{'discard'}))
   $script:MountedList = @($script:MountedList | Where-Object { (Get-NormalizedPath $_.Path) -ne (Get-NormalizedPath $Path) })
   Get-ChildItem $Path -Force | Remove-Item -Recurse -Force }
@@ -23,13 +23,13 @@ function Get-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,[switch]$M
   if ($Mounted) { return $script:MountedList }
   if ($Index) { return [pscustomobject]@{ ImageIndex=$Index; ImageName="Img$Index"; Version='10.0.17763.9121' } }
   return @([pscustomobject]@{ ImageIndex=1; ImageName='Img1' }) }
-function Add-WindowsPackage { [CmdletBinding()] param($Path,[Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath,$LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path,[Parameter(Mandatory)][ValidateNotNullOrEmpty()]$PackagePath,$LogPath,$ScratchDirectory)
   Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
-function Add-WindowsCapability { [CmdletBinding()] param($Name,$Path,$Source,[switch]$LimitAccess,$LogPath) Note "AddCap $Name" }
-function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path,$FeatureName,[switch]$All,$Source,[switch]$LimitAccess,$LogPath) Note "EnableFeature $FeatureName" }
-function Export-WindowsImage { [CmdletBinding()] param($SourceImagePath,$SourceIndex,$DestinationImagePath,$DestinationName,$CompressionType,[switch]$CheckIntegrity,$LogPath)
+function Add-WindowsCapability { [CmdletBinding()] param($Name,$Path,$Source,[switch]$LimitAccess,$LogPath,$ScratchDirectory) Note "AddCap $Name" }
+function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path,$FeatureName,[switch]$All,$Source,[switch]$LimitAccess,$LogPath,$ScratchDirectory) Note "EnableFeature $FeatureName" }
+function Export-WindowsImage { [CmdletBinding()] param($SourceImagePath,$SourceIndex,$DestinationImagePath,$DestinationName,$CompressionType,[switch]$CheckIntegrity,$LogPath,$ScratchDirectory)
   Note "Export -> $(Split-Path $DestinationImagePath -Leaf)"; Set-Content $DestinationImagePath 'x' }
-function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath) return @() }
+function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory) return @() }
 function Invoke-DismExe { param([string[]]$Arguments,[string]$Description,[switch]$AllowPending) Note "DISM: $Description" }
 function Get-MsuServicingStack { param([string]$MsuPath, [string]$Destination) return $null }   # fake .msu files hold no SSU cab
 function Expand-CombinedMsu { param([string]$MsuPath, [string]$Destination) return $null }
@@ -165,7 +165,7 @@ Check 'LCU applied once per index (English only)' (@($script:Calls | Where-Objec
 
 Write-Host "`n=== T5e Failure mid-servicing discards the mount ==="
 Reset-Test; $p = New-Paths 'd'
-function Add-WindowsPackage { [CmdletBinding()] param($Path,$PackagePath,$LogPath) throw 'boom' }
+function Add-WindowsPackage { [CmdletBinding()] param($Path,$PackagePath,$LogPath,$ScratchDirectory) throw 'boom' }
 $threw=$false; try { Service-InstallIndex -ImagePath '/w/i.wim' -Index 1 -Paths $p -Packages @{SSU=@();LCU=@([pscustomobject]@{FullName='/p/lcu.msu'});NetCU=@();SafeOS=@();SetupDU=@()} -OsDrive $os.Drive -LpFiles @{} -FodSource $null -Languages @() -DoWinRe $false -DoNetFx3 $false } catch { $threw=$true }
 Check 'error propagates and image is discarded (works despite trailing backslash in mount list)' ($threw -and $script:MountedList.Count -eq 0 -and ($script:Calls -join ' ') -match 'Dismount MainMount discard')
 

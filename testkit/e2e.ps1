@@ -7,9 +7,9 @@ function Get-WindowsImage { [CmdletBinding()] param($ImagePath,$Index,[switch]$M
   if ($ImagePath -like '*_isos*') { $i=0; return @($script:SourceNames | ForEach-Object { $i++; [pscustomobject]@{ ImageIndex=$i; ImageName=$_ } }) }
   return @(1..$script:ImageCount | ForEach-Object { [pscustomobject]@{ ImageIndex=$_; ImageName=$(if ($script:ImageCount -eq 1) {'Windows 10 Enterprise LTSC'} else {"Edition$_"}) } }) }
 $script:SourceNames = @('Windows 10 Enterprise LTSC')
-function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath)
+function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory)
   return @([pscustomobject]@{ PackageName='Package_for_RollupFix~31bf3856ad364e35~amd64~~17763.9121.1.9'; PackageState='Installed'; ReleaseType='Update' }) + $script:ExtraPkgs + @($script:MockImagePackages) }
-function Get-WindowsCapability { [CmdletBinding()] param($Path,$LogPath) return $script:Caps }
+function Get-WindowsCapability { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory) return $script:Caps }
 $script:AttachedIsos = [System.Collections.Generic.List[string]]::new()   # ISO files "mounted" outside a run (E15)
 function Dismount-DiskImage { [CmdletBinding()] param($ImagePath) Note "IsoDismount $(Split-Path $ImagePath -Leaf)"; [void]$script:AttachedIsos.Remove([string]$ImagePath) }
 function Get-DiskImage { [CmdletBinding()] param($ImagePath) [pscustomobject]@{ ImagePath = $ImagePath; Attached = $script:AttachedIsos.Contains([string]$ImagePath) } }
@@ -44,7 +44,7 @@ Check 'no image was ever mounted (no 2-hour wasted run)' (-not ($script:Calls -m
 Check 'ISOs were dismounted' (@($script:Calls | Where-Object {$_ -like 'IsoDismount*'}).Count -eq 2)
 
 Write-Host "`n=== E2 same folder, LP ISO added -> full run with verification ==="
-Reset-Test; $script:ImageCount=1
+Reset-Test; $script:ImageCount=1; $script:ScratchSeen.Clear()
 Fake-Iso 'Win10_Enterprise_LTSC_2019' 'lpall' (@($langs10 | % { "x64/langpacks/Microsoft-Windows-Client-Language-Pack_x64_$_.cab" }))
 # verification data: image contains all LPs and fonts
 $script:ExtraPkgs = @($langs10 | % { [pscustomobject]@{ PackageName="Microsoft-Windows-Client-LanguagePack-Package~31bf3856ad364e35~amd64~$($_.Substring(0,3))$($_.Substring(3).ToUpper())~10.0.17763.1"; PackageState='Installed'; ReleaseType='LanguagePack' } })
@@ -56,6 +56,8 @@ Check '10 language packs added' (@($script:Calls | Where-Object { $_ -match 'Add
 Check 'all 4 font capabilities added' (@($script:Calls | Where-Object { $_ -match 'AddCap Language.Fonts' }).Count -eq 4)
 Check 'read-only verify mount happened after the final export' ((($script:Calls | Select-String 'Export -> install.wim').LineNumber | Select-Object -Last 1) -lt (($script:Calls | Select-String 'Mount install.wim').LineNumber | Select-Object -Last 1))
 Check 'nothing left mounted / ISOs dismounted' ($script:MountedList.Count -eq 0 -and @($script:Calls | Where-Object {$_ -like 'IsoDismount*'}).Count -eq 3)
+$scr2 = @($script:ScratchSeen | Select-Object -Unique)
+Check 'every package went in with the DISM scratch folder <OS folder>\TEMP, not the user''s Temp on C: (2026-10-23 KMS run)' ($scr2.Count -eq 1 -and $scr2[0] -like '*\Win10_Enterprise_LTSC_2019\TEMP') "scratch=$($scr2 -join ', ')"
 
 Write-Host "`n=== E2b Step 3: validation gate, change events and change log for the clean E2 run ==="
 Check 'validation gate PASSED (0 issues)' ($script:LastResult.Gate -eq 'PASSED') "Gate=$($script:LastResult.Gate)"
@@ -79,7 +81,7 @@ Check 'HTML header names the OS and shows PASSED' ($html2 -match 'Windows 10 Ent
 
 Write-Host "`n=== E3 verification catches a missing LP and missing LCU ==="
 Reset-Test; $script:ExtraPkgs=@(); $script:Caps=@()
-function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath) return @() }
+function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory) return @() }
 Invoke-MediaRefresh (Opts 'Windows 10 Enterprise LTSC 2019 (IoT)' $langs10)
 Check 'issues reported (no RollupFix, 10 LPs, 4 fonts = 15)' ($script:LastResult.VerifyIssues -eq 15) "issues=$($script:LastResult.VerifyIssues)"
 Check 'validation gate FAILED (issues > 0)' ($script:LastResult.Gate -eq 'FAILED') "Gate=$($script:LastResult.Gate)"
@@ -87,7 +89,7 @@ $html3 = Get-Content -Raw -LiteralPath $script:LastResult.ChangeLogHtml
 Check 'HTML header shows FAILED for the dirty run' ($html3 -match 'FAILED')
 
 Write-Host "`n=== E4 Win11 English-only, no SSU folder content, no languages ==="
-function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath) return @([pscustomobject]@{ PackageName='Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.1.1.9'; PackageState='Installed'; ReleaseType='Update' }) }
+function Get-WindowsPackage { [CmdletBinding()] param($Path,$LogPath,$ScratchDirectory) return @([pscustomobject]@{ PackageName='Package_for_RollupFix~31bf3856ad364e35~amd64~~26100.1.1.9'; PackageState='Installed'; ReleaseType='Update' }) }
 Reset-Test; $script:ImageCount=1; $script:SourceNames=@('Windows 11 Pro','Windows 11 Pro N','Windows 11 Enterprise')
 Fake-Iso 'Win11Enterprise_24H2' 'os11' @('sources/install.wim')      # folder name as you typed it (alias)
 Patches 'Win11Enterprise_24H2' @('LCU/windows11.0-kb1-x64.msu')
@@ -324,7 +326,7 @@ $dwi15 = ${function:Dismount-WindowsImage}
 # A discard that keeps failing is reported as still left, not as cleaned
 Reset-Test; $script:AttachedIsos.Clear()
 $script:MountedList = @([pscustomobject]@{ Path = $main15; ImagePath = 'x.wim'; MountStatus = 'Invalid' })
-function Dismount-WindowsImage { [CmdletBinding()] param($Path, [switch]$Save, [switch]$Discard, [switch]$CheckIntegrity, $LogPath) Note 'DismountFail'; throw 'Access is denied' }
+function Dismount-WindowsImage { [CmdletBinding()] param($Path, [switch]$Save, [switch]$Discard, [switch]$CheckIntegrity, $LogPath, $ScratchDirectory) Note 'DismountFail'; throw 'Access is denied' }
 $stuck15 = Invoke-MountCleanup -Root $base
 Check 'an image that cannot be discarded is reported as still left, with a WARN' (@($stuck15.Remaining).Count -eq 1 -and @($stuck15.Remaining)[0] -like "Mounted image*MainOS" -and @($stuck15.Done).Count -eq 0)
 $script:MountedList = @()
@@ -350,7 +352,7 @@ $gwi16 = ${function:Get-WindowsImage}; $mwi16 = ${function:Mount-WindowsImage}
 function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
     if (-not $Mounted -and -not $Index -and $ImagePath -like '*boot*') { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Microsoft Windows Setup' }) }
     & $gwi16 @PSBoundParameters }
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath, $ScratchDirectory)
     & $mwi16 @PSBoundParameters
     if ($ImagePath -like '*boot.working.wim' -and $Index -eq 2) {
         foreach ($p in 'sources/setup.exe', 'sources/setuphost.exe', 'Windows/Boot/EFI/bootmgfw.efi', 'Windows/Boot/EFI/bootmgr.efi', 'Windows/Boot/EFI/boot.stl') { New-File (Join-Path $Path $p) "patched $(Split-Path $p -Leaf)" }
@@ -367,7 +369,7 @@ $media16Events = @($script:ChangeEvents | Where-Object { $_.Category -eq 'Media'
 Check 'the change log records the patched boot.wim and each replaced media file' ($media16Events -contains 'sources\boot.wim' -and $media16Events -contains 'setup.exe' -and $media16Events -contains 'setuphost.exe' -and $media16Events -contains 'efi\boot\bootx64.efi' -and $media16Events -contains 'bootmgr.efi' -and $media16Events -contains 'efi\microsoft\boot\boot.stl') ($media16Events -join ', ')
 # Win10-style Setup image: no setuphost.exe and no boot.stl - the media keeps its own setuphost-less layout
 Reset-Test; Remove-Item (Join-Path $os16 'sources\setuphost.exe') -Force
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath, $ScratchDirectory)
     & $mwi16 @PSBoundParameters
     if ($ImagePath -like '*boot.working.wim' -and $Index -eq 2) { foreach ($p in 'sources/setup.exe', 'Windows/Boot/EFI/bootmgfw.efi', 'Windows/Boot/EFI/bootmgr.efi') { New-File (Join-Path $Path $p) "patched $(Split-Path $p -Leaf)" } } }
 Invoke-MediaRefresh (Opts 'Windows 11 Enterprise 24H2' @() @{ NetFx3 = $false; Boot = $true; BuildMedia = $true; SetupDU = $false; WinRE = $false })
@@ -400,7 +402,7 @@ $script:Ex17 = $true
 function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]$Mounted)
     if (-not $Mounted -and -not $Index -and $ImagePath -like '*boot*') { return @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Microsoft Windows PE' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Microsoft Windows Setup' }) }
     & $gwi17 @PSBoundParameters }
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath, $ScratchDirectory)
     & $mwi17 @PSBoundParameters
     if ($ImagePath -notlike '*boot.working.wim') { return }
     New-File (Join-Path $Path 'Windows/Boot/EFI/boot.stl') 'stl'
@@ -643,7 +645,7 @@ Check 'no finished run: refused with what to do' (Test-Refused19 (Opts19) 'There
 
 Write-Host "`n=== E20 .NET Framework 3.5: every OS, always from the OS ISO's sources\sxs (the operator's question, 2026-09-27) ==="
 $ewof20 = ${function:Enable-WindowsOptionalFeature}; $script:Nfx20 = [System.Collections.Generic.List[string]]::new()
-function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path, $FeatureName, [switch]$All, $Source, [switch]$LimitAccess, $LogPath) $script:Nfx20.Add("$FeatureName|$Source|All=$All|LimitAccess=$LimitAccess") }
+function Enable-WindowsOptionalFeature { [CmdletBinding()] param($Path, $FeatureName, [switch]$All, $Source, [switch]$LimitAccess, $LogPath, $ScratchDirectory) $script:Nfx20.Add("$FeatureName|$Source|All=$All|LimitAccess=$LimitAccess") }
 Get-ChildItem (Join-Path $base 'Windows_Server_2022\ISO') -Filter '*15.iso' | Remove-Item -Force   # E15's dummy ISO files
 Reset-Test; $script:ImageCount = 4; $script:SourceNames = @('Windows Server 2022 Standard'); Patches 'Windows_Server_2022' @('LCU/windows10.0-kb2-x64.msu')
 $srvIso20 = @(Get-ChildItem (Join-Path $base 'Windows_Server_2022\ISO') -Filter *.iso)[0].BaseName
@@ -783,7 +785,7 @@ Check 'the change log files the SSU cab under SSU and the update cab under LCU' 
 # boot.wim fails: install.wim, the change log and RunResult.json are kept, and the run still ends in the error
 $rr24 = Join-Path $base 'Win10_Enterprise_LTSC_2019\NEWWIM\RunResult.json'; Remove-Item $rr24 -Force -ErrorAction SilentlyContinue
 $savedAdd24 = ${function:Add-WindowsPackage}
-function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath, $ScratchDirectory)
   if ((Split-Path $Path -Leaf) -eq 'WinPE') { throw 'An error occurred applying the Unattend.xml file from the .msu package. (0x8007371B)' }
   Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
 Reset-Test; $logs24.Clear(); $msg24 = ''
@@ -797,7 +799,7 @@ Check 'the log says what failed and that install.wim is kept, and the change log
 
 Write-Host "`n=== E25 the 1809 boot.wim cannot take the LCU at all: servicing stack only, the media is still built (LTSC 2019 IoT run 3, 2026-09-28) ==="
 # Run 3: the SSU cab went in, then the update cab on its own failed the same way (RollupFix 17763.9247, 0x8007371b)
-function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath, $ScratchDirectory)
   if ((Split-Path $Path -Leaf) -eq 'WinPE' -and (Split-Path $PackagePath -Leaf) -eq $script:Cab25) { throw 'One or more required members of the transaction are not present.' }
   Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
 $script:Cab25 = $cab24
@@ -813,7 +815,7 @@ $ev25 = @($script:ChangeEvents | Where-Object { $_.Target -eq 'boot.wim index 1'
 Check 'the change log lists boot.wim''s packages once: the discarded attempt left no rows' (@($ev25 | Where-Object { $_.Item -eq 'SSU-17763.9242-x64.cab' }).Count -eq 1) (($ev25 | ForEach-Object { "$($_.Item)=$($_.Detail)" }) -join ' | ')
 Check 'the log explains the fallback, and the change log records the LCU as not applied to boot.wim' ([bool]($logs24 -match '^\[WARN\] boot\.wim index 1 cannot take the LCU: .*Mounting it again for the servicing stack only') -and [bool]($logs24 -match "^\[WARN\] Skipped $([regex]::Escape($lcu23)) on boot\.wim index 1: ") -and @($script:ChangeEvents | Where-Object { $_.Target -eq 'boot.wim index 1' -and $_.Detail -like 'LCU - not applied*' }).Count -eq 1) ($logs24 -match 'WARN' -join ' | ')
 # any other boot.wim error still stops the media, and a second 0x8007371b (without the LCU) is not retried again
-function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath)
+function Add-WindowsPackage { [CmdletBinding()] param($Path, $PackagePath, $LogPath, $ScratchDirectory)
   if ((Split-Path $Path -Leaf) -eq 'WinPE') { throw 'The system cannot find the file specified. (0x80070002)' }
   Note ("AddPkg $(Split-Path $PackagePath -Leaf) @ $(Split-Path $Path -Leaf)") }
 Reset-Test; $msg25b = ''
@@ -1090,7 +1092,7 @@ function Get-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, [switch]
     $all = @([pscustomobject]@{ ImageIndex = 1; ImageName = 'Windows 10 Enterprise LTSC'; EditionId = 'EnterpriseS' }, [pscustomobject]@{ ImageIndex = 2; ImageName = 'Windows 10 IoT Enterprise LTSC'; EditionId = 'IoTEnterpriseS' })
     if ($Index) { $i = $all[$Index - 1]; return [pscustomobject]@{ ImageIndex = $i.ImageIndex; ImageName = $i.ImageName; EditionId = $i.EditionId; Version = '10.0.19041.1288'; SPBuild = 1288; Architecture = 9; InstallationType = 'Client'; Languages = @('en-US'); ModifiedTime = '2021-10-07' } }
     return @($all | ForEach-Object { [pscustomobject]@{ ImageIndex = $_.ImageIndex; ImageName = $_.ImageName } }) }
-function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath)
+function Mount-WindowsImage { [CmdletBinding()] param($ImagePath, $Index, $Path, [switch]$CheckIntegrity, [switch]$ReadOnly, $LogPath, $ScratchDirectory)
     Note ("Mount $(Split-Path $ImagePath -Leaf) idx$Index -> $(Split-Path $Path -Leaf)$(if ($ReadOnly) { ' readonly' })")
     $pk = Join-Path $Path 'Windows\System32\spp\tokens\pkeyconfig'; New-Item -ItemType Directory -Force $pk | Out-Null
     Set-Content (Join-Path $pk 'pkeyconfig.xrm-ms') (New-PkeyConfigText $cfg34)

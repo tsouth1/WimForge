@@ -12,7 +12,7 @@ This guide covers the folders WimForge expects, every part of the window, the re
 - **Windows ADK Deployment Tools** (recommended): when installed, every run uses the **ADK's DISM** (its PowerShell module and `dism.exe`) instead of Windows' own, so a Server 2022 build host can service newer images such as Windows 11 24H2 with a matching DISM. Install the ADK for the newest Windows release you service. The log says which DISM each run uses (`DISM: using the Windows ADK's DISM ...`); if the ADK's DISM cannot be loaded, Windows' own is used with a WARN. A preflight also compares that DISM with the OS ISO's image and WARNs when the DISM is older (`... is older than the image build ...`) - install the ADK for that release before the real run. Building an ISO needs the ADK too (its `oscdimg.exe`); without it the ISO option cannot be ticked. WimForge finds the ADK wherever it is installed.
 - **Internet access** is needed only for "Download patches...": it installs the MSCatalogLTS PowerShell module for the current user the first time, and searches catalog.update.microsoft.com.
 - **Free disk space:** roughly three times the size of the source image plus 6 GB, plus one ISO's size for the media folder and another for each ISO. The preflight check works out the figure and tells you.
-- **Antivirus exclusion:** exclude the repository root, including every `<OS>\MOUNT` folder, from real-time scanning. Without it DISM steps such as component cleanup can take hours instead of minutes.
+- **Antivirus exclusion:** exclude the repository root, including every `<OS>\MOUNT` and `<OS>\TEMP` folder, from real-time scanning. Without it DISM steps such as component cleanup can take hours instead of minutes. `<OS>\TEMP` is DISM's scratch folder: every package is unpacked there (a cumulative update needs several GB), not in your user Temp folder on C:. The log names it (`DISM scratch folder: ...`).
 - **Use an NTFS drive** for the repository root. Images cannot be mounted on ReFS.
 
 ## Folder layout
@@ -277,5 +277,6 @@ When asking for help with a run, send the `MediaRefresh_*`, `DISM_*` and `Change
 - **SCCM: "not inside a shared folder on this server"** - Configuration Manager reads the content over the network, so the content source folder must be inside a share. Share it (or a parent folder).
 - **SCCM: "Refused: ... FAILED its validation gate"** - fix what the VERIFY lines report, run again, then import.
 - **The run stopped after "Import-ready install.wim created"** (for example in Verify), so there is no `RunResult.json` and the SCCM tab has nothing to import - use Tools > Verify existing install.wim, then import.
-- **A step takes far longer than usual** (component cleanup over half an hour) - check the antivirus exclusion for the repository root and its `MOUNT` folders.
+- **A step takes far longer than usual** (component cleanup over half an hour) - check the antivirus exclusion for the repository root and its `MOUNT` and `TEMP` folders.
+- **An update fails with 0x80070003 (path not found) part-way through** - a file DISM had just unpacked in its scratch folder (`<OS>\TEMP`) was removed under it, most often by the antivirus. Check the exclusion and its quarantine history, then run again.
 - **Support-end warning in red** - the OS is within 180 days of the end of support; plan its replacement.
